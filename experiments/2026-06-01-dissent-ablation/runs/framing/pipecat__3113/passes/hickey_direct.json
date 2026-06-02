@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Output-response bookends complect timing, identity, and value into a fragile place-oriented state machine.",
+        "detail": "Three mutable fields (_output_response_open, _last_text_frame_time, _close_task) plus a sleep-based close task encode 'when does a response end' as wall-clock timing. The agent's response stream already has a natural end (the async-for completes). Use that boundary; emit Start before the loop, End after. The 1.0s timer is incidental complexity invented by the processor, not the problem.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "100-153",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Client and credentials are re-resolved on every frame instead of being values established once.",
+        "detail": "`async with self._aws_session.client(...)` inside process_frame conflates 'who I talk to' (identity, set once) with 'what I'm sending' (value, per-call). Each LLMContextFrame pays client construction cost and re-reads env vars captured at __init__. Build the client context once at startup, keep the value flowing through; don't complect connection lifecycle with message handling.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "166-172",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SSE parsing is hand-rolled and complects framing with payload semantics.",
+        "detail": "Splitting on '\\n', stripping 'data: ', warning on malformed lines: this is reinventing an SSE parser inline with the response handler. Multi-line events, comments (':'), and event:/id: fields are silently mishandled. Separate 'bytes -> SSE events' (pure transform over the stream) from 'event -> text' (the transformer). Two simple things instead of one complected thing.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "182-204",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer will raise on any non-JSON line and crash the pipeline.",
+        "detail": "json.loads is called with no try/except. A keepalive, an error event, or a comment line ends the whole invocation with an unhandled exception. The transformer's contract returns Optional[str]; honor it by returning None on parse failure. The essential complexity is 'sometimes the line isn't a response' \u2014 make that explicit in the data, not in the stack trace.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-78",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "agentArn parameter name complects Python convention with AWS field naming.",
+        "detail": "Python public API uses snake_case; agentArn is camelCase leaking from the AWS SDK shape. Rename to agent_arn (the AWS call site already uses the keyword agentRuntimeArn). Small, but it's the team's defaults winning over a moment of thought. Easy to fix now, hard later \u2014 this is a public constructor.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104, 137",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Default payload transformer silently drops valid contexts whose latest message isn't user/system.",
+        "detail": "If the latest message is assistant or tool, the transformer returns None and process_frame quietly returns \u2014 no log, no frame. The value 'no prompt extracted' is real information; surface it (logger.debug at minimum) or document that this is expected. The question that should have been asked: what does this processor do with multi-turn context? Right now: throws most of it away.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "30-61",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The processor mixes several concerns that want to be separate values and pure functions: a wall-clock timer encoding response boundaries that the stream already provides, a per-frame client construction that complects connection identity with message handling, and an inline SSE parser tangled with payload extraction. The default response transformer trusts every line is JSON, which will crash on the first keepalive. Decompose: response lifecycle from the async-for boundaries, client from invocation, SSE framing from payload semantics, and let the transformers return None cleanly on malformed input. This is EASY-NOT-SIMPLE \u2014 familiar imperative state plumbing where a small pipeline of pure transforms would do the same work with less surface to maintain."
+  }
+}

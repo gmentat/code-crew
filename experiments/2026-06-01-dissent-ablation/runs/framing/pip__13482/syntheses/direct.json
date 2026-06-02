@@ -1,0 +1,79 @@
+{
+  "task_id": "pip__13482",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer resets req.prepared / req.needs_more_preparation after the new prepare_linked_requirements_more call sites, leaving stale flag state.",
+        "detail": "The deleted resolver block was the only place setting req.prepared=True and req.needs_more_preparation=False after full preparation. The new call sites in install/wheel/download do not restore that bookkeeping. Any downstream consumer that branches on these flags is now wrong, or the flags need to be proven dead. Restore the discipline or remove the flags.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist cache silently shadows metadata_directory and local_file_path with no invalidation when full preparation later runs.",
+        "detail": "get_dist returns self._distribution first, unconditionally. After prepare_linked_requirements_more downloads the real wheel, callers will still get the cached metadata-only distribution. Either invalidate _distribution when full prep completes, assert the sources agree, or document the precedence and lifetime invariant. As written it is a footgun for stale metadata.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "prepare_linked_requirements_more is copy-pasted into three command call sites instead of a single shared seam.",
+        "detail": "install.py, download.py, and wheel.py each grew the same call after resolve(), at asymmetric points (install gates on dry-run early-return). The resolver previously owned this once. Three owners means the fourth command will forget it. Consolidate into a helper or named operation (e.g. ensure_fully_prepared) so the time-of-full-preparation decision lives in one place.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-422",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info synthesized via direct_url_from_link in the metadata-only branch loses the archive hash and may be passed a None source_dir.",
+        "detail": "Old path produced download_info with the archive hash from the real download; the new path calls direct_url_from_link(req.link, req.source_dir) inside the metadata-only fetch where source_dir may be None and no PEP 658 hash is threaded through. pip install --report consumers depend on archive_info hash fidelity. Thread the metadata hash or document the degradation, and prove the source_dir call is well-defined.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-542",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test diff demonstrates that --dry-run and pip lock no longer download full wheels.",
+        "detail": "The news fragment claims the headline behavior change but the diff shows zero test changes. For a regression-prone code path that moved across three commands, a failing-before / passing-after test is the minimum bar. Add a test that asserts no archive download occurs on --dry-run and lock paths.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing literate comments at the new call sites and on set_dist explaining the invariant and why the resolver no longer prepares.",
+        "detail": "install.py gates the call after dry-run early-return while download/wheel call it immediately after resolve; this asymmetry encodes the entire point of the PR and is invisible without context. A short comment at each site naming the invariant, plus a docstring on set_dist stating precedence and lifetime, would meet the readability bar. Linking issue #12603 would save the next maintainer an afternoon.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-425",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the structural idea is correct: stop preparing files inside the resolver so --dry-run and pip lock can short-circuit before downloading wheels. Execution is sloppy. The resolver's flag bookkeeping (prepared, needs_more_preparation) was deleted without being restored at the new call sites, set_dist/get_dist introduces a cache that silently shadows other dist sources with no invalidation, the prepare_linked_requirements_more call was copy-pasted into three commands instead of consolidated, and download_info in the metadata-only branch loses the archive hash that --report consumers depend on. No tests cover the headline behavior change. Verdict: NEEDS-WORK \u2014 fix flag discipline, document or invalidate the dist cache, consolidate the call site, preserve hash fidelity, and add a regression test."
+  }
+}

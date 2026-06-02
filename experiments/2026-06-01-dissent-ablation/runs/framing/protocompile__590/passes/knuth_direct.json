@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() on leader-panic path violates the function's invariant that callers dereference the result.",
+        "detail": "After a failed CAS, the code does `output := t.result.Load(); if output == nil { return nil }`. Every call site of run() expects a non-nil *result whose .Fatal or .Value is read. Returning nil shifts the nil deref one frame up rather than fixing it. The invariant 'run returns a completed result or signals cycle' must be preserved; synthesize a sentinel result with Fatal set.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The pending-branch race is not actually closed: t.result can be cleared between the closed(output.done) check and waitUntilDone.",
+        "detail": "On entry to run(), `output := t.result.Load()` may be non-nil and not-yet-closed. If the leader panics and clears t.result before we reach the select on output.done, we now wait on a done channel that will never be closed (the leader is gone). The invariant 'pending output's done will eventually close' no longer holds once leaders can disappear; waitUntilDone needs a second signal.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-450",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' appears to be a typo for 'did not see' and the explanation is missing.",
+        "detail": "Literate-programming-grade clarity is exactly what a subtle concurrency path requires. The reader cannot reconstruct what state the system is in from this one-liner. State the invariant: CAS failed (someone else became leader), then Load returned nil (that leader cleared its slot via panic recovery). Then state what the caller must do with the nil return.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle is O(n^2) in path length on the cycle-found branch; document this and bound n.",
+        "detail": "Outer Walk to find the match, inner Walk to materialize the prefix: worst case is quadratic in path depth. For typical query graphs this is fine, but the asymptotic claim should be stated in a comment and the maximum expected depth noted. If depths can reach thousands (deep import chains), a single pass collecting then truncating is linear and equally simple.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The new output parameter to waitUntilDone shadows the locally named output in run(), inviting future confusion.",
+        "detail": "Within run() there are now two variables called output at different scopes (the named return and the freshly Loaded one passed to waitUntilDone). A reader auditing the panic-recovery path must keep both in mind. Rename the parameter to pending or observed to make the literate reading unambiguous, since the invariant being preserved is 'observed-pending result, not necessarily the current slot'.",
+        "file": "experimental/incremental/task.go",
+        "lines": "535-550",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No regression test exercising the leader-panic-while-waiters-pending path is included.",
+        "detail": "The PR claims to fix a race producing nil deref, but proofs alone do not establish correctness here ('beware of bugs in the above code; I have only proved it correct, not tried it'). A test that forces the leader to panic with waiters parked on output.done would lock in both the present fix and the second race noted above.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The patch correctly notices that t.result.Load() can return nil after a leader panic and threads a captured *result into waitUntilDone \u2014 good. But the fix is incomplete in two ways: returning nil from run() pushes the nil deref up to callers rather than eliminating it, and the pending-branch (lines 441-450) still races because the leader can clear t.result and panic between the closed-check and the select, leaving waiters parked on a done channel no one will close. The cycle-detection extraction is a clean refactor and NEEDS-LITERATE-COMMENT only at the new return-nil site (whose comment also appears to contain a typo). Recommend: synthesize a Fatal sentinel result instead of returning nil, add a second wake signal to waitUntilDone, and ship a regression test that panics the leader."
+  }
+}

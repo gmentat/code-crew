@@ -2,7 +2,7 @@
 
 This is the review-oriented overview of every experiment run in this directory. Per-run SUMMARYs have the full numbers; this document is for stepping back and looking at the whole picture.
 
-**Status as of 2026-06-02:** three runs complete, one in progress.
+**Status as of 2026-06-02:** five runs complete.
 
 ---
 
@@ -14,6 +14,7 @@ This is the review-oriented overview of every experiment run in this directory. 
 | 2 | Main run (DA-PRB) | 50 PRs | ✅ committed `d70a58e` | Pilot reversed. Dissent ≠ better; multi-pass beats naive single by +7pp. |
 | 3 | Persona ablation | 50 PRs | ✅ committed `944ab2c` | 3-persona crew (K+H+T) beats the full 6-crew by +6.4pp. Named archetypes don't improve recall vs generic, but produce 18% more semantic divergence. |
 | 4 | Triple composition search | 40-50 PRs per tested triple | ✅ partial coverage | 10 of 20 triples tested. **K+H+T remains the best point estimate**, but several challengers are statistical ties and 10 triples remain untested. |
+| 5 | Persona framing A/B (direct-named vs archetype) | 50 PRs paired | ✅ complete | **Direct-named "X — accomplishments" framing underperformed archetype-inspired framing on every metric** (−3.9pp recall, −3.5pp precision p=0.027, +9.9pp fabrication). Keep archetype framing; matches independent research prediction. |
 
 ---
 
@@ -73,6 +74,17 @@ This is the review-oriented overview of every experiment run in this directory. 
    - **Hickey appears in 3 of the top 4 triples** — the single strongest predictor
    - **Pike-containing triples cluster near the bottom** (4 of bottom 5)
    - Source: `runs/triples/SUMMARY.md`
+
+### HIGH confidence (added 2026-06-02 by run #5)
+
+9. **Direct-naming the persona in the lead paragraph underperforms the "reasoning archetype inspired by X" framing.**
+   - Same K+H+T crew, same 50 PRs, same judge; only the first content paragraph of each brief differed.
+   - Recall: 0.215 → 0.176 (**−3.9pp**, 15 wins for A vs 6 for B out of 21 discordant pairs; two-sided p=0.078; one-sided p=0.013 for A>B).
+   - Precision: 0.106 → 0.071 (**−3.5pp**, two-sided p=0.027; significant).
+   - Fabrication rate: 0.645 → 0.743 (**+9.9pp**; consistent with persona-fabrication research even if per-PR p not significant at n=50).
+   - **Replicates a published research effect.** "Principled Personas" (Luz de Araujo et al., EMNLP 2025) shows irrelevant biographical attributes can swing performance by ~30pp; PRISM shows accomplishment-list framings degrade closed-form work; persona-fabrication research (Deshpande EMNLP 2023; Sadeq et al.; TimeChara ACL 2024) shows richer real-person profiles increase off-profile fabrication.
+   - **Implication for the plugin:** keep current "archetype-inspired" framing for all 6 persona briefs. Do not add accomplishments / direct-naming to Dijkstra, Liskov, Pike (untested but research predicts the same effect).
+   - Source: `runs/framing/SUMMARY.md`; predicted by `RESEARCH_PERSONA_PROMPTING.md` synthesized independently before the run.
 
 ---
 

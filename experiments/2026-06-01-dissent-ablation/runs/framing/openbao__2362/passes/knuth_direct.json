@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "The root-ACL ancestry check inverts the intended semantics via HasParent",
+        "detail": "In acl.go the new fast-path does `if !ns.HasParent(a.root) { return ret }`. A root policy minted in namespace N should grant access in N and its descendants, meaning the *request* ns should have a.root as ancestor. Verify HasParent's argument order: the test exercises only ns==a.root and root-context rejection; it does not exercise a true descendant of a non-root a.root, so a swapped argument would pass.",
+        "file": "vault/acl.go",
+        "lines": "346-360",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces invariant for sealed namespaces is undocumented and unenforced",
+        "detail": "The PR claims ListAllNamespaces now includes sealed namespaces, but NamespaceSealed is a stub returning false, and no invariant comment states what callers (loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, countActiveTokens) must do when a returned ns is sealed. Without a stated invariant, downstream loops will silently attempt operations against sealed barriers once the stub is replaced.",
+        "file": "vault/core.go",
+        "lines": "1396-1402, 3284, 3392",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Switch in AdjustErrorStatusCode loses fall-through semantics of prior if-chain",
+        "detail": "The refactor from sequential ifs to a switch changes behavior: previously an error matching both ErrSealed and an HTTPCodedError would set 503 then be overridden by the coded value (last write wins). The new switch picks only the first matching case. State the invariant for status precedence; if HTTPCoded should dominate, reorder cases, otherwise document why sealed wins.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength constant computed with opaque indexing expression",
+        "detail": "Defining `NSTokenLength = TokenLen + \".\"[1] + nsID` (per description) reads as a clever one-liner that obscures intent and risks off-by-one if the separator is ever multi-byte. A literate definition \u2014 `TokenLen + len(separator) + NamespaceIDLen` with a named const for the separator \u2014 would make the invariant inspectable without running the code.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NamespaceSealed stub silently returns false with no kill-switch or TODO enforcement",
+        "detail": "`func (c *Core) NamespaceSealed(ns *namespace.Namespace) bool { return false }` is a correctness landmine: every caller now assumes sealed-namespace detection works. A stub of this shape should at minimum log-once, or be wired behind a build tag / panic in tests, so the day SealManager lands the missing call sites are caught rather than silently green.",
+        "file": "vault/core.go",
+        "lines": "1399-1402",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "testACLRoot coverage gap: no descendant-namespace allow case",
+        "detail": "The new test exercises (a) ns==a.root allowed and (b) root-ctx-against-child-acl denied. It never constructs a child-of-child request to confirm the ancestry fast-path *grants* access to descendants \u2014 exactly the case the production code now hinges on. One more sub-test with ns2 whose parent is ns1 would pin the invariant.",
+        "file": "vault/acl_test.go",
+        "lines": "156-188",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The diff carries real algorithmic content in two places \u2014 the root-ACL ancestry check and the response-status switch \u2014 and both deserve an explicit invariant before merge. The ACL change replaces a boolean fast-path with a namespace-ancestry test, but the test suite does not exercise the descendant-allow case, leaving a HasParent argument-order swap undetectable. The response_util refactor turns independent ifs into a switch, quietly changing precedence semantics for compound errors. The NamespaceSealed stub and the namespace-aware ListAllNamespaces contract need stated invariants so future SealManager work doesn't silently no-op. UNDER-AUDITED overall; the data-structure choices are fine, the missing piece is literate-grade statement of what these functions promise."
+  }
+}

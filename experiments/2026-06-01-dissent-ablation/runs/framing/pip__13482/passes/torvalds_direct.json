@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer marks requirements as prepared, leaving needs_more_preparation=True stale state for downstream consumers",
+        "detail": "The resolver used to set req.prepared = True and req.needs_more_preparation = False after the bulk prepare call. That bookkeeping was removed entirely, not moved. Now install/wheel/download paths call prepare_linked_requirements_more but never flip these flags. Any code that branches on req.prepared or req.needs_more_preparation post-resolve is now wrong. Show me where these flags get cleared, or this is broken.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info synthesized via direct_url_from_link without the PEP 658 metadata hash, regressing --report fidelity",
+        "detail": "When the old path fully prepared the wheel, download_info included the archive hash from the actual download. Setting it here from direct_url_from_link(req.link, req.source_dir) gives you the link's hash at best and nothing at worst. pip install --report consumers depend on this being the archive_info hash. Either thread the PEP 658 metadata hash through or document the degradation.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-542",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three commands grew identical prepare_linked_requirements_more calls instead of one shared call site",
+        "detail": "install.py, download.py, wheel.py each got the same line bolted in after resolve(). The resolver used to own this. Now three callers own it and the fourth caller (lock, presumably) gets a different policy. This is THREE-PATCHES masquerading as one: the move belongs in a helper or the resolve() boundary, not copy-pasted into every command. Next maintainer adds a fourth command and forgets the call.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-422",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist cache silently shadows metadata_directory and local_file_path branches with no invariant check",
+        "detail": "get_dist now returns self._distribution first, unconditionally. If something later populates metadata_directory expecting it to win (e.g., after full prepare replaces the metadata-only dist), the cache from the PEP 658 stage wins instead and you ship stale metadata. Either invalidate _distribution when full prep runs, or assert the two sources agree. Right now it's a footgun.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-617",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test diff visible for the dry-run-doesn't-download behavior this PR claims to fix",
+        "detail": "The news fragment promises pip install --dry-run and pip lock stop downloading full wheels. The diff shows zero test changes. For a behavior change this load-bearing on a regression-prone code path, show me the test that fails before and passes after. Talk is cheap.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment in install.py says what the code does, not why the resolver stopped doing it",
+        "detail": "The added comment explains that more preparation may include downloading PEP 658 deferrals. Fine. But the interesting question is why this moved out of the resolver in the first place, and that history is now invisible to the next maintainer reading install.py. One sentence pointing at issue #12603 would save someone an afternoon.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-420",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The idea is right: stop downloading wheels when the user said --dry-run. Talk was cheap, the old code downloaded anyway, and this patch fixes the real problem. But the execution is sloppy. The resolver stopped flipping req.prepared/needs_more_preparation and nothing else picked up that responsibility \u2014 that's a latent bug waiting for a consumer to trip on stale flags. The prepare_linked_requirements_more call got copy-pasted into three commands instead of living in one place; the fourth command that needs it will be forgotten. set_dist/get_dist introduces a cache with no invalidation story. And the download_info synthesized in the metadata-only branch loses the archive hash that --report consumers rely on. Fix the flag bookkeeping, consolidate the call site, document the cache invariant, and show me the test that proves --dry-run no longer downloads. Then resubmit."
+  }
+}

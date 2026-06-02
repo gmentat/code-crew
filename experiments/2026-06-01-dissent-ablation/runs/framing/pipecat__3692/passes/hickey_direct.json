@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Frame carries a live FrameProcessor reference, complecting value with identity",
+        "detail": "A ControlFrame is supposed to be a value flowing through the pipeline. Stuffing a FrameProcessor instance into `service` complects the value (a request for metadata) with the identity of a stateful processor. A stable service name or id string would keep the frame a pure value, survive serialization, and let any downstream consumer reason about it without holding live object references.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting logic complects 'who should act' with 'who should suppress'",
+        "detail": "ServiceSwitcher both routes the frame to a specific service and then suppresses it on the way out by comparing `frame.service == self.strategy.active_service`. Two concerns \u2014 addressing and gating \u2014 are intertwined through object identity equality. If the active service ever changes between dispatch and bubble-up, suppression silently breaks. Separate the addressing data from the suppression policy.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "220-260",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Push-after-handle pattern duplicated across services with no shared contract",
+        "detail": "Both STTService and the test mock now follow the same shape: handle the request, then re-push the frame. That contract lives only in prose comments and test scaffolding. If a third service forgets to re-push, the switcher's suppression logic silently changes meaning. The 'handle then forward' protocol should be one named thing, not a copy-pasted idiom.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string type hint hides a real coupling",
+        "detail": "`service: \"FrameProcessor\"` uses a string to avoid a circular import. That is a smell that the frame module now depends on the processor module \u2014 exactly the complecting the rename was supposed to reduce. Either the field should be a plain identifier (string/id) that frames.py owns, or this coupling should be acknowledged and the import made real.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1735",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: why is this a frame at all?",
+        "detail": "A request to one specific service to re-emit metadata is a point-to-point call dressed up as a broadcast frame that then has to be filtered back out. The pipeline-as-bus model is being bent to do RPC. A direct method call on the target service (`await service.emit_metadata()`) would be simpler, smaller, and would delete both the suppression branch and the new field.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "258-263",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The rename clarifies intent, but the design is EASY-NOT-SIMPLE: it papers over a deeper question about whether a targeted re-emit should be a frame at all. The new `service` field complects value (the request) with identity (a live FrameProcessor reference), and the suppression logic in ServiceSwitcher now depends on object equality with mutable active-service state \u2014 two concerns intertwined. The handle-then-forward protocol exists only as a prose convention duplicated across services. The simpler decomposition is either a direct method call on the target service, or a frame carrying a plain service identifier with a single named handler contract."
+  }
+}

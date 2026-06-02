@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "openbao__1906",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "revoke_error is exposed to API without sanitization despite author's own security concern",
+        "detail": "The PR author literally asks in the description: 'Is it safe to display the revoke error?' Nobody answered. RevokeErr is a free-form error string from backend revocation paths that can carry URLs, internal hostnames, DB DSNs, file paths, or upstream API messages. Either sanitize/redact it, gate it behind sudo, or don't ship it. Don't merge a field whose author isn't sure is safe.",
+        "file": "vault/logical_system.go",
+        "lines": "around revoke_error assignment",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public API rename FetchLeaseTimes -> FetchLeaseInfo breaks any external caller for cosmetics",
+        "detail": "FetchLeaseTimes is an exported method on ExpirationManager. Renaming it because the semantics widened is fine taste, but it's a breaking change to anyone vendoring vault internals (and openbao has those users). Keep FetchLeaseTimes as a thin wrapper that calls FetchLeaseInfo, or document the break in the changelog. Right now neither happens.",
+        "file": "vault/expiration.go",
+        "lines": "1700-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI marks `path` Required:true but handler can emit empty string, and namespace_path/revoke_error schemas lie about presence",
+        "detail": "Path is declared Required in the framework schema, but leaseInfoForExport copies le.Path verbatim - an empty Path will produce an empty string field, which violates the contract. Meanwhile namespace_path and revoke_error are only set conditionally, so clients reading the schema will expect fields that aren't there. Pick one shape and make handler and schema agree.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2687+",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test changed from namespace.RootContext(nil) to namespace.RootContext(t.Context()) with no reason given",
+        "detail": "One of the two converted test sites silently swaps nil for t.Context(); the other keeps nil. If t.Context() is the right thing, fix both. If it isn't, don't touch it. Drive-by changes inside a feature patch are the kind of thing a maintainer six years from now spends an afternoon git-blaming. Three patches, not one.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for the new fields is one line checking `path`; namespace_path and revoke_error are untested",
+        "detail": "TestSystemBackend_leases got a single assertion that path == \"secret/foo\". The two genuinely interesting new fields - namespace_path (only present when namespace is non-nil and non-root) and revoke_error (the one with the security question) - have zero coverage. At minimum add a namespaced lease test and a revoked-with-error test.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1225+",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "leaseInfoForExport now copies an unexported field (namespace) - confirm this isn't a shared pointer that callers can mutate",
+        "detail": "The export struct now carries `namespace: le.namespace`. If namespace is a *namespace.Namespace shared with the live entry, an external consumer holding the returned leaseEntry can mutate it. For an exported-for-callers struct, copy the values you need (Path, ID) into the response map directly and don't hand out a pointer into live state.",
+        "file": "vault/expiration.go",
+        "lines": "1740-1755",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch is the right shape - widen the lease-lookup response with path, namespace_path, revoke_error, and rename Fetch* accordingly. Taste-wise the rename is good, and folding through leaseInfoForExport is clean. But the author's own PR description flags an unresolved security question about revoke_error and nobody answered it; that alone is NEEDS-WORK. Also: a public exported method got renamed without a compat shim, the OpenAPI schema doesn't match what the handler actually emits, one test silently swapped its context for no stated reason, and coverage for the two non-trivial new fields is missing. Verdict: NEEDS-WORK. Resolve the revoke_error exposure question on the record, keep FetchLeaseTimes as a deprecated shim, align schema with handler, and add tests for the namespace and revoke-error paths. Then it lands."
+  }
+}

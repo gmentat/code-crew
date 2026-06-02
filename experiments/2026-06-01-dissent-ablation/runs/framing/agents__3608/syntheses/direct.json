@@ -1,0 +1,68 @@
+{
+  "task_id": "agents__3608",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Close message string 'Close' contradicts PR description and Deepgram docs which specify 'CloseStream'",
+        "detail": "_CLOSE_MSG encodes {\"type\":\"Close\"} but the PR description and cited Deepgram Speak v1 docs specify {\"type\":\"CloseStream\"}. This is the entire point of the patch \u2014 if the literal is wrong, the fix does not actually flush pending audio. Verify against Deepgram's wire protocol and reconcile before merge.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout does not actually drain pending audio frames",
+        "detail": "Deepgram emits multiple frames (audio + Flushed + Closed) after Flush/Close. A single receive() consumes one message then proceeds to close, dropping subsequent frames. Loop until Closed ack or socket closure, bounded by the timeout. As written, the code does not deliver the audio it claims to wait for, and received frames are discarded rather than forwarded to the sink.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-139",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare except Exception hides protocol errors and breaks CancelledError propagation",
+        "detail": "Catching Exception around send_str and wait_for silently swallows ConnectionResetError, CancelledError, and protocol bugs alike. CancelledError in particular must propagate or task cancellation semantics break. Narrow to aiohttp/connection-level exceptions and re-raise CancelledError explicitly.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "138-140",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Magic 1.0s timeout lacks a named constant and justification",
+        "detail": "asyncio.wait_for(ws.receive(), timeout=1.0) bakes the entire graceful-shutdown budget into a bare literal, trading audio completeness against shutdown latency with no name or comment. Lift to a named constant (e.g. _CLOSE_DRAIN_TIMEOUT_S) or conn_options field with a one-line justification.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-137",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Close handshake conflates flush, terminate, and drain into one try/except blob",
+        "detail": "_close_ws bundles three distinct behavioral changes \u2014 sending Flush, sending Close, and drain-waiting \u2014 under one swallow. The commit only advertises CloseStream. Split into separable concerns (or at minimum separate commits) so bisection and review can isolate which step regresses.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the intent is correct \u2014 Deepgram now requires an explicit end-of-stream control message rather than relying on transport close \u2014 but the implementation is under-audited. The load-bearing defect is that the code sends {\"type\":\"Close\"} while the PR description and cited Deepgram docs specify {\"type\":\"CloseStream\"}; the wire literal is the contract and must be reconciled before merge. Beyond that, the \"drain\" is a single receive() that discards frames, the bare except Exception hides cancellation and protocol errors, and three concerns (flush, close, drain) are tangled in one diff. Verdict: NEEDS-WORK; fix the literal, loop the drain, narrow the except, name the timeout, and it lands."
+  }
+}

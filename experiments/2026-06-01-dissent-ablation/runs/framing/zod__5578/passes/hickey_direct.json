@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "zod__5578",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "`ref` and `parent` are complected into one Seen record with overlapping semantics",
+        "detail": "Seen now carries both `ref` (processor-set inheritance) and `parent` (clone-chain pointer), and finalize uses both with subtle precedence rules (`isParentRef`, `seen.parent !== ref`, auto-fill `if (!result.ref) result.ref = parent`). Two distinct concerns \u2014 value inheritance and identity/lineage \u2014 are intertwined in one field with mutation-as-sentinel (`seen.ref = null`). Decompose: keep parent purely as lineage, and derive inheritance separately.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "75-82, 175-198, 364-450",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "De-duplication via `JSON.stringify` equality is incidental complexity standing in for value identity",
+        "detail": "Twice in finalize the code does `JSON.stringify(schema[key]) === JSON.stringify(refSeen.def![key])` to decide whether a key was inherited. That conflates structural equality with provenance, is O(n*size) per key, and silently mis-handles key-order-sensitive stringification. The real question \u2014 \"did this property come from the parent or from the child?\" \u2014 should be answered by tracking origin at process-time, not by re-deriving it from string shape at finalize-time.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "411-415, 437-441",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override-count doubling from 6 to 12 is asserted but not explained",
+        "detail": "The test `override: do not run on references` now expects 12 invocations instead of 6, and the guard `if (!seen.isParent)` was removed so overrides now fire on parent nodes too. That is a behavior change for every user of the override hook \u2014 parent wrapper schemas will now be visited. The PR offers no rationale, and the test name still claims overrides do not run on references. Either the invariant changed and should be documented, or this is a regression hidden behind a snapshot bump.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "443-448",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`flattenRef` is recursive with mutation-as-memo and is now called re-entrantly on the same node",
+        "detail": "The new branch calls `flattenRef(seen.parent)` after the main ref recursion, on a graph where `seen.ref = null` is the only termination signal. With `parent` and `ref` potentially pointing at overlapping nodes, the order of visits and the `_cached` snapshot taken at entry no longer correspond to a single well-defined fold. The place-oriented mutation of `schema`, `seen.ref`, and `seen.parent` makes the time semantics of \"what does this node look like right now\" hard to reason about.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "370-450",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`play.ts` is repurposed as a scratch debug script and committed",
+        "detail": "`play.ts` switches from `import * as z from \"zod/v4\"` to a relative path into `packages/zod/src/index.js` and adds console.log probes for a metadata-order bug. That is hammock material, not a shipped artifact \u2014 it should not be in the diff. Either move it to a real test that pins the behavior, or revert it.",
+        "file": "play.ts",
+        "lines": "1-19",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`fileProcessor` factoring is a real simplification and worth keeping; the snapshot change is the right shape",
+        "detail": "Hoisting shared string-schema props to the root and leaving only `contentMediaType` in each `anyOf` branch is the simpler representation of the same fact: one string with several allowed media types. This is the kind of decomposition the rest of the PR should aspire to \u2014 one concept per place. Noted as P2 so it isn't lost in the noise.",
+        "file": "packages/zod/src/v4/core/json-schema-processors.ts",
+        "lines": "234-241",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR fixes a real bug \u2014 metadata and $ref propagation across wrapper chains like `readonly().meta({id}).describe()` \u2014 but it does so by adding a second lineage field (`parent`) alongside the existing inheritance field (`ref`) and entangling them in a recursive, mutation-driven `flattenRef`. The two concerns (who I was cloned from vs. what JSON properties I should inherit) are complected in one Seen record, and de-duplication relies on `JSON.stringify` structural equality as a proxy for provenance \u2014 incidental complexity standing in for a missing value. The `fileProcessor` refactor and the new wrapper test are clean wins. Before merge: justify the override-count doubling (semantics changed for every override user), and consider tracking property provenance at process-time so finalize doesn't have to guess via string equality. The hammock question that should have been asked first: what is the value, and what is the identity, of a \"wrapped schema with an id\" \u2014 and which of them does a `$ref` actually point at?"
+  }
+}

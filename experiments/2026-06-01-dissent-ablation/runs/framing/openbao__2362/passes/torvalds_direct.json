@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Root ACL fast-path uses HasParent which excludes the namespace itself, breaking same-ns root tokens",
+        "detail": "a.root is set to the ns from context, then AllowOperation checks `ns.HasParent(a.root)`. If the request runs in the same namespace where the root policy was issued, HasParent is typically false (a ns is not its own parent). That means a root token in ns1 cannot operate in ns1. Either the semantics are inverted or this needs `ns.ID == a.root.ID || ns.HasParent(a.root)`. Show me a test that exercises root-in-own-ns; the existing test only exercises child-context against root-ns.",
+        "file": "vault/acl.go",
+        "lines": "342-360",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that always returns false and is wired into ListAllNamespaces and ErrNamespaceSealed handling",
+        "detail": "Shipping a function whose body is `return false` with a TODO, while the PR description claims it gates sealed-namespace listing, is a lie in code form. Anything that calls this gets wrong answers until SealManager lands. Either land SealManager in the same series, or don't add the call sites. Stubs that silently say false are how production bugs ship.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch does at least three things; should be three patches",
+        "detail": "ACL root-per-namespace, ErrNamespaceSealed plumbing + response_util refactor, NamespaceView consolidation (removing namespaceMountEntryView), and test context propagation are independent changes. The response_util.go switch-statement rewrite is a pure refactor mixed into a feature patch \u2014 that's how regressions hide. Split: (1) ACL root semantics, (2) response_util refactor, (3) NamespaceView cleanup, (4) test ctx threading.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "errwrap.Contains on error message strings is fragile and now duplicated for ErrNamespaceSealed",
+        "detail": "Matching `ErrNamespaceSealed.Error()` substring instead of `errors.Is` perpetuates a known bad pattern. Worse, a namespace path containing the literal string \"namespace is sealed\" would false-positive. Use `errors.Is(err, consts.ErrNamespaceSealed)` and stop comparing strings. If errwrap is required for legacy reasons, document why here.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListNamespaces wrapper substitution changes semantics silently",
+        "detail": "Four call sites swapped `c.namespaceStore.ListAllNamespaces(ctx, true)` for `c.ListNamespaces(ctx)`. The PR claims ListAllNamespaces now includes sealed namespaces, but the new wrapper's filtering behavior isn't shown in the diff. MFA config loading, locked-user updates, entity gauge, and token counting all silently depend on this. State explicitly whether sealed namespaces are included or excluded in each call site \u2014 security-critical code shouldn't change semantics by rename.",
+        "file": "vault/core.go",
+        "lines": "3284-3395",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength defined as `TokenLen + \".\"[1] + nsID` is gratuitously clever",
+        "detail": "`\".\"[1]` is either a typo (string index 1 of a 1-char string is out of bounds) or a confused attempt at getting a byte/length constant. If you mean +1 for the separator, write `+1`. If this compiles, show me how \u2014 and then still rewrite it to be obvious. The maintainer six years from now will curse you for this line.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "REFUSE in current shape. The ACL root-per-namespace change has a likely semantic bug: `ns.HasParent(a.root)` excludes the namespace itself, so a root token issued in ns1 cannot operate in ns1, and the new test only covers the child-context case. NamespaceSealed is a `return false` stub already wired into security-critical list paths \u2014 either land SealManager with it or remove the call sites. This is also three-or-four patches submitted as one: split the response_util refactor, the NamespaceView consolidation, and the test ctx threading from the ACL feature. Stop matching errors by substring; use errors.Is. Resubmit smaller, with the root-in-own-ns test, and either real NamespaceSealed or no call sites."
+  }
+}

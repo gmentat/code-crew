@@ -1,0 +1,79 @@
+{
+  "task_id": "protocompile__590",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() on the leader-panic path pushes the nil deref onto callers instead of eliminating it.",
+        "detail": "After a failed CAS, `output := t.result.Load(); if output == nil { return nil }` violates run()'s invariant that callers receive a *result with done/Fatal/Output. Either downstream code crashes on dereference or the query silently reports success for a panicked computation. Synthesize a sentinel *result with Fatal set so failure is a value, not an absence.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race window between CAS-fail and Load is narrowed, not closed; leader can still panic and clear t.result before waiters observe it.",
+        "detail": "CompareAndSwap failing only proves t.result was non-nil at one instant. Between that and Load(), the leader may panic and store nil, leaving waiters either returning nil or parked on a done channel that will never close. The fix relocates the TOCTOU rather than synchronizing leader liveness with the pending slot. Needs a second wake signal or a proper state representation.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code path and is likely a typo for 'did not see'.",
+        "detail": "The branch executes precisely when Load() returned nil, i.e. we did NOT see a result. A wrong comment on a subtle concurrency path is worse than no comment: a future maintainer will trust it and ship a regression. Fix the wording and state the invariant: CAS failed, then the leader cleared its slot via panic recovery.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Variable shadowing of 'output' inside the CAS-failed branch complects two distinct values under one name.",
+        "detail": "The outer named return 'output' is the leader candidate just allocated; the inner `output := t.result.Load()` is some other goroutine's result. Reusing the name hides which value is which across scopes and obscures the panic-recovery audit. Rename the inner one to 'leader', 'pending', or 'existing' so identity is explicit.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test deterministically reproduces the leader-panic-with-waiters race under -race.",
+        "detail": "A race fix without a test is a hope. There should be a test that forces the leader to panic while waiters are parked on output.done, asserts no nil deref, and confirms a sensible error reaches the waiter. Without it, the next refactor reintroduces the bug silently and locks in neither this fix nor the second race above.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Cycle-check extraction lost the call-site comment explaining why the check runs only on the pending branch.",
+        "detail": "Moving the loop into checkCycle preserved logic but stripped the rationale at the call site. The doc on checkCycle helps, but readers auditing the pending branch now see bare control flow. Restore a one-line comment explaining that cycle detection is only meaningful when output is pending.",
+        "file": "experimental/incremental/task.go",
+        "lines": "444-447",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is NEEDS-WORK. The diagnosis (nil deref on t.result.Load().done after a leader panic) is correct and threading the captured *result into waitUntilDone is the right shape, but the fix is incomplete in two structural ways. First, returning bare nil from run() when Load() returns nil pushes the nil deref to callers or silently marks a panicked query as successful. Second, the TOCTOU between CAS-fail and Load is narrowed rather than closed \u2014 the leader can still clear the slot and leave waiters parked forever. Secondary issues: a backwards comment, variable shadowing of 'output', and no -race regression test reproducing the leader-panic path."
+  }
+}

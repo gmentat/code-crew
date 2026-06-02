@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "prowler__9702",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Check directory name and CheckID disagree with the user-facing semantics (single vs multiple)",
+        "detail": "PR title and description say 'detect VMs with multiple network interfaces' but the check is named compute_instance_single_network_interface and the CHANGELOG/metadata reinforce that. Worse, the GKE branch returns MANUAL while the PR description and checklist only document PASS/FAIL. Pick one shape and make code, metadata, changelog, and description match. Reviewers six months from now will curse this.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.metadata.json",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection by name prefix 'gke-' is a fragile special case smuggled into a generic check",
+        "detail": "Branching on instance.name.startswith('gke-') is exactly the kind of special case good taste eliminates. Names are user-controlled; legitimate non-GKE workloads can be called gke-foo, and GKE node pools can be renamed. If GKE exemption matters, detect it from labels/metadata (goog-gke-node, kube-env) in the service layer and expose a boolean, not by string-sniffing in the check.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "28-33",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-interface branch silently emits PASS, which is wrong",
+        "detail": "When interface_count == 0 the report.status set above remains 'PASS' and only status_extended changes. A VM with no network interfaces is either an impossible API response or a bug; reporting PASS hides it. Either treat as MANUAL/INFO or skip; do not paper over an unexpected shape with a green check.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "34-38",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Network virtual appliance exemption is documented but not implemented",
+        "detail": "Metadata Notes and PR description both call out network virtual appliances as legitimate multi-NIC users, then the code only exempts GKE. Either drop the claim from Notes, or model it (e.g., ip_forward already exists on Instance and is the standard NVA signal) and route those to MANUAL too. Right now the docs lie about what the check does.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "20-38",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "interface_names computed eagerly for every instance regardless of count",
+        "detail": "Minor, but the list comprehension and len() walk every NIC list even when the result is unused (single-NIC PASS uses [0] only). Trivial in practice; mention it only because the same loop could compute once and the single-NIC string could be built from nic.name directly. Not worth blocking on.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "23-25",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface model placed below Instance class that references it",
+        "detail": "Instance declares network_interfaces: list[NetworkInterface] but NetworkInterface is defined further down in compute_service.py. Pydantic with forward refs tolerates this, but it is sloppy reading order. Move NetworkInterface above Instance (and Disk, where similar models cluster) to match the file's existing layout convention.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "603-640",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Patch does one reasonable thing \u2014 surface multi-NIC VMs \u2014 but ships with a naming/semantics mismatch between title, CheckID, changelog, and code that no maintainer should let through. The GKE exemption is a string-prefix special case (bad taste); the documented NVA exemption is not implemented at all (the docs lie). The zero-NIC branch silently passes, which hides bugs. Service-layer model addition is fine, modulo placing NetworkInterface below its consumer. NEEDS-WORK: align names, fix the exemption shape (use labels/ip_forward, not name prefixes), and decide what 'no interfaces' means before this lands."
+  }
+}

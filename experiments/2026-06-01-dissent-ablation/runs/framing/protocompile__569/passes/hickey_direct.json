@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "protocompile__569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Value, identity, and time are complected in the Sorter struct's mutable fields",
+        "detail": "state, stack, and iterating live on the Sorter as mutable places shared across Sort() calls. The reentrancy panic and defer-clear dance exist only because identity (the Sorter) is complected with the per-sort value (a traversal). A pure Sort returning iter.Seq over local state would eliminate both the panic and the cleanup. The pooling is incidental complexity disguised as optimization.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "62-105",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The two-visit DFS encodes loop position inside node state, complecting traversal-step with node-status",
+        "detail": "walking now means both \"children pushed, awaiting second visit\" and \"currently on stack as ancestor for cycle detection.\" One byte carries two unrelated facts about a node. The earlier working/walking split at least named these separately; collapsing them saves a constant but hides what the algorithm is actually tracking. Consider a small visit struct or explicit phase value.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "82-99",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "defer-clear on state and stack is place-oriented housekeeping, not a semantic improvement",
+        "detail": "Moving clear() from entry to exit changes when the place gets wiped but not what it represents. The real question is whether Sorter should hold these places at all. If pooling matters, a sync.Pool of scratch buffers separates the value (one sort) from the identity (the pool) cleanly; the current shape just moves the bookkeeping.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "71-76",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment change introduces typos and weakens the previously-precise explanation",
+        "detail": "\"visisted\" and \"if its\" are typos; the new wording also drops the concrete \"visited stack\" referent without replacing it with something equally specific. Comments on subtle algorithms are part of the code's value. The old comment was clearer about the mechanism even if it referenced the prior naming.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "84-87",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Moving s.state[k] = sorted inside the yield branch quietly changes semantics for already-sorted revisits",
+        "detail": "Previously every pop wrote sorted unconditionally; now a node popped while already sorted is not rewritten. The values are equal so behavior is preserved, but the invariant \"on pop, state becomes sorted\" was simpler to reason about than \"on pop, state becomes sorted unless it already was.\" Worth a one-line comment or restoring the unconditional write.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "98-104",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The bug fix is correct and the diff is small, but the underlying design is COMPLECTED: a single Sorter struct holds mutable state, stack, and an iterating flag that exist only to support pooling across calls, and that pooling is what made the original cleanup bug possible. The rename working\u2192walking collapses two distinct facts (children-pushed vs. on-the-ancestor-path) into one byte, trading clarity for one fewer constant. The defer-clear is INCIDENTAL-COMPLEXITY housekeeping around a place-oriented design; a sort that returns its own scratch state would have no such bug to fix. Ship it as a patch, but the question that should have been asked first is whether Sorter should own these places at all."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Code/metadata/changelog name mismatch: filenames say 'not_publicly_shared', PR title and Image model field say otherwise",
+        "detail": "The PR description repeatedly references 'compute_image_publicly_shared' but the files are named 'compute_image_not_publicly_shared'. The check FAILS when publicly shared, which is the opposite polarity of the file name's natural reading. This is the kind of inconsistency that wastes maintainer time forever. Pick one convention and apply it everywhere.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare except Exception swallows IAM policy errors and silently marks images as not publicly shared",
+        "detail": "In _get_images, if getIamPolicy fails for any reason (permission denied, transient API error), publicly_shared stays False and the image is reported as PASS. That is a false negative in a security tool. At minimum the image should be skipped or flagged as 'unknown', not silently passed. Log-and-pretend-it's-safe is the wrong shape for a security check.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-575",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inner try/except uses error.__traceback__.tb_lineno which can be None and crash the logger",
+        "detail": "If the exception has no traceback attached (rare but possible in mocked or re-raised paths), tb_lineno access will itself raise. The surrounding code already uses this pattern elsewhere, so it matches house style, but it's fragile. Either guard it or use logger.exception() which is the obvious tool.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "560-563",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model is missing location/family/sourceDisk fields a real check will eventually need",
+        "detail": "The Image model holds name, id, project_id, publicly_shared. Fine for this one check, but the next check on images (deprecated state, encryption, family policy) will have to widen the model and re-touch _get_images. Not refusing the patch over it, but the maintainer six months from now will curse this minimalism.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-681",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test for getIamPolicy permission-denied path is set up in fixtures but no test asserts the resulting behavior",
+        "detail": "mock_api_images_calls configures test-image-3 to raise on getIamPolicy, but the included service test only checks count==3 and the check tests use hand-built Image objects. The error path through _get_images is never actually exercised end-to-end. Add one test that drives the real _get_images and asserts what happens when IAM lookup fails.",
+        "file": "tests/providers/gcp/gcp_fixtures.py",
+        "lines": "1305-1313",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Permissions checklist item left unchecked despite adding a new GCP API call (images.getIamPolicy)",
+        "detail": "The PR adds images().getIamPolicy() which requires compute.images.getIamPolicy permission. The PR template explicitly asks whether provider permissions need updating, and the box is blank. Either confirm the existing role covers it or update the permissions list. Don't leave the checklist for the maintainer to chase.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Patch adds a reasonable GCP check, scoped to one thing, with tests. Diff is readable and matches surrounding service style. Two real problems: a naming inconsistency between PR/changelog text and on-disk filenames, and a silent-pass behavior when getIamPolicy fails \u2014 for a security check that's the wrong default. Tests cover the check logic but never actually exercise the IAM-error path through _get_images even though the fixture sets it up. Verdict: NEEDS-WORK. Fix the polarity/naming, decide what to do when IAM lookup fails (don't silently PASS), and confirm provider permissions."
+  }
+}

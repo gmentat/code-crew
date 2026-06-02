@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "agents__3909",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Reconnect path can drop input audio frames mid-segment without invariant for in-flight buffer",
+        "detail": "The _run loop reconnects on _reconnect_event but the AudioByteStream is recreated per connection, so any buffered partial frame is discarded and the _speaking flag is not reset. State the invariant: across reconnect, either the in-flight 50ms frame is flushed and re-sent, or the speech segment is explicitly aborted with END_OF_SPEECH. Currently neither is guaranteed.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "send_task / _run",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "VAD/duration parameter ranges asserted only in docstring, never validated",
+        "detail": "The docstring states vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], and the duration fields in [50, 2000], but no precondition is checked. A literate program states preconditions and enforces them; otherwise the server rejects the WS connect with an opaque error. Add explicit range checks at construction.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "STTv2.__init__",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format derived by string interpolation without checking sample_rate is in the supported set",
+        "detail": "audio_format = f\"pcm_{sample_rate}\" then cast to STTAudioFormat. A user passing sample_rate=11025 produces \"pcm_11025\", which silently typechecks via cast but the server will reject. The Literal exists precisely to enumerate the valid set; validate sample_rate against it before constructing the format string.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "STTv2.__init__ audio_format line",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Speaking-state machine has no stated invariant and conflates two segment-end signals",
+        "detail": "_speaking is set True on first non-empty partial OR commit, and only cleared on empty committed_transcript. The invariant ('_speaking True iff a START_OF_SPEECH has been emitted without a matching END_OF_SPEECH') should be stated as a comment, and the code should defend it: today a partial that arrives after an empty commit but before the next session restart will re-open a segment without a clear contract. Document and assert.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "_process_stream_event",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Query string assembled by hand instead of via aiohttp/urlencode; no escaping of language_code",
+        "detail": "params are f-string concatenated then joined with '&'. If language_code ever contains a non-ASCII or reserved character (e.g., 'zh-Hant'), the URL is technically fine but the pattern invites bugs. Use aiohttp's params= argument or urllib.parse.urlencode. Small change, removes a class of future defect; pure readability win.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "_connect_ws params block",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Per-frame base64 encoding and json.dumps in hot send path is asymptotically OK but constants are heavy",
+        "detail": "Every 50ms a fresh dict is built, json.dumps'd, and base64'd. At 16kHz mono that is ~20 messages/sec \u2014 fine \u2014 but the JSON envelope is fixed; the audio_base_64 is the only variable field. A precomputed template or msgpack would cut allocations roughly in half. Premature to optimize without a profile, but worth measuring before claiming production readiness.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "send_task inner loop",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The streaming implementation follows the established Deepgram/Cartesia pattern competently and the WebSocket lifecycle is structured correctly, but the analysis is missing in several places a careful reader would want stated. The speaking-state machine has no written invariant and quietly handles two distinct segment-end signals; the documented numerical ranges for VAD parameters are not enforced; sample_rate is string-interpolated into audio_format without bounds-checking against the Literal. The reconnect path discards the in-flight AudioByteStream without a clear contract for the segment in progress. None of these are asymptotic defects \u2014 the algorithm is O(1) per frame \u2014 but the constants and the literate-programming-grade comments need work before this is code one would be comfortable reading without running."
+  }
+}

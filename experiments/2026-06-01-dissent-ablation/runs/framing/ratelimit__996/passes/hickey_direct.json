@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared rateLimit struct, racing across requests and corrupting Stats/FullKey",
+        "detail": "GetLimit reassigns rateLimit.Stats and rateLimit.FullKey on the cached limit object returned from the config tree. Concurrent requests with different runtime values will stomp each other's stats pointer in place. Value and identity are complected here: the limit-as-value is being mutated to carry per-request metric identity. Compute the stats lookup as a pure function of (limit, key) and return a fresh shallow copy.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Dead NewRateLimit allocation immediately overwritten, signaling confused ownership of the value",
+        "detail": "The branch calls NewRateLimit(...) then immediately reassigns Stats and FullKey on the next two lines, discarding the freshly built Stats. This is place-oriented thinking applied to what should be a value: it admits the author wanted a copy but then mutated anyway. The dead allocation is a symptom of not having decided whether rateLimit is a value or an identity.",
+        "file": "src/config/config_impl.go",
+        "lines": "423-427",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric-key construction is complected with descriptor lookup inside one 80-line loop",
+        "detail": "GetLimit now interleaves three concerns: descriptor traversal, detailed_metric key building, and value_to_metric key building, with matchedViaWildcard and matchedUsingValue flags threaded between them. These are separable: a pure function buildMetricKey(entries, matchTrace, policy) over a recorded trace of matches would decompose cleanly. As written, every future metric variant will add another branch to the same loop.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-410",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two near-identical key-building branches differ only by the matchedViaWildcard label",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default-key branches in the value_to_metric block all reduce to: if valueToMetric and entry.Value != \"\" then key_value else key. The three-way split is incidental complexity from carrying match-provenance flags that do not affect output. Collapse to one branch driven by the descriptor's valueToMetric and entry.Value.",
+        "file": "src/config/config_impl.go",
+        "lines": "355-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three overlapping metric-policy flags (detailed_metric, value_to_metric, default) with implicit precedence",
+        "detail": "The config now carries detailed_metric and value_to_metric as independent booleans whose interaction is defined only by a sentence in the README (\"detailed takes precedence\"). This is an easy-not-simple design: two booleans encode a three-state choice. A single metric_value enum (none | when_unspecified | always) would make the precedence explicit in the data and eliminate the ignored-flag case the code apologizes for.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-46",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "rateLimitDescriptor constructed by positional struct literal, fragile to future fields",
+        "detail": "newDescriptor := &rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric} uses positional initialization. Adding the next per-descriptor flag will silently shift meanings or require touching every call site. Use named field initialization; the diff already shows two such sites being edited in lockstep.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature itself is reasonable, but the implementation complects three concerns inside GetLimit: descriptor lookup, detailed_metric key building, and value_to_metric key building, plus it mutates a shared rateLimit value to carry per-request metric identity. The shared-mutation path is a real correctness hazard under concurrent traffic and is the load-bearing P0. The metric-policy surface is also two booleans where one enum would make precedence a property of the data instead of a paragraph of README. The right shape is a pure buildMetricKey function over a recorded match-trace, returning a fresh limit value; the keyboard work is small once the hammock work is done."
+  }
+}

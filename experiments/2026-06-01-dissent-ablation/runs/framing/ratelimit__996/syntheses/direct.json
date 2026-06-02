@@ -1,0 +1,78 @@
+{
+  "task_id": "ratelimit__996",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Redundant NewRateLimit+NewStats call leaks a counter under the old key on every override request",
+        "detail": "In the value_to_metric override block, NewRateLimit is invoked with statsManager.NewStats(rateLimit.FullKey) and then Stats is immediately overwritten with NewStats(enhancedKey). The first NewStats registers a counter under the old key that is never used, polluting the stats registry on a hot path. Drop the NewRateLimit recreate and just assign Stats and FullKey directly.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Enhanced key builder appends segments past matched depth, producing divergent keys even when no flag is set",
+        "detail": "valueToMetricFullKey runs unconditionally for every entry, including when nextDescriptor is nil, writing entry.Key as a fallback. This causes enhancedKey to diverge from FullKey on partial matches and forces the override block to fire with a fabricated tail. Gate the override on an actual valueToMetric=true descriptor in the chain, and stop appending once matching ends.",
+        "file": "src/config/config_impl.go",
+        "lines": "330-388, 423-432",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical key-building branches should collapse into one decision",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default-key branches all reduce to: if (matchedUsingValue || (nextDescriptor.valueToMetric && entry.Value != \"\")) emit key_value else emit key. The three-way split is incidental complexity from carrying match-provenance flags that do not affect output. Collapse to one branch; the current expansion obscures the invariant and invites divergence on future edits.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-388",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric-key construction complects descriptor lookup and two key builders inside one 80-line loop",
+        "detail": "GetLimit interleaves descriptor traversal, detailed_metric key building, and value_to_metric key building, with matchedViaWildcard and matchedUsingValue flags threaded between them. A pure buildMetricKey function over a recorded match-trace would decompose cleanly. Without that separation, every future metric variant adds another branch to the same loop, and the missing loop invariant makes the current logic hard to verify.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-410",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Builder runs unconditionally on every GetLimit even when no descriptor uses value_to_metric",
+        "detail": "valueToMetricFullKey performs string allocation and comparison per entry on every call, regardless of whether the new flag is ever used in the config. Track a bool during traversal indicating any descriptor on the path has valueToMetric=true and skip the builder otherwise. This avoids charging existing users for an opt-in feature on the hot path.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-432",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "rateLimitDescriptor constructed by positional struct literal, fragile to future field additions",
+        "detail": "newDescriptor := &rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric} uses positional initialization at two call sites edited in lockstep. The next person to add a field will silently shift meanings or have to touch every site. Use named field initialization for long-term maintainability.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the feature solves a real problem but the implementation has correctness, taste, and performance issues. The clearest P0s are a wasted NewStats call that leaks counters into the registry on every override request, and a key builder that appends segments past matched depth so enhancedKey can diverge from FullKey even when no value_to_metric flag is set. The three-branch key construction collapses to a single decision once the invariant is written down, and the whole builder should be gated on actual flag usage to avoid taxing existing users. Refactor the key builder into a pure function, drop the redundant NewRateLimit, gate the override on real flag presence, and switch struct literals to named fields."
+  }
+}

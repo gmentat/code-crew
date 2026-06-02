@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist complects identity, value, and time in the InstallRequirement object",
+        "detail": "InstallRequirement is now a mutable place holding a cached distribution value, a metadata_directory path, a local_file_path, and resolution flags (prepared, needs_more_preparation). get_dist() reads three different sources in priority order. The metadata-only dist and the post-download dist are different values at different times living in the same identity. A small value type (ResolvedDist) carrying source+dist would separate value from the mutating requirement.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "needs_more_preparation, prepared, and _distribution are three flags encoding one fact about time",
+        "detail": "The resolver previously set prepared=True and needs_more_preparation=False after the more-prep pass. That bookkeeping is now gone, but the flags remain on InstallRequirement. The actual fact is a state transition: metadata-only -> fully-prepared. That should be one value (an enum or replacement of the dist), not three correlated booleans whose consistency now depends on call-site discipline at install/download/wheel.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "prepare_linked_requirements_more call is duplicated across three command call-sites instead of one seam",
+        "detail": "install.py, download.py, and wheel.py each now call preparer.prepare_linked_requirements_more(...) at the right moment. The resolver used to do it once. That was wrong for dry-run, but the fix scatters the time-of-full-preparation decision into every command. A single named operation (ensure_fully_prepared) on the requirement set, called by commands that need files, would make the time semantics explicit in one place.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info is set as a side effect inside _fetch_metadata_only path",
+        "detail": "Setting req.download_info from direct_url_from_link inside prepare_linked_requirement, conditional on it being None, mixes the metadata-fetch concern with the report/lock concern. The fact 'we know where this came from' is a value derivable from req.link and req.source_dir; computing it lazily at the report site would keep prepare_linked_requirement about preparing, not about downstream commands.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "533-540",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist has no invariant about overwriting an existing cached distribution",
+        "detail": "set_dist unconditionally replaces _distribution. After full preparation, will set_dist be called again with the real wheel dist, or will get_dist keep returning the metadata-only one because _distribution is non-None and short-circuits the metadata_directory branch? The priority order in get_dist makes the cached value win forever. That is a place-oriented bug waiting to happen; the invariant should be stated and tested.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-621",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix correctly removes incorrect time-coupling from the resolver (it was preparing files as a side effect of resolution), which is the right decomposition. But the replacement scatters the now-explicit \"fully prepare\" step across three commands and grows InstallRequirement with a third source of truth for the distribution alongside metadata_directory and local_file_path. The core problem is COMPLECTED: value (the dist), identity (the requirement), and time (metadata-only vs fully-prepared) are intertwined in one mutating object, and get_dist's priority order silently encodes a state machine that nothing enforces. The question that should have been asked first: what is the value of a \"resolved requirement\" at each phase, and can that be one immutable thing per phase rather than a mutating bag of flags?"
+  }
+}

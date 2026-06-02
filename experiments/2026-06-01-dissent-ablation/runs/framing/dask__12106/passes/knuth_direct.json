@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` and `raise PerformanceWarning(...)` likely misuses a warning class as an exception",
+        "detail": "The statement `raise PerformanceWarning(msg)` is followed by a `break`, which is unreachable \u2014 a clear sign the control flow was not analyzed. Worse, the test uses `pytest.raises(PerformanceWarning)`, but `PerformanceWarning` is conventionally a `Warning` subclass meant to be emitted via `warnings.warn`, not `raise`d. Either warn-and-continue or raise a real exception class; the current code conflates the two.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3922",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop invariant is unstated and only the first axis's chunk size is checked",
+        "detail": "The loop iterates over all axes but only inspects `dw[0]`, the nominal first block size. The invariant the author seems to want \u2014 `forall ax: dask_chunks[ax][0] % zarr_write_chunks[ax] == 0` \u2014 is never stated, and the diagnostic `safe_chunk_size = prod(zarr_write_chunks) * itemsize` is a single global number, not per-axis. State the invariant; check every axis; report the offending axis cleanly.",
+        "file": "dask/array/core.py",
+        "lines": "3897-3922",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` is asymptotically harmless but semantically wrong",
+        "detail": "`max(1, itemsize)` guards against itemsize 0, which numpy dtypes do not produce except for void/structured edge cases \u2014 the guard hides rather than documents intent. More importantly, `prod(shard_shape) * itemsize` is the shard byte size, but the user is asked to set `array.chunk-size` to that exact value, which only coincidentally aligns chunks to shards. Derive the recommended value from the actual alignment requirement.",
+        "file": "dask/array/core.py",
+        "lines": "3910-3920",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`len(dw) >= 1` guard is dead code and obscures the real precondition",
+        "detail": "`normalize_chunks` returns non-empty per-axis tuples for non-empty shapes; the `if len(dw) >= 1` branch is essentially always taken and reads as if the author was uncertain. Either prove it cannot be empty and drop the guard, or handle the zero-length axis explicitly with a comment. Defensive code without a stated reason is noise.",
+        "file": "dask/array/core.py",
+        "lines": "3900-3903",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`not nominal_dask_chunk_size % zw == 0` reads ambiguously; prefer `% != 0`",
+        "detail": "Python parses this as `(not (n % zw)) == 0`, which happens to be correct but is the kind of expression that invites a future off-by-one bug in review. `nominal_dask_chunk_size % zw != 0` is the literate form and the one a careful reader can verify without reaching for the precedence table.",
+        "file": "dask/array/core.py",
+        "lines": "3904",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts only the first block size aligns; loses the original two-block coverage",
+        "detail": "The previous test asserted exact chunk tuple `((12,), (12,))`, verifying both block size and block count. The new assertion `all(c % s == 0 for c, s in zip(result.chunksize, zarr_shard_shape))` only checks the first axis's nominal size, not the trailing remainder block nor the count. A literate test states what it proves; this one proves less than it claims.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5167-5170",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The change has the right algorithmic idea \u2014 use shard shape as `previous_chunks` so `auto_chunks` produces shard-aligned multiples \u2014 but the audit reads UNDER-AUDITED and partly ASYMPTOTICALLY-OK-PRACTICALLY-WRONG. The loop invariant is not stated, only axis 0 of each per-axis chunk tuple is checked, and `raise PerformanceWarning(...)` followed by an unreachable `break` indicates the control flow was written but not read. The diagnostic's recommended `array.chunk-size` value is derived from the shard byte size rather than from the actual alignment requirement, which will mislead users in the multi-axis case. Tighten the invariant, check all axes, decide whether this is a warning or an exception (the PR description itself asks the question), and restore the stricter chunk-tuple assertion the old test had."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "kale__601",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Complecting file content with metadata: the RPC now returns both a path (identity/location) and the full file bytes (value) in one bag.",
+        "detail": "compile_notebook conflates two different facts: where the artifact lives on disk and what it contains right now. Returning script_content inline tangles transport, lifetime, and identity. A separate read_compiled_file(path) RPC keeps each call about one fact, lets the client decide when to materialize bytes, and avoids paying the cost on every compile.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "116-126",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wrong file is shipped: script_path is read but the download is labeled as the compiled pipeline.",
+        "detail": "kfputils.compile_pipeline produces package_path (the .yaml/.tar.gz). The diff reads script_path (the intermediate .kale.py) and the UI default filename is pipeline.kale.py, yet the button sits next to the link to pipeline.yaml. The value being transmitted does not match the identity the user clicked. Decide which artifact is the fact, then transmit only that.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "117-125",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Place-oriented duplication: the same bytes now exist on disk, in the RPC payload, in React state, and in a Blob URL.",
+        "detail": "Each copy is a place that can drift from the others over time. Nothing here is treated as a value with an explicit version; the server reads the file after compile (a race), then the client caches it indefinitely in DeployProgressState. If the file changes, no copy knows. Make the fetch lazy on click and keep one source of truth.",
+        "file": "labextension/src/widgets/deploys-progress/DeploysProgress.tsx",
+        "lines": "36-90",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Incidental complexity: imperative DOM choreography for what is a pure value-to-download transform.",
+        "detail": "createElement, appendChild, click, removeChild, revokeObjectURL is six lines of place-oriented ceremony repeating a well-known pattern. Extract a downloadBlob(name, content) helper so the component expresses intent (download these bytes as this name) rather than DOM mechanics. The handler then reads as data in, side effect out.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-183",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Memory cost is paid eagerly on every compile, whether the user ever clicks Download.",
+        "detail": "Reading the whole script into the RPC response treats the unlikely path (user wants bytes) as the default. For large pipelines this inflates every compile response. Easy to write, not simple: the cost is incidental to compilation. A lazy read on click keeps compile about compiling and download about downloading.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-125",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Untyped optional bytes silently degrade: if compiledContent is absent the icon renders but does nothing.",
+        "detail": "handleDownloadClick guards on both props but the icon is always rendered. A click that does nothing is worse than no icon. Either make compiledContent required for the success branch (its type currently says it is), or hide the icon when the value is missing. State what is true at this point in time.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "232-241",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This change is EASY-NOT-SIMPLE and COMPLECTED. The compile RPC now returns two different facts in one envelope (where the artifact is, and a snapshot of its bytes), and the client caches a third copy in component state plus a fourth in a Blob URL. The same value lives in four places with no version, no explicit time semantics, and a quiet mismatch between which artifact is actually being downloaded versus which one the UI links to. The decomposition I would ask for: one RPC that returns the artifact identity, a second that returns bytes for a given path on demand, and a small pure helper downloadBlob(name, content) so the React handler stops doing DOM choreography. Think first about what is a value, what is an identity, and when bytes actually need to cross the wire."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Test changed to pass a zero-amount/zero-puzzle-hash addition just to satisfy validation \u2014 that's not a test fix, that's hiding a regression in the public API",
+        "detail": "The old `cat_spend` accepted `additions=[]` and fell back to `amount`/`inner_address`. The new code passes `request.additions` through directly when not None, so an empty list now fails `CreateSignedTransaction.__post_init__` (`len(self.additions) < 1`). Rather than preserving the prior behavior, the test was edited to feed a junk Addition. Existing callers in the wild will break. Either keep `additions=[]` semantically equivalent to None, or document the breakage.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`send_transaction` silently dropped its prefix check in favor of `ensure_valid_address` \u2014 behavior change masquerading as refactor",
+        "detail": "The old code rejected with `\"Unexpected Address Prefix\"`. The new code calls `ensure_valid_address` with `allowed_types={AddressType.XCH}`, which raises a different error message and accepts/rejects different inputs depending on `AddressType.XCH`'s definition. A refactor that changes user-visible error contracts isn't a refactor. Either preserve the message or call it out in the commit.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three-patches problem \u2014 this commit does refactor + new fields + behavior changes + test edits in one diff",
+        "detail": "Extracting `cat_discrepancy_validation` is one patch. Adding `extra_delta`/`tail_reveal`/`tail_solution`/`puzzle_decorator` to `CreateSignedTransaction` is another. Forwarding `send_transaction` and `cat_spend` is a third. Plumbing `puzzle_decorator_override`/`cat_discrepancy` in `_generate_signed_transaction` is a fourth. Bisecting a regression here means reading the whole diff. Split it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`puzzle_decorator` field comment admits it's a hack \u2014 bake in the limitation properly or don't ship it",
+        "detail": "The comment says \"as a slight hack, we'll specify that only Clawback is supported.\" Either the type system enforces the constraint cleanly (a discriminated union, a single field, whatever) or you ship the general type with runtime validation. Shipping a `list[ClawbackPuzzleDecoratorOverride] | None` named generically `puzzle_decorator` with an apology comment is the worst of both options. Future maintainer will curse you.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1916-1929",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated `# type: ignore[arg-type]` block in `cat_discrepancy_validation` \u2014 the comment says mypy is wrong, fix it",
+        "detail": "The function admits \"Curious that mypy doesn't see the elif and know that none of these are None.\" The fix is two lines: assert the three are not None after the elif, or do explicit None checks. Don't ship three `type: ignore` comments and a confused comment to a shared helper. This was tolerable buried in a property; it's not tolerable as a public helper.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Discarding the return value of `get_wallet` with a \"# opportunity to raise\" comment is sloppy",
+        "detail": "If the call exists only for its side effect of raising, write `# Validate wallet exists and is the right type` and be explicit. \"Opportunity to raise\" reads like the author wasn't sure why it was kept. Also: `create_signed_transaction` will look up the wallet again, so this is a double lookup. Either fold the check into the callee or drop it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511, 2012",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The intent \u2014 collapse `send_transaction` and `cat_spend` onto `create_signed_transaction` \u2014 is right and overdue. The execution does too many things in one diff and quietly breaks the existing contract. The test was patched to feed a junk `Addition` instead of preserving the empty-additions fallback, which is a tell that real callers will break. `ensure_valid_address` replaces a specific prefix error with a different one. The `puzzle_decorator` field ships with an apology comment in place of design. Split the patch, preserve the public API, and remove the `type: ignore` triplet from the shared helper. Then it lands."
+  }
+}

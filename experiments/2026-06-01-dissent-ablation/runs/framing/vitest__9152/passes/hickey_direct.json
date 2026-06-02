@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "vitest__9152",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getSourceMap re-reads and re-parses external files on every error frame with no cache",
+        "detail": "parseErrorStacktrace can call getSourceMap once per frame, and each call does a sync existsSync + readFileSync + convert-source-map parse of the external file (and possibly an adjacent .map file). For a deep stack across several external modules this is the same value computed many times. A small Map keyed by file id would separate the value (the parsed sourcemap) from the act of fetching it.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "170-190",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "module-existence and transformResult are complected as the signal for 'external'",
+        "detail": "The condition `!mod?.transformResult && existsSync(file)` overloads two unrelated facts (Vite knows about it but did not transform; the path exists on disk) to mean 'external module'. That predicate should be a named function returning a value like {kind:'external', path} so callers reason about the fact, not about a coincidence of two APIs. Today the comment carries the meaning the code does not.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-185",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sync fs reads inside a hot error-reporting path complect IO with stack formatting",
+        "detail": "parseErrorStacktrace is pure value-shaping; this callback drags blocking disk IO into it. For a run with many failures or large stacks this serialises on the event loop and mixes 'where does the source live' with 'what does the stack say'. Hoisting the IO out (resolve sourcemaps once per file, then pass a pure lookup into parseErrorStacktrace) would keep the value transform clean.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "170-190",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns the string '{}' as a sentinel for 'missing'",
+        "detail": "The function conflates 'file found, here are its bytes' with 'file not found, pretend it is an empty map' by encoding both as a string. That is place-oriented thinking dressed as a value. Returning undefined (or throwing and letting the caller decide) would keep the value honest; the empty-map fallback can live at the single call site that actually wants that behaviour.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "resolve(from, '..', s) silently changes semantics of DecodedMap.resolvedSources",
+        "detail": "The fix is correct for sourcemaps whose `file` is a real path (sources resolve relative to the map's directory, not the map file itself), but the change is a one-liner with no test pinning the new behaviour at the unit level \u2014 only a snapshot two layers away. A direct test on DecodedMap that asserts the resolved source paths would make the value-level contract explicit instead of leaning on an integration snapshot.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Snapshot now points at .ts files inside node_modules \u2014 is that the fact we want to report?",
+        "detail": "The new stack frames resolve into transpiled.ts/transpiled-inline.ts inside a published package. That is what the sourcemap says, and it is more truthful than the .js line, but it is worth asking once whether users want the original-source path or the shipped-artifact path in their failure output. The decision should be named; right now it is implicit in 'we ran the sourcemap'.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "56-74",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix does the right thing at the value level: a sourcemap's `sources` are relative to the map's directory, not its path, and external modules legitimately need their own sourcemap lookup because Vite never transformed them. What's complected is the lookup itself \u2014 `getSourceMap` mixes 'is this external?' (a fact about Vite's module graph), 'does the file exist?' (a fact about disk), and 'parse a sourcemap' (a pure value transform) into one closure, then runs blocking sync IO per frame with no caching. The convert-source-map fallback's `'{}'` sentinel is place-oriented thinking sneaking into a value pipeline. Decompose: a pure `loadExternalSourceMap(file) -> SourceMap | undefined` with memoisation, called from a thin adapter, would separate the three concerns and remove the per-frame disk thrash. The one-line resolve() fix deserves a unit test against DecodedMap, not just a stacktrace snapshot two layers downstream."
+  }
+}

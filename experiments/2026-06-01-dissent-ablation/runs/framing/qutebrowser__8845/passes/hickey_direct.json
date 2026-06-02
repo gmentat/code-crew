@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "qutebrowser__8845",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Command names inconsistent with sibling commands (quickmark_save, bookmark_add use singular; new ones use plural)",
+        "detail": "The file already uses `quickmark_save`, `quickmark_load`, `bookmark_add`, `bookmark_load` \u2014 singular noun, underscore verb. The new commands use `quickmarks_reload` / `bookmarks_reload`. That's two different naming conventions complecting in one dispatcher. Pick one. The simple choice: match the neighbors as `quickmark_reload` / `bookmark_reload`.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1196, 1361-1367",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "reload() silently swallows file-read and parse errors that __init__ surfaces via _init_lineparser/_parse_line",
+        "detail": "In __init__, parse errors raised by _parse_line propagate to startup where the user sees them. After this change, the same path runs at runtime on a user command with no try/except and no user feedback distinguishing success from partial failure. The 'Bookmarks reloaded.' message will be shown even when a malformed line raised mid-iteration. Time semantics of error handling changed; make it explicit.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "102-112",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "reload() is not atomic: marks are cleared before the new file is read, so a read failure leaves the in-memory state empty",
+        "detail": "The value the user cares about is 'the set of marks'. reload() destroys that value first, then attempts to rebuild it from disk. If _init_lineparser or iteration fails, the user is left with no marks and a changed signal already pending emission. Build the new OrderedDict from disk first, then swap. Value semantics, not place-oriented mutation.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "102-112",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Parsing logic duplicated conceptually between __init__ flow and reload() \u2014 extract a pure load_from_lineparser",
+        "detail": "The loop (skip blanks/comments, _parse_line) is the actual essence; clear+emit is the identity-update wrapper. A small pure function `_load_marks(lineparser) -> OrderedDict` separates the value (parsed marks) from the identity update (assign + emit). __init__ and reload both call it. Same code, less complecting of 'parse' with 'mutate self'.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "67-112",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "changed signal now fires during __init__ where it previously did not",
+        "detail": "Old __init__ populated self.marks directly and never emitted changed. New __init__ calls reload(), which emits changed at construction time before _init_savemanager runs. Any listener wired up before construction completes (or via objreg lookups during init order) sees a changed event for an empty-then-filled transition that didn't exist before. Verify no subscriber assumes 'no changed during startup'.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "67-72, 102-112",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "feature-test scenarios are unnamed and don't restore prior state between scenarios",
+        "detail": "Both new Gherkin scenarios omit a title ('Scenario:' with no name) \u2014 easy to miss in test output, hard to grep. They also only assert the message string, not that reload actually re-read the file. A scenario that writes a new entry to the file then runs :bookmarks-reload then asserts the new entry is present would test the actual behavior, not just the success message.",
+        "file": "tests/end2end/features/urlmarks.feature",
+        "lines": "136-138, 305-307",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature is small and the intent is sound: expose the existing parse-loop as a callable so it can run twice. The decomposition into `reload()` is the right move and the unit test is honest. But the implementation complects three concerns \u2014 clearing identity, reading disk, and emitting change \u2014 in a single non-atomic mutation, so a parse error mid-reload silently wipes the user's marks while the UI says \"reloaded.\" Command names also fork from the existing singular convention in the same file. Decompose `_load_marks(lineparser) -> OrderedDict` as a pure step, swap identity once, then emit; and align the command names with their neighbors."
+  }
+}

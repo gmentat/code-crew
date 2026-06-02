@@ -15,6 +15,8 @@ When asked for "a review", use **Knuth + Hickey + Torvalds**. This is the empiri
 
 For single-lens shortcuts and the full triage logic, load `plugins/code-crew/skills/code-crew/procedures/triage.md`.
 
+**Brief framing is `"reasoning archetype inspired by X"`, not `"X — author of TAOCP, ..."`.** Both were tested. The direct-named "X — accomplishments" framing underperformed on every metric in a paired A/B (n=50): −3.9pp recall (one-sided p=0.013), −3.5pp precision (two-sided p=0.027), +9.9pp fabrication rate. Replicates a known literature effect ("Principled Personas" EMNLP 2025; PRISM; persona-fabrication research). Do not rewrite persona briefs to lead with the person's name and accomplishments. See `experiments/2026-06-01-dissent-ablation/runs/framing/SUMMARY.md` and `experiments/2026-06-01-dissent-ablation/RESEARCH_PERSONA_PROMPTING.md`.
+
 ## Crew dispatch rules
 
 1. **Independent blind passes.** Each persona runs in its own subagent context. One agent writing "Knuth says... Hickey says..." in a single transcript is consensus-by-author, not a crew run.

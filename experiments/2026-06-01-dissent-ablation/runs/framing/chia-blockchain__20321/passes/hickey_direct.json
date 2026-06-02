@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Test passes a zero-amount addition with zeros puzzle_hash to placate the new validator, masking the real contract",
+        "detail": "The test changes from `additions=[]` to `[Addition(amount=0, puzzle_hash=zeros)]` to satisfy `CreateSignedTransaction.__post_init__` which requires at least one addition. This complects the CATSpend legacy fallback path (amount/inner_address) with the additions path. The test now exercises a nonsense addition rather than the intended legacy fields. Tests should reflect the actual contract; this is TDD-as-design covering up an incidental conflation.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1247",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "CATSpend legacy fields and additions are complected; the forwarding path silently elides the legacy branch when additions present",
+        "detail": "CATSpend has two value-shapes (amount+inner_address vs additions). The new `cat_spend` forwarder picks `request.additions if not None else [Addition(amount, decode(inner_address), memos)]`. But callers can pass `additions=[]` (empty list, not None) and bypass the legacy fallback, or pass both. The identity \"what coins are being spent\" is now ambiguous. Decompose: validate input into one canonical shape before forwarding.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`cat_discrepancy_validation` returns a tuple but its inputs are three independent optional fields scattered across two request types",
+        "detail": "The validator throws when any subset of (extra_delta, tail_reveal, tail_solution) is partially specified. This is essential validation, but the underlying complecting is: three fields on two dataclasses that must move together. Make it a single nested value type (`CatDiscrepancy | None`) on both requests. Then the validator becomes construction, and `None in {...}` checks and `type: ignore` disappear.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1919-1923",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`send_transaction` discards the wallet object it fetched purely \"for the opportunity to raise\"",
+        "detail": "`self.service.wallet_state_manager.get_wallet(...)` is called and its return value thrown away; the comment `# opportunity to raise` admits this. Side-effecting a lookup for validation is place-oriented thinking. Extract a `validate_wallet_id(id, required_type)` function that returns None or raises. The intent becomes simple and the dead binding goes away.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1512, 2012-2013",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`json_serialize_for_transport(...).then call create_signed_transaction` round-trips structured values through JSON for an internal call",
+        "detail": "Both `send_transaction` and `cat_spend` build a typed `CreateSignedTransaction`, serialize it to JSON, then hand it to `create_signed_transaction` which presumably parses it back. This is incidental complexity from the RPC framework leaking into internal call sites. The value is already a value; pass the value. If `create_signed_transaction` requires JSON, that is the abstraction hiding the data.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1514-1531, 2014-2042",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`CreateSignedTransaction` is accreting unrelated concerns (CAT discrepancy, puzzle_decorator) with a comment admitting the hack",
+        "detail": "The comment `# Technically this value was meant to support many types here / However, only one is supported right now ... as a slight hack` is honest but is exactly the moment to stop and ask: is `CreateSignedTransaction` the right concept, or are we building a god-request to avoid two simpler endpoints? The deprecation note in the PR description suggests yes \u2014 but the right time to think about that is now, not \"another time and day\".",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1916-1924",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "This PR reduces duplication by routing two endpoints through a third \u2014 directionally aligned with simplification \u2014 but achieves \"easy\" (less code) rather than \"simple\" (decomposed concerns). The receiving `CreateSignedTransaction` is now COMPLECTED: it carries XCH-style additions, CAT-specific discrepancy fields, and a puzzle_decorator with an admitted hack. The test change to pass a zero-amount/zero-hash Addition to satisfy `__post_init__` is TDD-AS-DESIGN papering over a contract problem. The question that should have been asked first: do these three endpoints represent one value-shape or three, and if three, why force one dataclass to carry all of them?"
+  }
+}

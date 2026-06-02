@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "vega__4219",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Patch does two things: adds types AND changes runtime behavior (throws on empty domain).",
+        "detail": "Description says 'everything else should have same runtime behavior' then admits adding a runtime error. That's a behavior change snuck into a typing patch. THREE-PATCHES: (1) rename .js to .ts and add types, (2) add the empty-domain throw with its own justification and tests, (3) the peek overload. Split it.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent semantic change: `identity` was `accessors.identity`, now it's a number-only function.",
+        "detail": "Old code imported `identity` from `./accessors.js` \u2014 generic passthrough. New code defines a local `identity: TransformFn = x => x` and drops the accessors import. Functionally equivalent for the number path, but you've shadowed an existing exported name with a narrower local. Either reuse the exported identity (cast if needed) or name the local something else. Don't fork vocabulary.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "30",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`coerceNumber` silently turns null into 0 \u2014 that's a behavior change masquerading as a type adapter.",
+        "detail": "Old code passed `toNumber` directly; `toNumber(null)` returns null and the arithmetic propagates NaN. New code coerces null to 0, which will produce different domain math for inputs that previously yielded NaN results. Comment even calls it out: 'Unlike toNumber, coerceNumber always returns a number.' That's not a typing fix \u2014 that's a semantic patch hiding inside a refactor.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "29-30",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests only cover panLinear/zoomLinear empty-domain throw; six other entry points untested.",
+        "detail": "If you're going to add the runtime guard, test it on every exported function that hits `pan`/`zoom`. panLog, panPow, panSymlog, zoomLog, zoomPow, zoomSymlog all share the same guard via the inner functions, but a future refactor could move the check. Two tests for eight functions is lazy coverage for a behavior change.",
+        "file": "packages/vega-util/test/transform-test.js",
+        "lines": "68-77",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`panLog`/`zoomLog` read `domain[0]` before the emptiness check runs inside `pan`/`zoom`.",
+        "detail": "`Math.sign(domain[0])` executes on `undefined` when domain is empty, returning NaN, before `pan` throws. Harmless today because the throw still fires, but the order is sloppy: the caller computes garbage from an empty array then the callee complains. Check at the entry point or accept `NonEmptyArray` in the public signature.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "55-57, 79-81",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public signatures take `number[]` but the body requires non-empty \u2014 encode it in the type.",
+        "detail": "You already defined `NonEmptyArray<T>` and a peek overload that consumes it. GOOD-TASTE would be to make the public functions accept `NonEmptyArray<number>` so the empty case becomes a compile error and the runtime throw becomes a belt-and-suspenders fallback for untyped callers. Instead you defined the type and didn't use it where it matters.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "5, 36-90",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Patch claims to be types-only and then changes runtime behavior in two places: a new empty-domain throw and a silent null-to-zero coercion via `coerceNumber`. That's THREE-PATCHES jammed into one \u2014 split them, justify each, and test each. The `NonEmptyArray<T>` type is defined but not used on the public surface where it would actually pay rent. Tests cover two of eight entry points for a new throw. NEEDS-WORK: split the patch, use the type you defined, and don't hide semantic changes inside a typing refactor."
+  }
+}

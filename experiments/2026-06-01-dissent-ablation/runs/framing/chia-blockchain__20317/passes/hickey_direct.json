@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "chia-blockchain__20317",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "sign_message branches on (is_hex, safe_mode) tuple instead of carrying the SigningMode value",
+        "detail": "The new signing_mode_enum() decodes two booleans into one of four SigningMode values, then sign_message re-branches on that enum. The request type complects 'how to interpret the message' with 'which safety policy applied' across two booleans. The value that actually matters (SigningMode) should be the request's primary field; the booleans are an incidental encoding kept for wire compatibility.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sign_message and verify_signature still complect mode-dispatch with the signing primitive",
+        "detail": "Both functions in chia/wallet/util/signing.py carry a four-way if/elif on SigningMode that maps mode -> bytes-to-sign. That mapping is a pure value-level function (SigningMode, str) -> bytes and should be one named function reused by both sign and verify. As written, the two branches drift independently (already do: CHIP_0002 default arm vs explicit arms) which is exactly the kind of incidental duplication decomposition prevents.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-40, 75-84",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "verify_signature returns a transport response type from a pure utility",
+        "detail": "chia/wallet/util/signing.py imports VerifySignatureResponse from wallet_request_types and returns it. The util is now coupled to the RPC schema, so any wire-shape change drags through a 'utility'. The value here is a (bool, optional error); let the RPC layer wrap it. This is easy-not-simple: convenient at the call site, but it ties the library to the transport.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-65",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "current_p2_puzzle_hash duplicates the same uncurry-or-raise shape across DID and NFT wallets",
+        "detail": "DIDWallet.current_p2_puzzle_hash and NFTWallet.current_p2_puzzle_hash both do: uncurry, if None raise, else return p2.get_tree_hash(). The shared concept is 'extract the p2 puzzle hash from a singleton inner puzzle'. A small pure helper taking the uncurried result keeps the wallets thin and makes the value (puzzle_hash) the explicit return, not the method.",
+        "file": "chia/wallet/nft_wallet/nft_wallet.py",
+        "lines": "497-503",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert_secret_key_to_synthetic added as a Wallet method rather than a pure function",
+        "detail": "calculate_synthetic_secret_key(secret_key, DEFAULT_HIDDEN_PUZZLE_HASH) is a pure value->value transform with no dependence on Wallet state. Hanging it off the Wallet class re-complects identity (which wallet) with a value transform that applies to any key. A module-level function in signing.py would be the simple form.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "VerifySignature.signing_mode_enum default silently picks BLS_MESSAGE_AUGMENTATION_HEX_INPUT",
+        "detail": "When signing_mode is None the property returns BLS_MESSAGE_AUGMENTATION_HEX_INPUT with a comment about historical 'chia keys sign' behavior. That default is a fact about time and history, not about this request. Encoding it as a silent fallback inside the value type makes the time-dependent decision invisible at the call site; require callers to pass the mode or name the default constant explicitly.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "378-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The refactor is a real improvement: signing logic is pulled out of three wallet classes into one module, which is the right direction. But it stops short of being simple. The mode-to-bytes mapping is still duplicated between sign and verify, the request type encodes one logical value (SigningMode) as two booleans plus a derivation function, and the new util returns an RPC response type, coupling the library to the transport. The wallets gained current_p2_puzzle_hash methods that are really 'pure extract from uncurried puzzle' functions in disguise. Decompose the mode-encoding once, return plain values from the util, and the rest collapses."
+  }
+}

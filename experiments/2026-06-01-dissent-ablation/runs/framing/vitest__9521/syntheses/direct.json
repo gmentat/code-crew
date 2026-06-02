@@ -1,0 +1,79 @@
+{
+  "task_id": "vitest__9521",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles path comparison may silently fail due to absolute-vs-relative/slash mismatches between git output and isIncluded input",
+        "detail": "VitestGit.findChangedFiles returns repo-relative paths while isIncluded receives slash(cleanUrl(_filename)) which is typically absolute. The raw Array.includes equality check across differently-rooted strings will silently exclude everything on real repos. Normalize both sides to a single canonical form (absolute POSIX) before comparison and state the invariant.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-180",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache poisoned by changedFiles-aware results creates order-dependent, stale cache semantics",
+        "detail": "isIncluded folds the changedFiles filter into the cached boolean. onTestRunStart clears the cache only when changedFiles is set; in watch mode or when changedFiles is later unset, cached filter-aware false values leak into subsequent filter-free passes. Either skip caching when changedFiles is active, key the cache on (filename, changedSnapshot), or cache only the pure-glob result.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "166-182",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook is wired by hand at three core.ts call sites instead of through the run lifecycle",
+        "detail": "Three separate await this.coverageProvider?.onTestRunStart?.() calls were sprinkled into core.ts after _testRun.start(). The next code path that starts a run will forget this and silently produce wrong coverage. Consolidate into _testRun.start or a single startTestRun helper so the lifecycle is expressed once.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-885",
+        "flagged_by": [
+          "torvalds",
+          "hickey",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isIncluded complects glob membership with changed-set membership in one cached predicate",
+        "detail": "isIncluded originally answered only include/exclude glob matching; it now also answers is-in-changed-set, caches the conjunction, and depends on call ordering relative to onTestRunStart. Keep isIncluded as a pure glob check and compose a separate isChanged filter at call sites that need it, eliminating the mutable changedFiles field and hand-invalidated cache.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "148-185",
+        "flagged_by": [
+          "hickey",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform for coverage.changed is under-specified and half-wires boolean and string inputs",
+        "detail": "The transform accepts 'true'/'yes'/'false'/'no' and raw booleans but passes everything else through unchanged, while the option is declared as taking a <commit/branch> argument. Either the boolean branches are dead code or the option needs to be declared as a bare flag. Pick one and produce a typed parsed value rather than a boolean|string union.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Implicit test.changed -> coverage.changed inheritance in resolveConfig lacks a guarded invariant",
+        "detail": "The rule `if (resolved.coverage.changed === undefined && resolved.changed !== undefined)` quietly couples two options and distinguishes undefined from explicit false only by strict equality. A future refactor using ?? would silently break the 'explicit false wins' behavior the new test relies on. Extract a named resolver and document the undefined-vs-false semantics.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "419-424",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the feature is well-scoped and tested, but the implementation has several taste and correctness problems that should be fixed before merge. The load-bearing issue is path normalization in isIncluded \u2014 comparing git's likely repo-relative output to absolute slashed filenames via Array.includes will silently exclude everything on real repos. The globCache is now order-dependent and pollutes future runs because filter-aware results are cached alongside pure-glob ones. The new onTestRunStart hook is wired by hand at three call sites in core.ts and should be consolidated into the run lifecycle. Verdict: NEEDS-WORK \u2014 fix path normalization, fix the cache, consolidate the lifecycle hook, and clarify the CLI transform."
+  }
+}

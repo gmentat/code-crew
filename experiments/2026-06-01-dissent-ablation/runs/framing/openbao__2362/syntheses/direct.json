@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__2362",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Root ACL fast-path via HasParent likely breaks same-namespace root tokens and lacks descendant-allow test coverage",
+        "detail": "a.root is set from ctx, and AllowOperation checks ns.HasParent(a.root). A namespace is typically not its own parent, so a root token in ns1 may fail in ns1; argument order for descendants is also unverified. Existing tests only cover ns==a.root and child-ctx-against-root-ns. Add tests for root-in-own-ns and a true descendant case, and consider ns.ID == a.root.ID || ns.HasParent(a.root).",
+        "file": "vault/acl.go",
+        "lines": "342-360",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that always returns false yet is wired into security-critical list paths",
+        "detail": "(*Core).NamespaceSealed unconditionally returns false with a TODO, while ListAllNamespaces and sealed-namespace handling now depend on it. Callers will silently assume 'never sealed' until SealManager lands. Either ship SealManager in the same series, return an explicit ErrNotImplemented, or remove the call sites \u2014 stubs shaped like facts produce production bugs.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-error detection uses errwrap.Contains on message substring instead of errors.Is",
+        "detail": "errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) matches by error text, complecting sentinel identity with message bytes and risking false positives on namespace paths containing the literal string. Use errors.Is(err, consts.ErrNamespaceSealed); fix the same pattern for ErrSealed while you're here.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces semantics changed implicitly across four security-critical call sites with no stated invariant",
+        "detail": "loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, and countActiveTokens swapped namespaceStore.ListAllNamespaces(ctx, true) for c.ListNamespaces(ctx). Whether sealed namespaces are included is undefined and depends on the stubbed predicate. Document the contract \u2014 at what time, including or excluding sealed \u2014 for each caller before SealManager lands.",
+        "file": "vault/core.go",
+        "lines": "3284-3395",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "response_util switch refactor changes status-code precedence semantics for compound errors",
+        "detail": "The prior if-chain let later matches override earlier ones (e.g., HTTPCoded overriding ErrSealed's 503); the new switch picks only the first matching case. State the precedence invariant explicitly and order cases accordingly, or document why sealed wins. This pure refactor also belongs in a separate patch from the ACL feature.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength defined as TokenLen + \".\"[1] + nsID is opaque and possibly wrong",
+        "detail": "Indexing a string literal to derive a separator length is incidental complexity at best and an off-by-one or out-of-bounds bug at worst. Rewrite as TokenLen + nsSeparatorLen + len(nsID) with a named constant so the invariant is inspectable and won't be 'fixed' incorrectly later.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on REFUSE in current shape. Two P0s dominate: the ACL root-per-namespace check via ns.HasParent(a.root) likely breaks root tokens operating in their own namespace and lacks tests covering both same-ns and true descendant cases; and NamespaceSealed is a return-false stub already wired into security-critical list paths, a fact-shaped lie waiting for SealManager. Secondary issues include substring-based sentinel matching that should be errors.Is, a silent semantics change across four ListAllNamespaces call sites, and a response_util switch refactor that quietly alters status-code precedence. The patch also bundles independent changes (ACL feature, response_util refactor, NamespaceView cleanup, test ctx threading) that should be split."
+  }
+}

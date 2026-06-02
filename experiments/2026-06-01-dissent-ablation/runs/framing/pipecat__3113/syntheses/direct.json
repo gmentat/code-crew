@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3113",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Boto3 client is reconstructed on every invocation instead of once at startup",
+        "detail": "Each LLMContextFrame opens a new `async with self._aws_session.client(...)` context, paying TLS handshake and client construction on every turn in a streaming voice pipeline. Build the client once at startup (or cache lazily) and tear down on shutdown.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "210-216",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "default_response_to_output_transformer crashes the pipeline on non-JSON lines",
+        "detail": "`json.loads(response_line)` has no try/except, so any keepalive, comment, or error event raises JSONDecodeError out of process_frame and kills the pipeline. The transformer's return type is Optional[str]; catch parse failures, log a warning, and return None to honor the contract.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-89",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates PEP 8 and the codebase's snake_case convention",
+        "detail": "Every other constructor arg is snake_case (`aws_access_key`, `aws_region`), but `agentArn` leaks the AWS SDK's camelCase into the public Python API. Rename to `agent_arn`; the internal call site can still map to `agentRuntimeArn`. Cheap to fix now, painful later since it's a public constructor.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104-115",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No try/finally guarantees the LLMFullResponseEndFrame bookend if streaming raises",
+        "detail": "If `invoke_agent_runtime` or any `async for part` iteration raises, `_output_response_open` stays True with a Start frame pushed and no matching End. Downstream aggregators hang on a response that never closes. Wrap the streaming block in try/finally so the bookend always closes, and audit the timeout-task/close-path interaction on `_output_response_open`.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "165-257",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SSE parsing is hand-rolled with magic slice and complects framing with payload",
+        "detail": "`line[6:]` to strip `data: ` is opaque and breaks on `data:foo` with no space; multi-line events, comments, and event:/id: fields are silently mishandled. Use `line.removeprefix(\"data: \")` or a named constant, and separate SSE framing from payload extraction so each piece is simple.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "182-237",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class name disagrees with PR title (AWSAgentCoreProcessor vs AWSBedrockAgentCoreProcessor)",
+        "detail": "The PR title promises `AWSBedrockAgentCoreProcessor` but the code ships `AWSAgentCoreProcessor`. Pick one name and align title, class, and docstring before merge to avoid grep pain later.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "82",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK: the diff is readable and the streaming logic is broadly sound, but four concrete issues should block merge. The boto3 client is rebuilt per invocation (a per-turn TLS handshake in a real-time pipeline), the default JSON transformer will crash the pipeline on any non-JSON SSE line, there is no try/finally to guarantee the LLMFullResponseEndFrame bookend on errors, and `agentArn` breaks the codebase's snake_case public API. Hand-rolled SSE parsing with magic slices and a name mismatch between PR title and class round out the cleanups. Fix these and ship."
+  }
+}

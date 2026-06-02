@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() when leader panicked silently swallows the failure",
+        "detail": "On the CAS-failed path, if t.result.Load() is nil the function returns nil. Callers of run() expect a *result; a nil return either crashes downstream on output.done dereference or marks the query as silently succeeded with no result. Either is worse than the original panic. Return a synthetic failed result with Fatal set, or propagate a panic-recovery error.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race window between CAS-fail and Load still permits the original nil-deref",
+        "detail": "After CompareAndSwap(nil, output) fails, the leader can panic and store nil before we Load(). The Load returns non-nil (the leader's result), we pass it to waitUntilDone, then read output.done -- which is fine -- but if the leader stored nil between CAS and Load, we return nil (see issue above). The fix does not actually close the TOCTOU; it just relocates it. Needs a proper synchronization story, not a snapshot-and-hope.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' is backwards and misleading",
+        "detail": "The code returns nil precisely when we did NOT see a result. The comment says the opposite. Either a typo for 'did not' or the author confused themselves. Future maintainer will curse you for this -- six years from now someone will read the comment, trust it, and ship a regression.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle extraction is fine but commit conflates refactor and bugfix",
+        "detail": "This is THREE-PATCHES territory: (1) extract checkCycle, (2) thread output through waitUntilDone, (3) handle nil result.Load after CAS failure. Bisecting a regression here means staring at a single diff doing three things. Smaller patches are almost always better. Split it.",
+        "file": "experimental/incremental/task.go",
+        "lines": "404-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproduces the race; fix is unverified against the bug it claims to fix",
+        "detail": "A race-condition fix with no accompanying test is a hope, not a fix. There should be a test that, under -race, deterministically triggers the leader-panic-then-waiter path and asserts no nil deref and a sensible error returned to the waiter. Without it, the next refactor reintroduces the bug and nobody notices.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable shadowing of output inside CAS-failed branch hurts readability",
+        "detail": "The outer named return is 'output'; the inner block redeclares 'output := t.result.Load()'. Two different things named the same in adjacent scopes makes the diff harder to read and invites future confusion about which one is being returned. Rename the inner one (e.g., leaderResult) or reuse the outer.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The diagnosis -- nil-deref on t.result.Load().done after a leader panic clears the slot -- is real and the threading of output through waitUntilDone is the right shape. But the fix has a P0: when Load returns nil we just return bare nil from run(), which either crashes a layer up or silently reports success for a panicked query. The race window is also not actually closed; it's moved. The comment on line 458 says the opposite of what the code does. And this is three patches submitted as one (extract checkCycle, plumb output, handle nil-after-CAS) with zero tests reproducing the race. Land the checkCycle extraction separately, then come back with a real fix plus a -race test that deterministically exercises the leader-panic path."
+  }
+}

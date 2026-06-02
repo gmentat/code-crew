@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "vitest__9521",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles path comparison may silently fail because git returns repo-relative paths while isIncluded receives absolute slashed paths",
+        "detail": "VitestGit.findChangedFiles typically returns paths relative to the repo root. In isIncluded, `filename` is `slash(cleanUrl(_filename))` which for transformed modules is usually an absolute path. `this.changedFiles.includes(filename)` is then a string-equality check on differently-rooted strings. Either the tests pass by accident (because related/git both happen to use the same form in fixtures) or this breaks on real repos. Normalize both sides to absolute slashed paths before comparing.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-180, 329-346",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache is populated with mixed `changed`-aware and pure-glob results, polluting future runs",
+        "detail": "isIncluded now folds the changedFiles filter into the cached boolean. onTestRunStart clears the cache when changedFiles is set, but nothing clears it when changedFiles is later unset (watch mode, reruns where the git diff changes). A cached `false` from a changed-aware pass will be returned in a subsequent pass that shouldn't apply the filter. Either don't cache when changedFiles is active, or key the cache on (filename, changedFilesVersion).",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "166-182",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook is fired in three call sites by hand instead of through the existing _testRun lifecycle",
+        "detail": "Three separate `await this.coverageProvider?.onTestRunStart?.()` calls were sprinkled into core.ts immediately after `_testRun.start(...)`. That's a maintainability landmine: the next code path that starts a run will forget this and produce silent wrong coverage. Either put the hook inside _testRun.start, or wrap a single helper `startTestRun()` that does both. Don't ask future maintainers to remember.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-885",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform accepts boolean inputs that the declared `argument: '<commit/branch>'` shape says it can't receive",
+        "detail": "The transform handles `value === true` / `value === false`, but the option is declared as taking a `<commit/branch>` argument string. If a boolean ever arrives it's because something upstream is passing through unparsed config, not CLI. Either the option needs to be declared as accepting a bare flag (so `--coverage.changed` with no value means `true`) or the boolean branches are dead code. Pick one; don't leave both half-wired.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Type widening on CustomProviderOptions silently expands the public API surface",
+        "detail": "`Pick<BaseCoverageOptions, FieldsWithDefaultValues | 'changed'>` adds `changed` to the custom provider contract, but custom providers won't implement the new `onTestRunStart` hook or know to read `options.changed`. Either document that custom providers must handle it, or don't expose the field to them. As written, custom providers will accept the config and silently ignore it.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "294-296",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test that asserts `coverage.changed: false` overrides `changed: 'HEAD'` relies on resolveConfig semantics that the diff doesn't enforce",
+        "detail": "The resolveConfig change only assigns when `resolved.coverage.changed === undefined`. The added test sets `coverage: { changed: false }` and expects `false` to be preserved. That works today, but there's no comment in resolveConfig saying \"explicit false must win,\" so a future refactor that uses `??` vs `=== undefined` will silently break this. Add a comment or a stronger invariant.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "419-424",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch does one thing \u2014 decouple coverage's \"changed files\" filter from the test runner's `--changed` \u2014 and the shape is right: new option, inherit-by-default, override allowed, hook called at run start. That's a real problem worth solving and the diff is mostly readable. But the implementation has three taste problems a maintainer will hate: path comparison via raw string `includes()` between possibly-differently-rooted strings, a cache that mixes filter-aware and filter-free results across runs, and the new `onTestRunStart` hook scattered by hand into three call sites in core.ts instead of being plumbed through the lifecycle. NEEDS-WORK \u2014 fix path normalization, fix the cache, consolidate the hook call, and clarify the CLI transform's boolean branches. Then it lands."
+  }
+}

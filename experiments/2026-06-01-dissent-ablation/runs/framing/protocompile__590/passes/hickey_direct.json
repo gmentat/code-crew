@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "protocompile__590",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil from run() silently drops the panic instead of surfacing it as a value.",
+        "detail": "When CompareAndSwap fails and Load() returns nil, the function returns nil. Callers of run() expect a *result value carrying done/Fatal/Output. A nil return complects 'leader panicked' with 'no information,' losing the fact. The value of a failed computation should itself be a value (an explicit failed result), not the absence of one. COMPLECTED.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race window between CAS-failure and Load() is still open; the read is not synchronized with the leader's nil-store.",
+        "detail": "CompareAndSwap failing tells you only that result was non-nil at one instant. Between that instant and Load(), the leader may panic and store nil, or store a fresh non-nil pointer for a re-attempted leader. The fix narrows the window but does not close it. The identity 't.result' and its time semantics are still complected with leader liveness. PLACE-ORIENTED.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle-check comment was lost when the loop was extracted into checkCycle.",
+        "detail": "The original block carried the comment explaining that cycle detection is only meaningful when output is pending. Moving the loop into checkCycle preserved the logic but the call site no longer explains why this branch runs the check. The doc on checkCycle helps, but the call site reads as bare control flow. Small loss of essential context, easy fix.",
+        "file": "experimental/incremental/task.go",
+        "lines": "444-447",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Shadowing 'output' inside the CAS-failed branch complects two distinct values under one name.",
+        "detail": "The outer 'output' is the leader candidate just allocated; the inner 'output := t.result.Load()' is some other goroutine's result. Reusing the name hides which value is which and which time it belongs to. Rename to 'leader' or 'existing' so the identity and its temporal origin are explicit. EASY-NOT-SIMPLE.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code path.",
+        "detail": "The code returns nil precisely because Load() did NOT return a result; the comment says 'we did see a result.' Likely a typo for 'did not.' Wrong comments are worse than missing comments because they encode a false fact about time and state. Fix the wording so the reader knows the actual condition being handled.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: why does the leader ever store nil after a panic?",
+        "detail": "The real complecting is that t.result encodes three things \u2014 'no leader yet,' 'leader in progress,' and 'leader gave up.' A single atomic pointer with a sentinel nil reuses one slot for three distinct facts about time. A small state value (or a 'failed' sentinel result) would make the identity explicit and remove the whole class of nil-deref races. Hammock before keyboard.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The patch fixes the immediate nil-deref by capturing the result pointer locally before selecting on done, which is a real improvement. But the underlying design is still complected: t.result is a single atomic slot doing the work of three distinct facts (no leader, leader running, leader gave up), and 'leader panicked' is represented by the absence of a value rather than a value. The race window is narrowed, not closed, and the new bare-nil return propagates that absence to callers. The cleanest fix is upstream \u2014 represent failed computations as values, not as missing pointers \u2014 so identity and time semantics are explicit."
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "agents__3608",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Close message type string does not match Deepgram's documented control message",
+        "detail": "The PR description and linked Deepgram docs specify {\"type\": \"CloseStream\"}, but the constant is defined as json.dumps({\"type\": \"Close\"}). If the server requires the exact literal CloseStream, this fix sends the wrong control frame and does not actually resolve the truncation it claims to fix. Verify the wire literal against Deepgram's Speak v1 socket schema before merging.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() call does not establish the invariant that all final audio has been drained",
+        "detail": "The post-condition we want is: all pending audio frames are delivered before ws.close(). A single receive() with a 1s timeout consumes at most one frame and then proceeds to close, which can drop subsequent frames mid-flight. The loop invariant should be drain-until-CloseStream-ack-or-timeout, not receive-one-message.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-139",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Drained frames are silently discarded rather than emitted to the audio sink",
+        "detail": "_close_ws reads from the socket but does not forward received audio frames to the output emitter. Any final TTS audio that arrives in that 1-second window is read off the wire and thrown away, defeating the stated purpose of waiting for remaining audio. Either route those frames to the consumer or document why discard is correct here.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-138",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare except Exception around send_str hides protocol and cancellation errors",
+        "detail": "Wrapping both send_str calls and the wait_for in a single except Exception catches CancelledError on older Python and obscures the distinction between a closed socket (expected) and a serialization or programmer error (unexpected). Narrow to ConnectionResetError / aiohttp.ClientError, or at minimum re-raise asyncio.CancelledError explicitly.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-140",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Magic 1.0s timeout deserves a named constant and a comment justifying the value",
+        "detail": "The literal 1.0 is the entire budget for graceful shutdown and directly trades off audio completeness against shutdown latency. A named constant (e.g. _CLOSE_DRAIN_TIMEOUT_S) with a one-line literate comment on why one second is the chosen point on that curve would make the choice auditable by the next reader.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "137",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The intent \u2014 send a control message so Deepgram flushes pending audio before socket teardown \u2014 is correct and matches the STT precedent. The execution is UNDER-AUDITED: the close-message literal appears to disagree with the PR's own cited spec (\\\"Close\\\" vs \\\"CloseStream\\\"), and the drain loop invariant is too weak (one receive(), discard frames, then close) to actually deliver the audio it waited for. With the literal corrected, a proper drain loop, and a named timeout constant with a literate comment, this becomes a clean, RIGOROUS fix."
+  }
+}

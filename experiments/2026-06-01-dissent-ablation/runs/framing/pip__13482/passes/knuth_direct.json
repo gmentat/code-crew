@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "framing": "direct",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Loop invariant for `prepare_linked_requirements_more` placement is not stated; correctness rests on an unwritten contract.",
+        "detail": "The diff moves a call from the resolver into each command, but no comment states the invariant that 'after resolve, requirements may have needs_more_preparation=True, and every command path that actually installs/downloads/builds must call prepare_linked_requirements_more exactly once before consuming files.' Without this written contract, a future command (or plugin) will silently regress dry-run by forgetting the call, or double-call it. State the invariant in code.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`needs_more_preparation` and `prepared` flags are no longer reset after the new `prepare_linked_requirements_more` calls.",
+        "detail": "The deleted block in resolver.py explicitly set `req.prepared = True` and `req.needs_more_preparation = False` after preparation. The new call sites in install/wheel/download do not. If any downstream code inspects these flags (or if prepare_linked_requirements_more is called twice), behavior diverges from the prior invariant. Either preserve the flag discipline or prove the flags are now dead state.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist` caches a metadata-only distribution that may later be replaced by a real one, with no invalidation.",
+        "detail": "After `prepare_linked_requirements_more` fully downloads the wheel, `get_dist()` will still return the cached metadata-only `_distribution` rather than reading from `metadata_directory` or `local_file_path`. For metadata-only PEP-658 dists this may be fine, but the invariant 'cached dist remains valid after full preparation' is unstated and unaudited. Document it or invalidate `_distribution` in prepare_linked_requirement when the real artifact arrives.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`download_info` assignment uses `req.source_dir` which may be None during metadata-only fetch.",
+        "detail": "`direct_url_from_link(req.link, req.source_dir)` is called inside the metadata-only branch where the requirement has not been unpacked. `source_dir` is typically set during full preparation; passing None here may produce a malformed DirectUrl or rely on direct_url_from_link tolerating None. Worth an assertion or an explicit comment proving the call is well-defined in this code path.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-542",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No literate comment explains why three commands now bracket resolve with `prepare_linked_requirements_more` at different points.",
+        "detail": "install.py places the call after the dry-run early-return; download.py and wheel.py place it immediately after resolve. The asymmetry encodes the whole point of the PR (skip download in dry-run) but is invisible to a careful reader. A short comment at each site naming the invariant ('dry-run must return before this call') would make the code readable without running it.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-425",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`set_dist`/`get_dist` precedence order is undocumented and silently shadows two other dist sources.",
+        "detail": "`get_dist` now prefers `_distribution`, then `metadata_directory`, then `local_file_path`. The reader must infer that the cached dist is authoritative once set. A one-line docstring on `set_dist` stating the precedence and lifetime ('set during metadata-only fetch; never cleared') would meet the literate-programming bar for foundational req-state code.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-621",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The change is algorithmically straightforward: move \"more preparation\" out of the resolver and into the commands that actually need bytes on disk, so `--dry-run` and `pip lock` can stop short. The structural idea is right, but the patch deletes the only place where the prepared/needs_more_preparation invariants were explicitly maintained without restoring that discipline at the new call sites, and it introduces a `_distribution` cache whose precedence and lifetime are nowhere written down. UNDER-AUDITED and NEEDS-LITERATE-COMMENT: the code is plausibly correct but the loop-level and object-level invariants a careful reader needs are missing. Recommend adding a short contract comment at each new prepare_linked_requirements_more call site, documenting get_dist precedence on set_dist, and either preserving or proving-dead the prepared/needs_more_preparation flags."
+  }
+}

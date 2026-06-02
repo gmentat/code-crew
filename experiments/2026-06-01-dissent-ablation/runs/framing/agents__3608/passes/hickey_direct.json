@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR description says CloseStream but code sends Close \u2014 values disagree with their description",
+        "detail": "The PR text and Deepgram docs reference the control value {\"type\":\"CloseStream\"}, but _CLOSE_MSG encodes {\"type\":\"Close\"}. These are different facts. One of them is wrong. The value itself is the contract with Deepgram; verify against the Speak v1 socket protocol and make the data match reality before merging.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Close handshake complects three concerns: flush, terminate, and drain",
+        "detail": "_close_ws now sends Flush, sends Close, waits once for any frame, swallows all exceptions, then closes. Flushing pending audio, signaling end-of-stream, and draining server acks are three separable facts about time. A single receive() with 1s timeout is not a drain \u2014 it reads one message and moves on. Name and separate them, or the next bug will hide in this lump.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare except Exception erases the failure modes you actually want to know about",
+        "detail": "Catching Exception and logging a warning treats ConnectionResetError, CancelledError, and protocol errors as the same fact. They are not. At minimum exclude CancelledError so shutdown propagates; ideally narrow to the connection/aiohttp exceptions that are expected during a closing socket. Right now the log line is the only evidence anything went wrong.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "138-139",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Control message strings live as class constants but are pure values \u2014 push them to module scope",
+        "detail": "_FLUSH_MSG and _CLOSE_MSG are immutable JSON values that have nothing to do with instance identity or class state. Binding them to SynthesizeStream complects protocol vocabulary with a stream object. A module-level dict or two module constants would say what they are: facts about the Deepgram wire protocol, reusable by _close_ws without reaching through the class.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "1.0s magic timeout with no name and no justification",
+        "detail": "asyncio.wait_for(ws.receive(), timeout=1.0) bakes a time-semantics decision into a literal. Why 1.0? What does the user observe if Deepgram takes 1.2s to ack? Lift it to a named constant (or conn_options field) so the time model is explicit and tunable, instead of buried as a number.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-137",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix points at a real problem \u2014 Deepgram now requires an explicit end-of-stream value rather than relying on transport close \u2014 but the implementation conflates the message vocabulary with the stream object, and the close handshake complects flush, terminate, and drain into one try/except blob. The most load-bearing issue is that the PR description says CloseStream while the code sends Close; the value on the wire is the contract, and right now the description and the data disagree. Narrow the exception handling, name the 1s timeout, and verify the actual control type against Deepgram's Speak v1 protocol before merge. None of this is a redesign \u2014 it is decomposing three facts (flush, close, drain) that the current diff has tangled."
+  }
+}

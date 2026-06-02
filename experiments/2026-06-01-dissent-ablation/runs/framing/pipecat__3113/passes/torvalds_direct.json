@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "framing": "direct",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Boto3 client is created per invocation instead of once at init",
+        "detail": "Every LLMContextFrame opens a fresh `async with self._aws_session.client(...)` context. In a streaming pipeline that's TLS handshake plus client construction on every turn. Build the client once in startup (or lazily and cache it), tear it down on shutdown. This is the obvious shape.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "210-216",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "agentArn parameter violates PEP 8 and the rest of the codebase",
+        "detail": "Every other arg is snake_case (`aws_access_key`, `aws_region`). Then `agentArn` shows up camelCase because that's what the AWS API uses. Match the codebase voice: `agent_arn`. The maintainer six months from now will curse this. Trivial fix, do it before merge.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "108",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer crashes on non-JSON lines",
+        "detail": "`json.loads(response_line)` has no try/except. One malformed SSE line from the agent and the whole pipeline blows up with an uncaught JSONDecodeError. The warning above about `data:` prefix suggests the author knows lines can be weird; handle it consistently. Catch, log, return None.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78-80",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "process_frame swallows exceptions and never closes LLMFullResponseStartFrame",
+        "detail": "If `invoke_agent_runtime` or any `async for part` iteration raises, `_output_response_open` stays True with a Start frame already pushed and no matching End. Downstream aggregators hang on a response that will never end. Wrap in try/finally to guarantee the bookend closes.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "199-257",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded magic numbers for SSE prefix and timeout",
+        "detail": "`line[6:]` to strip `data: ` is the kind of clever that breaks the next time someone sends `data:foo` with no space. Use `line.removeprefix(\"data: \")`. And `_output_response_timeout = 1.0` is buried in __init__ as a constant; either make it a parameter or a module-level constant. Small stuff, but the diff is otherwise clean enough to fix it.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "172, 195",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class docstring says AWSAgentCoreProcessor, PR title says AWSBedrockAgentCoreProcessor",
+        "detail": "Pick one name. The PR title promises `AWSBedrockAgentCoreProcessor`, the code ships `AWSAgentCoreProcessor`. Either rename the class to match the title, or fix the title. Sloppy and the kind of thing that bites grep six months later.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "82",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch does one thing, the diff is readable, and the streaming logic isn't terrible. But it's NEEDS-WORK, not ACCEPT. The boto3 client is reconstructed on every invocation \u2014 that's a per-turn TLS handshake in a real-time pipeline, which is the kind of thing that gets noticed in production. `agentArn` is camelCase in a snake_case codebase; that's a style violation against the surrounding code, not a kernel-style nit. The default response transformer crashes on malformed JSON with no handler, and there's no try/finally to guarantee the LLMFullResponseEndFrame bookend if the AWS call throws \u2014 downstream aggregators will hang. Fix those four, ship it."
+  }
+}

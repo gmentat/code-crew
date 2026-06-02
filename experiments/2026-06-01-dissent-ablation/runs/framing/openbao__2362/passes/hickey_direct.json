@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root field complects authorization decision with namespace ancestry \u2014 three concerns in one boolean-turned-pointer",
+        "detail": "The `root *namespace.Namespace` field now encodes three facts: (1) is this a root policy, (2) which namespace owns it, (3) implicit ancestry check against the request. nil-pointer-as-bool plus HasParent at check time is COMPLECTED. A small value type like `rootScope{ns *Namespace}` or explicit `IsRoot bool; RootScope *Namespace` separates 'has root policy' from 'scope of root'. The current shape will be misread.",
+        "file": "vault/acl.go",
+        "lines": "38, 104-108, 342-361",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that always returns false \u2014 a lie shaped like a fact",
+        "detail": "`(*Core).NamespaceSealed` unconditionally returns false with a TODO. Callers (ListAllNamespaces filtering, future ACL gates) will be written against this signature and silently assume 'never sealed.' This is PLACE-ORIENTED in the worst way: a fact about the world is hardcoded. Either don't add the method until SealManager exists, or make it return an explicit `ErrNotImplemented` so callers can't accidentally rely on the false value.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-error detection by string-Contains on error message is EASY-NOT-SIMPLE",
+        "detail": "`errwrap.Contains(err, consts.ErrNamespaceSealed.Error())` matches by substring of the error text. That complects identity (which sentinel) with value (message bytes). `errors.Is(err, consts.ErrNamespaceSealed)` is the simple version \u2014 sentinel identity, no string parsing, survives message edits. The existing ErrSealed check has the same flaw; this PR is the moment to stop propagating it.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-167",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NSTokenLength = TokenLen + \".\"[1] + nsID conflates encoding with arithmetic",
+        "detail": "Per the description, token length is computed as `TokenLen + \".\"[1] + nsID`. Indexing a string literal to get a byte and adding it as a number is INCIDENTAL-COMPLEXITY \u2014 the '.' is a separator, not a quantity. The simple form is `TokenLen + 1 + len(nsID)` with a named constant `nsSeparatorLen = 1`. The current expression reads like a typo and will get 'fixed' wrong by someone later.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces semantics changed implicitly via stubbed sealed-filtering \u2014 time semantics unclear",
+        "detail": "Callers (`loadLoginMFAConfigs`, `runLockedUserEntryUpdates`, `entityGaugeCollector`, `countActiveTokens`) all switched from `namespaceStore.ListAllNamespaces(ctx, true)` to `c.ListNamespaces(ctx)`. The set of namespaces returned at time T now depends on a not-yet-implemented seal predicate. What does 'all namespaces' mean \u2014 at what moment, including or excluding sealed ones? Document the time semantics before the stub becomes real, or every caller will mean something different.",
+        "file": "vault/core.go",
+        "lines": "3287, 3395",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test ctx threading shows the missing abstraction: requests should carry namespace as a value, not as ambient context",
+        "detail": "The diff sprinkles `namespace.RootContext(t.Context())` across a dozen test sites and replaces `context.Background()` mid-function. This is PLACE-ORIENTED test setup \u2014 the namespace is a load-bearing value being smuggled through context.Value. A `Request` value with an explicit `Namespace` field would make tests trivial and remove the entire class of 'forgot to wrap context' bugs. Not blocking this PR, but worth a hammock session before the next one.",
+        "file": "helper/testhelpers/logical/testing.go",
+        "lines": "201-399",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "This PR is mostly threading namespace through context and reshaping ACL.root from a bool into a namespace pointer. The reshape is COMPLECTED: one field now carries 'is root policy', 'which namespace scope', and an implicit ancestry check evaluated lazily at request time. The `NamespaceSealed` stub that always returns false is a fact-shaped lie that downstream callers will quietly depend on. Error matching via substring-Contains and the `TokenLen + \\\".\\\"[1] + nsID` length expression are incidental complexity that should be replaced with `errors.Is` and explicit separator arithmetic. The deeper question that should have been asked first: should namespace be an ambient context value at all, or a load-bearing field on Request and ACL \u2014 the test churn in this diff is the field telling you."
+  }
+}

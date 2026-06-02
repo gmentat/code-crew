@@ -1,0 +1,78 @@
+{
+  "task_id": "vitest__9152",
+  "framing": "direct",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getSourceMap performs sync file I/O on every external stack frame with no caching",
+        "detail": "getSourceMap is called per-frame during error formatting, doing existsSync + readFileSync + convert-source-map parse for each external file. A deep stack across node_modules re-reads and re-parses the same map many times, blocking the event loop. Memoize per absolute file path (including negative results) for the lifetime of the stack parse.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "170-190",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent swallowing of read/parse errors can crash the error reporter itself",
+        "detail": "readFileSync and convert-source-map can throw on permission errors, non-UTF8 bytes, or malformed maps; there is no try/catch. A malformed external module would turn a test failure into a formatter crash. State the invariant that getSourceMap returns SourceMap | undefined and never throws, wrap in try/catch, and return undefined on failure so the original stack survives.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "318-343",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) change in DecodedMap lacks a direct unit test",
+        "detail": "The one-line resolve(s, from) -> resolve(from, '..', s) is the actual fix but its only evidence is a downstream snapshot. Add direct unit tests on DecodedMap.resolvedSources covering relative sources, absolute sources, and sources with sourceRoot, and document the invariant that 'from' is the map URL and sources resolve against its parent directory.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Fallback '{}' sentinel for missing companion map is undocumented and place-oriented",
+        "detail": "createConvertSourceMapReadMap returns the string '{}' when the referenced file is missing, conflating 'file found' with 'pretend empty map'. A reader cannot tell whether this is a valid library input or a hack. Return undefined (or a typed empty SourceMap via the library helper) and handle the fallback at the single call site that wants it, with a literate comment.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "323-343",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Load-bearing 'external module' invariant is implicit in a coincidence of two APIs",
+        "detail": "The condition !mod?.transformResult && existsSync(file) overloads 'Vite knows about it but did not transform' with 'path exists on disk' to mean external. If transformResult is ever populated for an externalized module (SSR edge cases, plugin transforms) the fix silently doesn't apply. Name the predicate, state the invariant explicitly, and ideally assert/test it.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-185",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New convert-source-map dependency overlaps with existing @jridgewell stack",
+        "detail": "Vitest already depends on @jridgewell/trace-mapping and friends, which can extract inline and file sourcemaps. Adding convert-source-map plus @types/convert-source-map for a ~30-line helper introduces a second sourcemap parser in the same package. Check whether the existing jridgewell utilities can do this before landing a new dependency.",
+        "file": "packages/vitest/package.json",
+        "lines": "198-214",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the one-line resolve() fix in DecodedMap is the correct value-level change, but the surrounding plumbing is under-engineered. Three concerns are unanimous: getSourceMap does synchronous per-frame file I/O with no memoization, errors are silently swallowed inside the error-reporting path itself, and the load-bearing resolve() change ships without a direct unit test on DecodedMap.resolvedSources. Secondary concerns flagged by two reviewers: the '{}' sentinel for missing maps is undocumented place-oriented thinking, and the 'external module' predicate complects two unrelated facts. Verdict: NEEDS-WORK \u2014 fix the fix, add caching, error containment, and a unit test before landing."
+  }
+}

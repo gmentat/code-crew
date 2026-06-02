@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "framing": "direct",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "IAM-policy fetch error is swallowed; image silently reported as PASS instead of UNKNOWN",
+        "detail": "When getIamPolicy raises, the except block logs and continues with publicly_shared=False, so a permission-denied or transient API error becomes a clean PASS. Value and time are complected: 'we don't know' and 'it is private' are different facts about the world and the model collapses them. Either skip the image or carry a tri-state (known/unknown/public).",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image model loses the binding data that justified the verdict",
+        "detail": "The service walks IAM bindings, then throws them away and keeps only a boolean. The check's value (the policy bindings, a timestamped fact) is complected with the verdict (a derived predicate). Store the public members or the relevant bindings on the model so the check, reports, and any future check ('shared with specific external domain') can reason from data rather than from a boolean someone else computed.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "556-588",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Tests assert the boolean the test itself set, not the extraction logic",
+        "detail": "Every check test constructs Image(publicly_shared=True/False) directly and asserts the corresponding status. That tests the trivial branch in the check, not the binding-parsing in _get_images, which is where the real logic and risk live. TDD-as-design: the seam was drawn at the boolean, so the interesting code is untested. Add a service-level test that feeds real bindings through.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": "30-168",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Per-image getIamPolicy call is an N+1 against the GCP API with no concurrency",
+        "detail": "_get_images iterates images serially and issues one getIamPolicy per image, while the rest of the service uses __threading_call__ for similar fan-outs. Essential work is one policy per image; the incidental cost is doing them one at a time on the calling thread. Reuse the existing threading helper or at least document why this one is sequential.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-585",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changelog entry name does not match the actual check id",
+        "detail": "CHANGELOG lists compute_image_not_publicly_shared but the PR description and metadata in other places refer to compute_image_publicly_shared. Names are identities; two identities for one thing makes future grep, dashboards, and suppressions diverge. Pick one and use it everywhere.",
+        "file": "prowler/CHANGELOG.md",
+        "lines": "16",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model omits self_link / location / kind that the API already returns",
+        "detail": "The API response carries self_link, creation timestamp, family, and source; the model keeps only name, id, project_id, publicly_shared. Future checks (image age, deprecated images, cross-project sharing) will need another pass over the API. Capturing the values once, as data, is cheaper than re-fetching later.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The check is small and readable, but the design complects 'unknown' with 'not public' by collapsing IAM policy state into a single boolean on the Image model, which is set even when getIamPolicy fails. The interesting logic (binding parsing, error handling, pagination) lives in the service, but the tests stub it out by constructing Image(publicly_shared=...) directly, so the check tests assert a tautology rather than behavior. The Image model should carry the policy data as values; the check should derive the verdict from those values. Also: N+1 IAM calls without the project's existing threading helper, and a name mismatch between the CHANGELOG entry and the description's check id."
+  }
+}
