@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer sets req.prepared/needs_more_preparation=False, so downstream code that trusts those flags now sees stale state.",
+        "detail": "The old resolver loop flipped prepared=True and needs_more_preparation=False after the more-preparation pass. That contract is gone. Now every call site must remember to call prepare_linked_requirements_more itself AND nothing resets the flags. Anything that checks req.prepared or req.needs_more_preparation after resolve() is now wrong. Either keep the flag reset inside prepare_linked_requirements_more, or document and audit every caller. Show me the audit.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Moving prepare_linked_requirements_more into each command duplicates the call in three places and is one forgotten line away from a regression.",
+        "detail": "download.py, install.py, wheel.py now each call preparer.prepare_linked_requirements_more themselves. That used to live in one spot in the resolver. Three copies of the same incantation is exactly how the fourth command (lock, hash, whatever ships next) silently regresses to downloading everything again. Put it back behind one function with an explicit dry_run flag, or wrap it.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist cache has no invariant relating _distribution to metadata_directory or local_file_path.",
+        "detail": "get_dist now prefers _distribution over metadata_directory and local_file_path. If someone calls set_dist with the metadata-only dist and later the wheel is fully downloaded and unpacked, get_dist keeps returning the stale metadata-only distribution. No invalidation, no assert. State that disagrees with itself is a bug waiting to happen. At minimum clear _distribution when metadata_directory or local_file_path changes.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-620",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Synthesizing download_info from req.link inside the metadata-only branch silently changes what --report and pip lock emit.",
+        "detail": "Previously download_info was set by the actual download path. Now if metadata-only succeeds, we fabricate it via direct_url_from_link(req.link, req.source_dir). That is the value users will see in --report JSON and pip lock output. It needs a test that pins the exact shape, including hashes (or their absence), for both dry-run and real install. Otherwise downstream consumers break quietly.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch ships zero new tests for the headline behavior.",
+        "detail": "The diff claims --dry-run and pip lock no longer download full wheels. The only evidence is a news fragment. Prose is not a regression suite. There needs to be a test that runs --dry-run against an index serving PEP-658 metadata, asserts no wheel bytes were fetched, and asserts download_info is populated correctly. Without it, the next refactor regresses this and nobody notices.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no validation; either make it a property or assert the precondition.",
+        "detail": "def set_dist(self, distribution): self._distribution = distribution is just attribute assignment with extra ceremony. If the point is to enforce a lifecycle (only set once, only set when metadata-only), assert it. If not, drop the method and assign the attribute directly at the one call site that uses it.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-613",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The core idea is right and the diff is small: pull the more-preparation step out of the resolver so dry-run and lock can skip it. Good taste, in principle. But the execution leaks the maintainer cost it was supposed to save. The resolver used to reset two flags after the prep pass; that contract is now gone with no replacement and no audit of who reads those flags. The call to prepare_linked_requirements_more is now duplicated across three command files, which is exactly the shape that regresses the moment a fourth command ships. The new set_dist/get_dist cache has no invalidation and the fabricated download_info has no test pinning its shape. NEEDS-WORK: split into the behavior change plus the caching change, add the dry-run test that proves no wheel bytes get fetched, and either restore the flag-reset contract or audit every reader."
+  }
+}

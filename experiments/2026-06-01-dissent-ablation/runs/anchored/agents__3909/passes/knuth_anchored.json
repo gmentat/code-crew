@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "agents__3909",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "sample_rate is accepted as int but silently coerced to a format that may not exist",
+        "detail": "audio_format is built via f\"pcm_{sample_rate}\" and cast to STTAudioFormat. If a caller passes sample_rate=11025 or 32000, the cast lies and the server rejects the connection. The invariant 'sample_rate in {8000,16000,22050,24000,44100,48000}' is unstated and unenforced. Validate at construction, or accept STTAudioFormat directly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~118-126",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Empty committed_transcript as end-of-speech sentinel is an unstated invariant",
+        "detail": "The receive handler treats committed_transcript with empty text as 'end of speech segment'. This is a load-bearing protocol assumption with no comment stating it, no defense if the server never sends the empty commit, and no timeout. A reader cannot follow why _speaking flips false here. State the invariant in a literate comment and add a safety path.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~366-384",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect loop never resets _speaking; a mid-utterance reconnect leaves state inconsistent",
+        "detail": "_speaking is process-level state but the WebSocket can be re-established via _reconnect_event. After reconnect, if the previous session left _speaking=True without an END_OF_SPEECH, the next partial will not emit START_OF_SPEECH and downstream turn-taking breaks. The invariant 'between START_OF_SPEECH and END_OF_SPEECH exactly one speech segment is open' is not preserved across reconnects.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~200-260, 340-385",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Numeric range constraints documented in docstring but not asserted in code",
+        "detail": "Docstring states vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_speech/silence_duration_ms in [50, 2000]. None are checked. The server will reject, but the failure mode is a WebSocket close far from the bad call site. A two-line assert per parameter turns a remote error into a local one and documents the invariant in code.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~95-115",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "50ms chunking constant is magic; relationship to API requirements is undocumented",
+        "detail": "samples_50ms = sample_rate // 20 is the load-bearing chunk size for streaming. There is no comment stating why 50ms (ElevenLabs requirement? latency tradeoff?), and integer division silently truncates for odd rates. A one-line comment naming the choice and a constant CHUNK_MS = 50 would make this readable without running it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~205-211",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "keepalive_task swallows all exceptions silently",
+        "detail": "The bare 'except Exception: return' loses information about why the keepalive died. If the ping fails due to a transport issue, the recv_task will eventually notice, but the diagnostic trail is gone. Log at debug level before returning so a careful reader debugging a stuck stream has a thread to pull.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~178-184",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The streaming protocol rests on several unstated invariants: the sample-rate-to-format mapping is a silent cast that can lie, empty committed_transcript is a load-bearing end-of-segment sentinel with no comment, and the _speaking flag is not reconciled across reconnects. The algorithm itself is straightforward, but a reader has to reconstruct the protocol contract from observation. Docstring documents numeric ranges that the code does not enforce, turning local mistakes into remote WebSocket closures. Recommend tightening the invariants in code (asserts, comments, reconnect reset) before merge; no rewrite needed."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "vitest__9152",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getSourceMap callback complects module-graph lookup, filesystem I/O, and sourcemap parsing in one closure",
+        "detail": "The inline callback braids four concerns: querying Vite's module graph, an existence check, a synchronous file read, and convert-source-map parsing. Each is a separate fact about the world. Pull a pure `readExternalSourceMap(file): SourceMap | undefined` out, and let the caller decide when 'external' applies. The test-run hot path then describes intent, not mechanism.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes semantics of resolvedSources without an explicit model of what 'from' is",
+        "detail": "The one-line fix in source-map.ts reinterprets `from` as a file path whose parent contains the sources, rather than a base. That is probably correct for sourcemaps but the code does not say so. Name it: is `from` a file URL, a directory, or a map location? A two-line comment plus a named helper (`resolveSourceRelativeToMap`) makes the time-of-decision explicit instead of hidden in pathe semantics.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "366-368",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Returning '{}' as a string sentinel for missing files complects 'not found' with 'empty map'",
+        "detail": "createConvertSourceMapReadMap returns the literal string '{}' when the file is missing, leaning on convert-source-map to treat it as an empty map. Missing-file and empty-map are two distinct facts; collapsing them hides a class of bugs (typo in sourcesContent path looks identical to a legitimately empty external map). Return undefined or throw a typed 'missing source' value and let the caller decide.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "337-342",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Synchronous readFileSync inside an error-reporting hook is place-oriented and unbounded",
+        "detail": "Every stack frame may trigger a synchronous disk read of an external module plus a recursive read of its referenced map file, with no caching across frames or across test runs. The value 'sourcemap for file X' is stable per file mtime; treat it as a value with an identity (path) and a time (mtime) and memoize. Otherwise a 50-frame stack against node_modules can hit the FS 100+ times per error.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Adding convert-source-map is incidental complexity given @jridgewell/trace-mapping is already a dep",
+        "detail": "The repo already depends on @jridgewell/trace-mapping and ships its own DecodedMap. Pulling in a second sourcemap library plus its @types just to parse inline/file comments adds a tool to solve a small parsing problem. A ~30-line extractor over the existing trace-mapping surface keeps the dependency graph honest. Accept the new dep only if the team states the convenience-vs-decomplection tradeoff out loud.",
+        "file": "packages/vitest/package.json",
+        "lines": "201-215",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked: who owns 'is this module external'?",
+        "detail": "The heuristic `!mod?.transformResult && existsSync(file)` defines 'external' implicitly, in the error path, by negation. External-vs-inlined is a fact the module graph already knows authoritatively. Expose it as a predicate (`project.isExternalModule(file)`) and the stack-trace code becomes a one-liner that consults a fact rather than reconstructing one.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "178-183",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix is correct in outcome \u2014 external module frames now point at the .ts sources instead of transpiled .js \u2014 but the implementation complects four concerns (module-graph lookup, FS existence, sync read, sourcemap parsing) in one inline callback on the error path. The one-line resolve() change in source-map.ts silently reinterprets what `from` means without naming it. A second sourcemap library is pulled in when trace-mapping is already present, and 'external module' is defined by negation in the error reporter rather than asked of the module graph that already knows. Decision: COMPLECTED. The simpler shape is a pure `readExternalSourceMap(file)` value-returning function plus an explicit `isExternalModule` predicate on the project, with the FS reads memoized by path+mtime. Ship it if velocity demands, but state the tradeoff."
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "pipecat__3233",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Error-message branch complects fourteen distinct error types into one undifferentiated push_error call",
+        "detail": "The new tuple lumps auth errors, quota, rate limiting, throttling, session limits, and 'insufficient_audio_activity' under one handler that emits 'Error: <error>'. These are different facts about the world with different semantics (terminal vs retryable vs informational). Callers downstream lose the ability to discriminate. A small data table mapping message_type to category/severity would decompose this cleanly.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-741",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "transcriber_error listed twice in the match tuple is a symptom of pattern-matching where data would be simpler",
+        "detail": "Duplicate string in a 14-element literal is exactly the bug a hashmap or set prevents. The shape of the code (a hand-typed elif tuple) makes the duplicate invisible. Lifting the error names to a module-level frozenset (or dict keyed by type) turns the duplication into a syntax error and makes the set of handled types a value you can inspect, log, and test.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-741",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removing the try/except around _process_messages complects 'iteration stopped' with 'connection failed'",
+        "detail": "The old code caught exceptions and logged 'connection closed'. The new code lets them propagate to the outer reconnect loop. That may be the right call, but value (the message stream ending) and identity (the websocket connection) are now indistinguishable to the caller. A normal close should not look like an error; an error close should not look like normal termination. State which is which.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "693-705",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inner try/except in _receive_messages swallows all per-message exceptions, undermining the fix's intent",
+        "detail": "The PR's stated goal is to let websocket disconnects propagate so the outer loop can reconnect. But the per-message 'except Exception' still catches everything inside the async for, including disconnects raised mid-iteration on some websocket libraries. Narrow this to JSON/parse errors so the disconnect path is actually reachable. Otherwise the infinite-loop fix depends on the library raising at the for-statement, not inside the body.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "693-702",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error payload shape assumed identical across fourteen message types without evidence",
+        "detail": "All branches now read data.get('error', ...). The linked ElevenLabs docs show different error types carry different fields (codes, reasons, retry hints). Treating them as one shape is easy (one line) but not simple \u2014 it discards facts the server sent. At minimum, pass the full data dict through so downstream consumers can recover what was lost.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "740-741",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR makes two reasonable moves \u2014 propagating disconnects to the reconnect loop, and acknowledging more error message types \u2014 but it does so by complecting fourteen distinct error semantics into one branch and one push_error shape. The error-type list is a hand-typed tuple that already contains a duplicate ('transcriber_error' twice), which is exactly the bug a data structure prevents. The simple-not-easy move is to lift the error catalog to data: a mapping from message_type to {category, severity, retryable} that the handler reads. The disconnect fix is directionally right but the surviving inner try/except may still swallow the very exceptions the fix wants to propagate; tighten it to parse errors only."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "protocompile__569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Loop invariant is not stated; the two-visit DFS deserves an explicit invariant comment.",
+        "detail": "The inner loop encodes a tail-call-optimized DFS where each node is visited twice and state transitions unsorted->walking->sorted gate the yield. The new comment hand-waves at this but never states the invariant: at top of loop, every node on s.stack is either unsorted or walking, and walking nodes appear below all their not-yet-sorted descendants. Without it the merge of state collapse plus yield reorder is faith-based.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "75-105",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "State map is never released, so memory is held for the Sorter's lifetime.",
+        "detail": "The defer now does clear(s.state) but never s.state = nil. clear() zeroes entries but Go maps do not shrink; a one-shot Sort over a large DAG permanently inflates the Sorter's resident set. For a reusable Sorter this is fine; for a Sorter used once on a large graph and then idle it is a silent leak. Document the reuse contract or nil the map when len exceeds a threshold.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "70-76",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cleanup runs only if the iterator is fully consumed, defeating the reset guarantee.",
+        "detail": "The defer that clears state and stack lives inside the returned yield closure, so it only fires when the caller drains or aborts the sequence. If a caller calls Sort() to obtain the iter.Seq but never iterates it, s.state and s.stack stay dirty and s.iterating stays false but state from a prior partial run lingers. Reset should also happen at the top of Sort, not only on iterator exit.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "63-76",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment contains typos and grammar errors in load-bearing explanation.",
+        "detail": "The replacement comment says \"visisted\" and \"if its the first\" where literate-grade prose would say \"visited\" and \"whether it is the first.\" This is the comment that explains the entire two-visit trick; it should read cleanly. The cost of fixing is two characters and one apostrophe.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "84-87",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Removing the working/walking distinction collapses two concepts into one name without justification.",
+        "detail": "Previously unsorted -> working (children being pushed) -> walking was implied by the cycle-detection path in push. The diff folds working into walking so push's walking case now fires both during descent and during the in-progress-cycle check. That is correct because both mean \"on the current DFS path,\" but the rename deserves a one-line comment at the const block explaining that walking == on-stack-and-not-yet-emitted.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "26-30",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "clear(s.stack) before reslicing to zero length is redundant work.",
+        "detail": "s.stack = s.stack[:0] already makes the slice length zero; the subsequent appends will overwrite any retained backing-array elements before they are read. clear(s.stack) zeroes the full backing array to drop Node references for GC, which is the real intent for pointer-bearing Nodes. Worth one comment to say \"clear before reslice to release Node references for GC\" so the next reader does not delete it as dead code.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "72-75",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The fix is plausibly correct: collapsing working/walking into a single \\\"on-path\\\" state and moving state=sorted inside the yield-success branch prevents premature marking, and the deferred clear restores reuse hygiene. But the change lives in tightly invariant-bearing code and ships without stating the invariant or auditing edge cases. The cleanup defer is scoped to iteration, not to Sort() entry, so an unconsumed iterator leaves the Sorter dirty. The map is cleared but never released, so memory grows with the largest DAG ever sorted. Comment quality is below the bar the surrounding code sets."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panicked breaks the function's postcondition and shifts the panic downstream",
+        "detail": "The new branch returns nil when t.result.Load() is nil after a failed CAS. Every other path in run() returns a non-nil *result, and callers dereference output.done and output.Fatal. The invariant 'run returns a non-nil result' is silently broken. State and enforce the invariant: either return a sentinel failed result with output.Fatal set, or propagate the panic explicitly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race window remains: t.result can be cleared between Load() and the select on output.done",
+        "detail": "The fix loads t.result once into a local and selects on output.done, which closes the nil-deref hole. But the comment 'Leader panicked but we did see a result' contains a typo ('did' should likely be 'didn't') and the actual invariant is never stated: 'output is the result observed by the losing CAS racer, and the leader's cleanup-to-nil cannot retroactively invalidate output.done's closure'. Without that invariant written down, the next reader cannot verify correctness by inspection.",
+        "file": "experimental/incremental/task.go",
+        "lines": "455-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pending-path waitUntilDone now uses a stale output captured before checkCycle, with no stated invariant about lifetime",
+        "detail": "The pending branch (line ~441) does output := t.result.Load() at entry, runs checkCycle, then passes that output to waitUntilDone. The invariant 'output remains the valid pending result for the duration of checkCycle and the subsequent wait' is load-bearing but unstated. If the leader can null t.result mid-flight on panic, the captured output.done may already be closed-by-cleanup or never closed. Document why this is safe, or audit it.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-447",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle extraction is a readability win but walks caller.path twice when once suffices",
+        "detail": "The extracted function walks caller.path.Walk() to find the cycle node, then walks it again from the start to collect the prefix. For typical short paths this is fine, but the algorithm is O(2n) where O(n) with a single walk accumulating into a slice and truncating at the match would do. Not premature to fix; it's the same line count. Asymptotically-OK-practically-slow only matters at deep recursion, so this is a P1 readability/literate note, not a perf claim.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test exercises the leader-panic race that motivated the fix",
+        "detail": "The PR description describes a specific race: leader panics, sets t.result to nil, waiter observes nil on Load and would deref .done. The fix is plausible but the change set shows no regression test that forces a leader panic with a concurrent waiter. Per the lens: I have only proved it correct, not tried it. A test that injects a panicking query and asserts no nil-deref in N concurrent waiters is the minimum bar.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typo and missing invariant block above the cycle-detection loop",
+        "detail": "'Leader panicked but we did see a result' reads as a negation typo; intended meaning is likely 'didn't see a result' or 'leader panicked before publishing a result'. Also, checkCycle's docstring states the precondition (output pending) but not the loop invariant: at each iteration, no prefix of caller.path up to the current node matches q.Key(). One literate comment block above the outer loop completes the function.",
+        "file": "experimental/incremental/task.go",
+        "lines": "405-432, 457",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The fix closes the obvious nil-deref by capturing t.result.Load() into a local before selecting on its done channel, which is the right move. But the patch silently introduces a new postcondition violation: run() can now return nil, and no caller-side audit accompanies that change. The extracted checkCycle is a readability win, though it doubles the walk for no reason and lacks a stated invariant. The race that motivated the PR has no regression test, and a comment typo ('did see a result') suggests the author's mental model of the panic path is not yet written down clearly enough to review against. State the invariants, fix the nil return, and add a test that panics the leader."
+  }
+}

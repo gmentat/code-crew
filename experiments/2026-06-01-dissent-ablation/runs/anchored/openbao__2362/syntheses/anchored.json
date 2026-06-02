@@ -1,0 +1,77 @@
+{
+  "task_id": "openbao__2362",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that always returns false yet is already wired into security-relevant call sites.",
+        "detail": "(*Core).NamespaceSealed unconditionally returns false with a TODO, while ListAllNamespaces and the new ErrNamespaceSealed sentinel + response_util mapping already depend on it. The system now silently lies about sealed state in a security-relevant path. Either land the SealManager in this series, return ErrNotImplemented, or revert the call sites until the implementation exists.",
+        "file": "vault/core.go",
+        "lines": "1397-1404",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Root ACL fast-path depends entirely on HasParent semantics with no test proving sibling/prefix rejection.",
+        "detail": "After a.root becomes non-nil, ns.HasParent(a.root) is the sole gate for root authorization. If HasParent is path-prefix based, namespaces like 'foo' and 'foobar' could collide, enabling cross-namespace root. The only test uses a degenerate Namespace{Path:'ns1'} with empty ID. Add tests for sibling rejection, prefix collisions, deep nesting, and ID-based parentage before merge.",
+        "file": "vault/acl.go",
+        "lines": "111-115, 342-361",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL.root invariant is unstated and the field complects presence, ownership, and ancestry scope.",
+        "detail": "The bool became a *Namespace pointer simultaneously encoding 'has root caps,' 'owned by this ns,' and 'check ancestry on each call.' The comment is grammatically misleading and never states whether HasParent is reflexive. Either split into a small RootScope value type or write a literate comment stating the exact invariant: a root policy in N authorizes requests in N and its descendants.",
+        "file": "vault/acl.go",
+        "lines": "37-39, 100-110",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AdjustErrorStatusCode matches sentinels by substring of error message text instead of errors.Is.",
+        "detail": "The refactor preserved errwrap.Contains against .Error() strings and extends the pattern to ErrNamespaceSealed. Any unrelated error whose message contains 'namespace is sealed' is remapped to 503. The switch also silently changes independent checks to first-match precedence without comment. Switch the sentinel cases to errors.Is and document the precedence ordering.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently denies on namespace.FromContext error instead of distinguishing from policy denial.",
+        "detail": "When FromContext fails, the new path returns empty ACLResults with Allowed=false before any policy check runs. A missing namespace in context is a programmer error, not a permission denial; swallowing it produces confusing 403s that look like policy bugs. Log the error and distinguish 'no namespace in context' from an actual deny.",
+        "file": "vault/acl.go",
+        "lines": "340-345",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR bundles six unrelated changes; split for bisectability.",
+        "detail": "ACL root semantics, ErrNamespaceSealed plumbing, NamespaceSealed stub, ListAllNamespaces rewiring, namespaceMountEntryView removal, and broad test ctx rewrites ship as one commit. When the root-ACL change regresses, bisect lands on a commit that also reshapes views and error mapping. Split into at least: (1) ACL root per-ns, (2) view consolidation, (3) sealed-namespace sentinel + stub.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. Two issues are P0: a NamespaceSealed stub that always returns false is already wired into security-relevant paths (ListAllNamespaces, the new ErrNamespaceSealed mapping), and the per-namespace root ACL change hinges entirely on HasParent semantics with no test proving sibling or prefix-collision rejection \u2014 the one test this PR exists to justify. Secondary concerns: ACL.root complects presence/ownership/scope without a stated invariant, AdjustErrorStatusCode still matches sentinels by message substring, AllowOperation silently denies on context errors, and the PR bundles six unrelated changes into one commit. Fix the root-ancestor check with real tests, land NamespaceSealed with its implementation or revert the call sites, and switch to errors.Is for sentinel detection before merge."
+  }
+}

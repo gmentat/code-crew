@@ -1,0 +1,78 @@
+{
+  "task_id": "agents__3608",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Close control message sends {\"type\":\"Close\"} but PR description and Deepgram docs specify {\"type\":\"CloseStream\"}.",
+        "detail": "The PR title, description, and cited Deepgram Speak v1 spec all require CloseStream, yet _CLOSE_MSG serializes {\"type\":\"Close\"}. If the server ignores unknown message types, this silently fails to flush and the patch does not achieve its stated goal. Verify against the live API and reconcile the code with the description before merge.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout does not actually drain final audio frames as the comment claims.",
+        "detail": "receive() returns after exactly one message, which may be an audio chunk, a control ack, or a close frame. The invariant the comment asserts (server confirmed shutdown, all audio drained) is not what the code enforces. Either loop draining until the CLOSE frame / close ack is seen, or rewrite the comment to honestly describe a best-effort 1s grace period.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "133-138",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare except Exception around the shutdown handshake hides protocol-level failures and creates log noise.",
+        "detail": "Catching bare Exception at warning level conflates expected teardown errors (ConnectionResetError, socket already closed) with real bugs (JSON errors, contract violations, send failures mid-stream). Narrow to the specific aiohttp/connection exceptions actually expected here, or distinguish the cases in the log so future readers can tell whether the close sequence ran.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-141",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_close_ws complects protocol handshake, drain wait, and transport teardown in one try/except.",
+        "detail": "What was one operation (close the socket) is now flush + close + await ack + close, all wrapped in a single broad except. A pure send_shutdown(ws) returning acked/timed-out, composed with a separate ws.close(), would separate the handshake protocol from the transport teardown and make each piece independently testable.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_FLUSH_MSG and _CLOSE_MSG are class-level json.dumps strings cross-referenced from a sibling class.",
+        "detail": "These constants encode facts about the Deepgram protocol, not implementation details of SynthesizeStream. _close_ws reaches across to SynthesizeStream._CLOSE_MSG from a different class, creating odd coupling. Hoist them to module-level plain data so both call sites refer to the same value without cross-class reach-through.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-128, 238-239",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comments describe the symptom (429s, lingering sessions) rather than the protocol invariant.",
+        "detail": "A reader six months from now needs the contract: Deepgram Speak v1 requires Flush then CloseStream; the server emits remaining audio frames and then closes; we wait briefly for that close. Reframe the comments around what the protocol guarantees, not which error code prompted the fix.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-137",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix points in the right direction \u2014 making the shutdown handshake explicit instead of relying on TCP close \u2014 but the implementation has one blocking protocol-contract bug and several structural issues. All three reviewers flag that the wire message {\"type\":\"Close\"} disagrees with the PR's own cited Deepgram spec (CloseStream); this must be reconciled before merge. The single receive() with 1s timeout does not establish the drain invariant the comment claims, and the bare except Exception hides real failures while creating noise on normal disconnects. Secondary cleanups: decompose _close_ws into separate shutdown and close steps, hoist the protocol constants to module scope, and reframe comments around the protocol contract rather than the 429 symptom. NEEDS-WORK."
+  }
+}

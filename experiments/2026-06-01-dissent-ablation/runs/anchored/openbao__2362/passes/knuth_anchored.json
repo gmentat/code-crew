@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "The `a.root` fast-path lacks a stated invariant explaining the parent-relationship semantics.",
+        "detail": "The change reinterprets `root` from a bool to a `*namespace.Namespace` carrying the policy's owning namespace, and gates the fast-path on `ns.HasParent(a.root)`. The invariant \u2014 'an ACL bearing a root policy from namespace N authorizes any request whose context namespace is a descendant of N (inclusive?)' \u2014 is not stated in code. A reader cannot tell from the comment whether `HasParent` is reflexive (does root-ns root token authorize root-ns requests?). NEEDS-LITERATE-COMMENT.",
+        "file": "vault/acl.go",
+        "lines": "108-123, 342-361",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`HasParent` semantics are load-bearing for the root-token authorization path but unaudited in this diff.",
+        "detail": "The entire security model of namespace-owned root tokens now depends on `ns.HasParent(a.root)` returning true exactly when authorization should be granted. If `HasParent` is strict (excludes self), a root-ns root token may stop authorizing root-ns requests; if it accepts string-prefix matches (`ns1` vs `ns10`), it over-grants. The test only covers `Path: 'ns1'` with no ID, which is not representative. UNDER-AUDITED.",
+        "file": "vault/acl.go",
+        "lines": "111-115",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`NamespaceSealed` is a stub that unconditionally returns false and is already wired into a caller.",
+        "detail": "`(*Core).NamespaceSealed` returns `false` with a TODO, but `ListAllNamespaces` (per the PR description) is already adjusted to consult it. Shipping a stub that silently lies about sealed state is a correctness hazard: any future caller added before the seal manager lands will get wrong answers with no compile-time signal. At minimum, panic in non-production builds or return `ErrNotImplemented` so callers cannot accidentally depend on it.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`AdjustErrorStatusCode` refactor changes from independent checks to mutually exclusive switch cases.",
+        "detail": "The old code ran each `if` independently, so a single error could match multiple branches and the last one would win. The new `switch` short-circuits on first match. This is likely an improvement, but it is a behavioral change not called out: e.g. an error wrapping both `ErrSealed` and an `HTTPCodedError` previously had its code overwritten by the coded error; now the sealed branch wins. The ordering needs an explicit comment justifying precedence.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`NSTokenLength = TokenLen + \".\"[1] + nsID` is opaque and abuses string indexing for a constant.",
+        "detail": "Per the PR description, `NSTokenLength` is defined as `TokenLen + \".\"[1] + nsID`. `\".\"[1]` indexes past the end of a one-byte string \u2014 if literally written this way it is a compile error or wrong constant. Even if it is `\".\"[0]` (the byte value 46) being added as a length, that conflates an ASCII codepoint with a character count. This needs to be `TokenLen + len(\".\") + nsIDLen` with named constants. NEEDS-LITERATE-COMMENT and likely ASYMPTOTICALLY-WRONG-as-written.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test `testACLRoot` constructs a namespace with only `Path: \"ns1\"` and empty ID, masking the real invariant.",
+        "detail": "The child-namespace test creates `&namespace.Namespace{Path: \"ns1\"}` with no ID, then asserts that a root-namespace context is rejected. This tests the wrong axis: real namespaces have IDs, and `HasParent` likely compares IDs/paths in ways this fixture doesn't exercise. Add cases for deep nesting (`ns1/ns2`), sibling rejection (`ns1` root token vs `ns2` request), and ID-based parentage. UNDER-AUDITED test coverage.",
+        "file": "vault/acl_test.go",
+        "lines": "156-188",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The PR makes a structurally sound generalization \u2014 turning ACL.root from a bool into the owning namespace pointer \u2014 but ships without stating the load-bearing invariant (\"root policy in N authorizes requests in descendants of N\") and without auditing the `HasParent` semantics it now depends on. A stub `NamespaceSealed` returning false is already wired into callers, which is a correctness hazard until the seal manager lands. The `AdjustErrorStatusCode` refactor changes independent checks into a precedence-ordered switch without comment. Test coverage for the new child-namespace authorization path uses a degenerate namespace fixture and does not exercise sibling rejection or deep nesting. Verdict: UNDER-AUDITED with NEEDS-LITERATE-COMMENT on the root fast-path; recommend annotating the invariant, hardening the stub, and broadening tests before merge."
+  }
+}

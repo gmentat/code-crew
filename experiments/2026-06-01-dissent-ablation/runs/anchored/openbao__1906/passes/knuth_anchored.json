@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "openbao__1906",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Security question raised in PR description (revoke_error leakage) is unresolved",
+        "detail": "The author explicitly asks whether RevokeErr is safe to expose, noting it could contain sensitive info. The diff ships it anyway without a decision recorded. Knuth-style: state the invariant for what 'non-sensitive' means in the renamed leaseInfoForExport, or gate revoke_error behind a sudo/root check. Proved-correct vs tried-correct: neither here.",
+        "file": "vault/logical_system.go",
+        "lines": "2200-2202",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Renamed function leaseInfoForExport lacks an explicit invariant of which fields are safe to export",
+        "detail": "The old name leaseTimesForExport was self-documenting; the new name promises 'non sensitive information' but defines it only by enumeration in the struct literal. A literate comment listing the redaction policy (what is included, what is deliberately omitted, why namespace pointer is safe to share) would make future additions safe-by-default rather than safe-by-accident.",
+        "file": "vault/expiration.go",
+        "lines": "1737-1751",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shared namespace pointer copied into exported lease entry creates aliasing without stated contract",
+        "detail": "ret.namespace = le.namespace shares a pointer with the live lease entry. If any caller mutates the returned entry's namespace, it mutates the cached one. The export contract should state read-only or clone defensively. Same concern applies less acutely to Path (string, immutable) and RevokeErr.",
+        "file": "vault/expiration.go",
+        "lines": "1745-1747",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for new fields is thin: only path is asserted, not namespace_path or revoke_error",
+        "detail": "TestSystemBackend_leases adds a single assertion for path == 'secret/foo'. The two more interesting new outputs (namespace_path conditional on non-nil namespace with non-empty Path, and revoke_error conditional on non-empty string) have no test exercising the present and absent branches. Four small cases would lock the contract.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Metric label 'expire.fetch-lease-times' was not updated when function was renamed",
+        "detail": "defer metrics.MeasureSince([]string{\"expire\", \"fetch-lease-times\"}, ...) retains the old name. Keeping the metric label stable is defensible (avoids breaking dashboards), but that decision should be a comment, not silence. Otherwise the next renamer will 'fix' it and break operators' alerts.",
+        "file": "vault/expiration.go",
+        "lines": "1709",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stale test function name TestExpiration_FetchLeaseTimesIrrevocable after API rename",
+        "detail": "The test still calls itself FetchLeaseTimes... but now exercises FetchLeaseInfo. Minor literate-programming hygiene: rename to match, or leave a one-line comment that the old name is intentionally preserved for git-blame continuity. Not a correctness issue.",
+        "file": "vault/expiration_test.go",
+        "lines": "3101-3120",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "A clean, mostly mechanical rename (FetchLeaseTimes -> FetchLeaseInfo, leaseTimesForExport -> leaseInfoForExport) plus three new exported fields on lease lookup. The algorithm and data structures are unchanged; no complexity concerns. UNDER-AUDITED on the security front: the author flags revoke_error as a possible leak vector and ships it without a stated policy. NEEDS-LITERATE-COMMENT on leaseInfoForExport: the redaction contract is implicit in a struct literal rather than written down, which will erode as fields are added. Tests assert only the easiest of the three new outputs. Verdict: RIGOROUS on the rename, UNDER-AUDITED on the new surface area."
+  }
+}

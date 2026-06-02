@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Switching to blocking mode loses the timeout and process-exit safety net entirely",
+        "detail": "Once the first read succeeds, the code drops O_NONBLOCK and enters a blind while-True loop. If the writer wedges after sending one byte, this hangs forever with no poll timeout and no check_process_exited. The whole point of the original poll loop was to detect a stuck or dead subprocess; you just deleted that for everything after byte one.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-146",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "fcntl flag race: another thread or the caller may rely on O_NONBLOCK being set",
+        "detail": "You mutate the fd's file-status flags mid-function and never restore them. If anyone else holds this fd or reopens it via the same description, behavior changes under them. At minimum, restore the original flags in a finally block. Better: do not flip modes at all, just keep polling with a sane timeout.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "134-135",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BlockingIOError branch silently swallowed, removing the prior 'file was closed' signal",
+        "detail": "The old code treated BlockingIOError-with-content as 'writer closed, we are done.' New code replaces both branches with pass. That may be fine given the new blocking path handles drain, but the has_blocking_error variable and its semantics are now dead. Either delete it completely and explain why, or keep the exit condition.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch does two things: fixes the race and rewrites the EOF detection path",
+        "detail": "The bug is 'truncated JSON because we exited before kernel buffers drained.' The minimal fix is: after detecting process exit, do one more blocking drain. Instead this patch restructures the whole loop, deletes the macOS workaround comment, and removes check_process_exited from the hot path. Split it. Bisect-six-months-from-now will thank you.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "132-157",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproducing the truncation; correctness argued only in the commit message",
+        "detail": "The PR description leans hard on a POSIX guarantee. Fine. Then write the test that fails without the patch and passes with it: a subprocess that writes >64KB and exits immediately, run in a loop. Prose is not a regression suite. Without that test this bug returns the next time someone touches this function.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead comment and dead control flow after the rewrite",
+        "detail": "The else branch now contains only 'pass' under a multi-line comment about waiting for data. If the branch does nothing, say so in one line or delete it. Leaving stale explanatory comments next to no-op code is how the next reader gets confused about intent.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "147-154",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The diagnosis is plausible and the POSIX argument is correct, but the patch is the wrong shape. It fixes the truncation by abandoning the non-blocking poll loop entirely once data arrives, which throws away the subprocess-exit and timeout safety nets that motivated the original design. The minimal fix is: on detected EOF-or-exit, do one final blocking drain \u2014 not a permanent mode flip with no restore and no test. NEEDS-WORK: split the patch, add the regression test that reproduces the >64KB truncation, and keep a timeout on the blocking drain."
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Two read paths complect non-blocking polling with blocking drain in one function",
+        "detail": "The function now braids two distinct concerns: 'wait for the writer to start producing' (poll + non-blocking) and 'drain to EOF once producing' (blocking read). Both live in one loop with a mid-function fcntl mode switch and a break that exits the outer loop from inside the inner one. Decompose into wait_for_first_byte() and drain_to_eof(fd) \u2014 each is one concept.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "File descriptor mode is place-oriented mutable state with no restoration on error",
+        "detail": "fcntl flips O_NONBLOCK on the live fd, then the inner blocking read can raise (signal, OSError) and leave the fd in a different mode than the caller handed in. The 'identity' (fd) now points at a value (flags) that silently changes mid-function. Either own the fd's lifecycle end-to-end in this function, or restore flags in a try/finally \u2014 make the time-of-change explicit.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-135",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Removed cross-platform EOF heuristic without naming what changed about the time model",
+        "detail": "The prior code carried a real fact about the world: on macOS, FIFO close may not surface as poll/EOF, so process-exit was used as a proxy. The new design claims POSIX blocking-read semantics make that unnecessary. That may be true once the writer has produced a byte \u2014 but the wait-for-first-byte branch still relies on poll-or-timeout and now silently 'pass'es on timeouts. State the new time model explicitly: what guarantees first-byte arrival?",
+        "file": "metaflow/runner/utils.py",
+        "lines": "139-158",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError branch reduced to 'pass' \u2014 the meaning of that event is now unstated",
+        "detail": "Previously BlockingIOError-with-content meant 'writer closed, we're done.' Now it means nothing \u2014 just 'continue.' Either it can no longer occur (then assert and document why), or it still can and the loop will spin. Naming the event without handling it is incidental noise. Decide whether this branch is reachable; if not, remove it; if so, say what fact it represents.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "8192-byte chunk size and poll timeout are magic values complected with the read protocol",
+        "detail": "The chunk size, the poll timeout, and the assumption 'first non-empty read means writer is committed' are three independent decisions braided into the control flow. Lift them to named values (or parameters) so the protocol is described by data, not buried in literals. This is a small move but it's exactly the kind of incidental coupling that makes the next bug hard to see.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "130-145",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: why a FIFO and not a pipe owned by the parent",
+        "detail": "A FIFO between parent and child subprocess re-introduces the open/close/EOF race that an anonymous pipe inherited via fork would not have. The fix patches the symptom (drain semantics) without revisiting whether the IPC primitive matches the time model. Worth an hour in the hammock before the next related change \u2014 the right fix may be upstream of this function.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The patch fixes a real race by leaning on a real POSIX guarantee \u2014 blocking read() returns 0 only after writer-close and full kernel drain. That part is sound. The cost is that one function now complects two phases (wait-for-first-byte vs drain-to-EOF) with a mid-loop fd mode switch, no flag restoration on error, and a now-meaningless BlockingIOError branch reduced to 'pass'. The previous macOS process-exit heuristic carried information that has been discarded without the new design naming why it's safe to discard. Decompose into two small functions, make the fd-flag change explicit and reversible, and consider whether a FIFO is the right IPC primitive here at all."
+  }
+}

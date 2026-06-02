@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "DescriptorProto() silently returns nil on empty files instead of guarding the zero-case path",
+        "detail": "`(*imports).DescriptorProto()` now returns nil when `i == nil`, but on a non-nil but empty `imports` it still calls `slicesx.Last(i.files)` and returns `imported.file` (likely nil) without indicating absence. The zero-test only checks no-panic; it doesn't check that the contract makes sense. If empty files is reachable, the caller gets a nil File and the existing `IsDescriptorProto` nil-guard papers over it. State the invariant or document the nil-return.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-200",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Same nil-then-call-method pattern copy-pasted across 15+ accessors; this should be one helper or a method on the zero receiver",
+        "detail": "Every accessor on `*File` and `Type` now has the same five-line `var x T; if f != nil { x = f.field }; return wrap(x, ...)` shape. That's THREE-PATCHES worth of duplication smeared into one. The right shape is either methods that work on nil receivers directly (Go allows this) or one `safeSlice` helper. Fifteen near-identical blocks is a maintainer-tax patch.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "179-330",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch bundles 'fix panics on zero values' with 'add zero test' \u2014 these are two patches",
+        "detail": "Commit message admits two things: add the test, and fix the panics it surfaces. When this regresses in a year, bisect lands on a commit that does both and the reviewer has to reread 200 lines to find which production change broke something. Split: one patch adds the test (red), then per-package patches make it green. THREE-PATCHES.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven test is clever where table-driven would be obvious and debuggable",
+        "detail": "`testZeroAny` walks `reflect.Method`, special-cases `IsZero`/`Context`/`ValueNodeIndex` by name, and asserts `r.Interface()` is zero. When this fails six months from now on a new accessor, the failure message is `non-zero return #0 of ir.Foo.Bar` and the maintainer has to mentally simulate reflect. A table of `{name, fn func(T) any}` is uglier in line-count but trivially debuggable. Borderline BAD-TASTE.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "78-137",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex returning -1 as a sentinel is a new special case the test then has to special-case",
+        "detail": "`Element.ValueNodeIndex()` returns -1 on zero, and `testZeroAny` has a dedicated branch for that method name. That's a special case adding a special case \u2014 exactly the BAD-TASTE pattern. Either the zero element has no valid index (return 0 and document it as undefined when IsZero), or the API should return `(int, bool)`. The -1 sentinel will leak into callers.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symbol.RawData() in export_test.go silently returns Nil instead of letting test catch the real bug",
+        "detail": "Test-only helper now returns `arena.Nil()` for zero Symbols. If a test passes a zero Symbol where it shouldn't, you've masked it instead of letting it panic loudly. Test infrastructure should fail fast on garbage input, not normalize it. Either make this a real `Symbol.RawData()` on the type, or leave the panic and fix the caller.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "36-43",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The intent is right \u2014 zero-value accessors shouldn't panic, and a regression test for that contract is good hygiene. But the execution is two patches stapled together (add test + fix panics), with fifteen copies of the same nil-guard boilerplate that wants to be one helper or nil-receiver methods. The reflection-based test is clever where a table would be obvious, and the new -1 sentinel from ValueNodeIndex adds a special case the test then has to special-case. Split it, dedupe the guards, reconsider the sentinel."
+  }
+}

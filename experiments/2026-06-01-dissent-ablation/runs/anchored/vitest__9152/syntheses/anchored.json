@@ -1,0 +1,77 @@
+{
+  "task_id": "vitest__9152",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes resolvedSources semantics without documenting the invariant on `from`",
+        "detail": "All three reviewers flag the one-line fix in DecodedMap as correct only when `from` is a file path with a meaningful parent. If `from` is a directory, bare name, or URL, the '..' segment produces a wrong base. Extract a named helper (e.g. resolveSourceRelativeToMap), add a comment stating the invariant, and add a direct unit test rather than relying on the snapshot.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "readFileSync on every external stack frame is synchronous, unbounded, and uncached",
+        "detail": "getSourceMap is called per frame during error reporting and does existsSync + readFileSync + convert-source-map parse with no memoization. A deep stack across node_modules will re-read and re-parse the same vendor files many times per error. Memoize by file path (ideally path+mtime) and add a size guard so megabyte-scale bundled vendor files do not stall the reporter.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Inline getSourceMap callback complects module-graph lookup, FS I/O, and sourcemap parsing on the error path",
+        "detail": "The closure braids Vite module-graph queries, existsSync, sync read, and parsing. Worse, 'external module' is defined by negation (`!mod?.transformResult`) in the reporter rather than asked of the module graph authoritatively. Pull out a pure readExternalSourceMap(file) helper and expose an explicit isExternalModule predicate so the hot path describes intent, not mechanism.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Returning '{}' for missing map files conflates 'not found' with 'empty map' and swallows diagnostics",
+        "detail": "createConvertSourceMapReadMap returns the literal string '{}' when the referenced .map file is missing so convert-source-map will not throw. This collapses two distinct facts and hides bugs (e.g. wrong sourcesContent path looks identical to a legitimately empty map). Return undefined or a typed sentinel, and at minimum emit a debug-log breadcrumb.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-342",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "FS read+parse path lacks try/catch and uses TOCTOU existsSync; throws would crash error reporting",
+        "detail": "existsSync followed by readFileSync is a classic race, and any throw from readFileSync or convertSourceMap.fromSource will bubble up and kill stack parsing for the whole error. An error reporter that throws while formatting an error is the worst failure mode. Wrap the read+extract in try/catch returning undefined with a debug log.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "180-184, 320-326",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No targeted unit test for the resolvedSources fix; extractSourcemapFromFile is misplaced",
+        "detail": "The snapshot in stacktraces.test.ts proves end-to-end behavior but the actual algorithmic change is one line in DecodedMap whose correctness hinges on `from`'s shape. Add a direct DecodedMap test over representative (sources, from) shapes. Also, the generic extractSourcemapFromFile helper belongs alongside DecodedMap in packages/utils/src/source-map.ts, not in the reporter glue.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix is directionally correct \u2014 external module frames now resolve to original sources \u2014 but the implementation has two clear weaknesses. First, the one-line resolve(from, '..', s) change in DecodedMap silently reinterprets what `from` means without documenting the invariant or adding a direct unit test; all three reviewers want a named helper and a focused test. Second, the new external-module path in test-run.ts does synchronous, unbounded, uncached readFileSync per stack frame, complects module-graph lookup with FS I/O and parsing, returns a magic '{}' string for missing maps, and lacks try/catch around throwing calls. Verdict: ship-shaped but NEEDS-WORK \u2014 add memoization, a size guard, error handling, and move the generic helper into packages/utils."
+  }
+}

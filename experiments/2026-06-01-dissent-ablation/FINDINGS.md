@@ -2,7 +2,7 @@
 
 This is the review-oriented overview of every experiment run in this directory. Per-run SUMMARYs have the full numbers; this document is for stepping back and looking at the whole picture.
 
-**Status as of 2026-06-02:** five runs complete.
+**Status as of 2026-06-02:** six runs complete.
 
 ---
 
@@ -15,6 +15,7 @@ This is the review-oriented overview of every experiment run in this directory. 
 | 3 | Persona ablation | 50 PRs | ✅ committed `944ab2c` | 3-persona crew (K+H+T) beats the full 6-crew by +6.4pp. Named archetypes don't improve recall vs generic, but produce 18% more semantic divergence. |
 | 4 | Triple composition search | 40-50 PRs per tested triple | ✅ partial coverage | 10 of 20 triples tested. **K+H+T remains the best point estimate**, but several challengers are statistical ties and 10 triples remain untested. |
 | 5 | Persona framing A/B (direct-named vs archetype) | 50 PRs paired | ✅ complete | **Direct-named "X — accomplishments" framing underperformed archetype-inspired framing on every metric** (−3.9pp recall, −3.5pp precision p=0.027, +9.9pp fabrication). Keep archetype framing; matches independent research prediction. |
+| 6 | Persona behavioral-anchors A/B | 50 PRs paired | ✅ complete | **NULL by pre-registered threshold; direction slightly negative.** Adding 4 method anchors per persona: Δ recall = −2.3pp p=0.40; Δ precision = −2.4pp p=0.48. Literature's "anchors lift quality" prediction did NOT replicate. Briefs appear saturated; look elsewhere for quality lifts. |
 
 ---
 
@@ -85,6 +86,19 @@ This is the review-oriented overview of every experiment run in this directory. 
    - **Replicates a published research effect.** "Principled Personas" (Luz de Araujo et al., EMNLP 2025) shows irrelevant biographical attributes can swing performance by ~30pp; PRISM shows accomplishment-list framings degrade closed-form work; persona-fabrication research (Deshpande EMNLP 2023; Sadeq et al.; TimeChara ACL 2024) shows richer real-person profiles increase off-profile fabrication.
    - **Implication for the plugin:** keep current "archetype-inspired" framing for all 6 persona briefs. Do not add accomplishments / direct-naming to Dijkstra, Liskov, Pike (untested but research predicts the same effect).
    - Source: `runs/framing/SUMMARY.md`; predicted by `RESEARCH_PERSONA_PROMPTING.md` synthesized independently before the run.
+
+### NULL / NOT VALIDATED (added 2026-06-02 by run #6)
+
+10. **Adding 4 behavioral-anchor vignettes to each persona brief does NOT measurably improve outputs.**
+   - Same K+H+T crew, same 50 PRs, same judge; new `## Behavioral Anchors` section inserted between Operating Principles and Process (LLM-drafted, third-person to avoid invented quotes).
+   - Recall: 0.215 → 0.192 (**−2.3pp**, p_two=0.40, A wins 14-9 of 23 discordant)
+   - Precision: 0.106 → 0.082 (**−2.4pp**, p_two=0.48)
+   - Fabrication rate: 0.645 → 0.678 (+3.3pp, p_two=0.49)
+   - **NULL by the pre-registered ±3pp / p<0.05 threshold**, but direction is slightly negative across the board.
+   - **The literature's "anchors lift quality" prediction did NOT replicate** (Kong et al. NAACL 2024, ExpertPrompting, Salewski NeurIPS 2023 all suggested method-anchored content would help).
+   - **Combined with run #5:** adding ~3K chars to a brief — biographical (run #5) or method-anchored (run #6) — reliably moves recall down a small amount. The current briefs appear to be at a saturation point.
+   - **Implication for the plugin:** keep existing briefs unchanged. Don't add anchors to the other 3 personas. Look for quality lifts via the verifier, synthesis, or judging — not by adding more persona content.
+   - Source: `runs/anchored/SUMMARY.md`
 
 ---
 

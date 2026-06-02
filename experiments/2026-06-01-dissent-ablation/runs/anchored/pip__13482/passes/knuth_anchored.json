@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer marks requirements as prepared, leaving an unstated invariant break for downstream consumers.",
+        "detail": "The removed block set `req.prepared = True` and `req.needs_more_preparation = False` after resolve. The new code returns req_set without touching either flag, relying on callers to invoke `prepare_linked_requirements_more`. The invariant 'after resolver.resolve, requirements are prepared' is now silently violated. State the new contract in a docstring on resolve(), or have prepare_linked_requirements_more set those flags itself.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three call sites duplicate the same `prepare_linked_requirements_more` call with no shared abstraction.",
+        "detail": "install.py, download.py, and wheel.py each independently call `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` at a specific point in their flow. A future command (e.g. `pip lock`) that forgets this call will silently regress to the old behavior. Either fold it into a RequirementSet method or document the obligation prominently on the resolver's return value.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist` bypasses the existing precedence rules in `get_dist` without documenting why it wins.",
+        "detail": "`get_dist` previously dispatched on `metadata_directory`, `local_file_path`, etc. The new `self._distribution` short-circuits all of them with no comment explaining the ordering. If a later code path populates `metadata_directory` after `set_dist` was called with stale metadata, the stale value silently wins. State the invariant: '_distribution, once set, is the authoritative dist for this requirement's lifetime.'",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`download_info` is unconditionally set from `req.link` and `req.source_dir` with no audit of what `source_dir` is during metadata-only fetch.",
+        "detail": "In dry-run / metadata-only mode, `req.source_dir` may be unset or point to a transient location, yet `direct_url_from_link(req.link, req.source_dir)` is called unconditionally. The PR description claims this enables `pip lock` and `--report`, but there is no test or assertion showing the resulting `DirectUrl` is correct for a never-downloaded wheel. Verify and document the precondition.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No literate comment explaining why the old in-resolver preparation was removed.",
+        "detail": "The deletion in resolver.py is the architectural heart of the change: 'preparation moves out of resolve and into each command.' A careful reader of resolver.py alone cannot recover that rationale. A short block comment at the deletion site, or in the resolve() docstring, would prevent a future contributor from 'helpfully' restoring the loop and re-introducing the bug #12603 exists to fix.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`set_dist` has no docstring and no validation that the distribution matches the requirement.",
+        "detail": "A one-line setter that mutates authoritative state deserves at minimum a docstring stating the contract: when it is legal to call, whether re-setting is allowed, and the relationship to `metadata_directory`. As written, a caller can `set_dist(unrelated_dist)` and `get_dist` will return it. Cheap to fix; expensive to debug later.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The change correctly moves \"more preparation\" out of the resolver and into each command, which is the right architectural move to fix #12603. But the new contract is nowhere stated: the resolver no longer sets `req.prepared` / `needs_more_preparation`, three commands duplicate the same call with no shared abstraction, and `set_dist` / the new `download_info` assignment introduce authoritative state mutations without docstrings or invariant comments. The algorithm is fine; the literate-programming layer is missing. Add docstrings on `resolve()`, `set_dist`, and the prepare.py block, and verify `source_dir` is meaningful at the dry-run call site."
+  }
+}

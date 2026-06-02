@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "vitest__9152",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently assumes `from` is a file path, not a directory or URL",
+        "detail": "The fix changes resolution semantics from resolve(s, from) to resolve(from, '..', s). This is correct only when `from` is a file path with a meaningful parent. If `from` is already a directory, a bare filename, or a URL-like string, the '..' segment will produce a wrong base. The invariant ('from' is always a file path whose parent is the source root) needs to be stated in a comment or asserted; otherwise the next caller will break it.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "readFileSync on every external stack frame is unbounded and uncached",
+        "detail": "getSourceMap is called per frame during error stacktrace parsing. For an error with N frames touching distinct external files, we do N existsSync + N readFileSync + N convert-source-map parses, with no memoization. Errors with deep stacks in node_modules will reread and reparse the same files repeatedly within one error and across errors. A simple Map<file, SourceMap|undefined> cache scoped to the project (or LRU) would make this asymptotically and practically sane.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-187",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Synchronous fs in a hot error-reporting path with no size bound",
+        "detail": "extractSourcemapFromFile does readFileSync on the external module source plus, via fromMapFileSource, on an adjacent .map file. Both can be megabytes (bundled vendor files often are). On a failing test in a large monorepo this can stall the reporter loop noticeably. At minimum, document the assumption that external files are small enough to slurp; ideally guard with a stat-based size cap and fall back to undefined above some threshold.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "320-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns '{}' for missing maps, which is a silent lie",
+        "detail": "When the referenced .map file does not exist, the reader returns '{}' so convert-source-map will not throw. This converts a missing-map condition into a valid-but-empty map and discards the diagnostic. A short literate comment is present, but the function should at least surface the miss via debug logging so users debugging bad sourcemaps in node_modules have a thread to pull.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "337-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Loop invariant / contract of getSourceMap is under-documented",
+        "detail": "The inline comment says 'external modules only' and relies on `!mod?.transformResult` as the discriminator. The actual invariant \u2014 'a file is external iff Vite has a module node without a transformResult' \u2014 is load-bearing and non-obvious; if Vite ever populates an empty transformResult for inlined modules, this silently double-applies source maps. Worth one extra sentence stating the invariant and what breaks if it does not hold.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No targeted unit test for the resolvedSources path change",
+        "detail": "The snapshot test demonstrates end-to-end behavior, which is good, but the actual algorithmic change is one line in DecodedMap whose correctness depends on what `from` looks like in practice. A small unit test feeding DecodedMap a few representative (sources, from) shapes \u2014 absolute file, nested, with '../' in sources \u2014 would pin the invariant and protect against future regressions of the resolve semantics.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The one-line fix in DecodedMap is plausible but rests on an unstated invariant about the shape of `from`; that invariant should be written down and unit-tested rather than inferred from the snapshot diff. The new external-module source map path in test-run.ts is correct in spirit but UNDER-AUDITED on the performance axis: it does synchronous, unbounded, uncached file reads per stack frame during error reporting, which will bite on large node_modules with bundled vendor files. A small memoization cache and a size guard would move this from ASYMPTOTICALLY-OK-PRACTICALLY-SLOW to RIGOROUS. The '{}' fallback for missing maps is a reasonable defensive choice but silently swallows a real diagnostic and deserves a debug-log breadcrumb. Overall: ship-shaped, but tighten the invariants and add caching before this becomes a hot path."
+  }
+}

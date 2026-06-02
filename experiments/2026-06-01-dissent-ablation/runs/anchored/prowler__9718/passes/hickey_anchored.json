@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "prowler__9718",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Service collection complects discovery, IAM fetching, exception logging, and policy interpretation in one nested loop",
+        "detail": "_get_images braids four concerns: listing images, fetching IAM policy, classifying public membership, and constructing the Image value. A pure function taking an IAM policy dict and returning publicly_shared would be testable in isolation; right now the interpretation rule (allAuthenticatedUsers in any binding) is buried inside a try/except inside a paginator. Decompose: pure is_publicly_shared(policy) plus a thin fetch loop.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image value loses the IAM bindings as data; only a derived boolean survives",
+        "detail": "The Image model stores publicly_shared: bool instead of the actual members or bindings. The fact-about-the-world is who has access; the boolean is one interpretation of that fact. Future checks (overly-permissive sharing, specific external domains) will have to re-fetch. Keep the value: store public_members or bindings as data, derive booleans at the check layer.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent IAM-policy failure is indistinguishable from confirmed-not-public",
+        "detail": "When getIamPolicy raises (e.g., the test-image-3 permission-denied case), publicly_shared stays False and the image is reported PASS. Absence of evidence is being complected with evidence of absence. The value model needs a third state (unknown/error) or the check needs to skip the image; reporting PASS on an exception is a correctness bug dressed as a default.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "545-567",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests verify the boolean field, not the policy-to-boolean rule",
+        "detail": "Every check test constructs Image(publicly_shared=True/False) directly and asserts the status echo. The actual logic worth testing - bindings dict to publicly_shared - lives in _get_images and is only exercised by fixture mocks. If you extract a pure classifier, you can table-test the rule (empty bindings, allAuthenticatedUsers, allUsers, mixed members) without MagicMock scaffolding.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Check name encodes a negative; the metadata Description and CheckID disagree slightly on framing",
+        "detail": "compute_image_not_publicly_shared as an identity reads as the desired state, but the FAIL message reports the violation. Minor, but naming the identity after the desired state forces every reader to mentally invert when scanning failures. Not a blocker; flag for the surveyor's naming-convention check across other compute_* checks in this repo.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The check works for the happy path but complects four concerns in _get_images: pagination, IAM fetching, policy interpretation, and value construction. The Image value throws away the underlying bindings and keeps only a derived boolean, which means a second check on the same data will refetch, and an IAM-fetch exception silently degrades to PASS - absence of evidence treated as evidence of absence. Decomposition is straightforward: a pure is_publicly_shared(policy_dict) function, an Image value that stores members as data, and an explicit unknown state when the policy call fails. The tests assert the boolean echo rather than the policy-to-boolean rule, which is the part that actually has logic worth testing."
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "task_id": "pip__13482",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer resets req.prepared/needs_more_preparation, leaving an unstated contract break for downstream consumers.",
+        "detail": "The old resolver loop flipped prepared=True and needs_more_preparation=False after the more-prep pass. That contract is gone with no replacement, and any code that checks those flags after resolve() now sees stale state. Either restore the flag reset inside prepare_linked_requirements_more, document the new contract on resolve(), or audit every reader.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "prepare_linked_requirements_more is duplicated verbatim across three command files with no shared seam.",
+        "detail": "install.py, download.py, and wheel.py each call preparer.prepare_linked_requirements_more at the same logical point. The next command that ships (pip lock, hash, etc.) is one forgotten line away from silently regressing #12603. Fold this into a RequirementSet/finalize helper or expose an explicit two-phase API on the resolver.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/_distribution adds a third source of distribution truth with no invariant or invalidation.",
+        "detail": "get_dist now branches across _distribution, metadata_directory, and local_file_path with no documented precedence. If set_dist is called with a metadata-only dist and the wheel is later unpacked, get_dist keeps returning the stale value. Clear _distribution when metadata_directory/local_file_path changes, or thread the dist as a return value instead of a mutable slot.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "604-620",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is synthesized unconditionally in the metadata-only branch with no test pinning its shape.",
+        "detail": "Setting req.download_info = direct_url_from_link(req.link, req.source_dir) inside _fetch_metadata_only silently defines what --report and pip lock emit, and assumes source_dir is meaningful for a never-downloaded wheel. The policy belongs to the caller, and the resulting DirectUrl (including hashes) needs a test pinning its exact shape for dry-run and real install.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch ships zero new tests for the headline dry-run/lock behavior.",
+        "detail": "The diff claims --dry-run and pip lock no longer fetch full wheels when PEP-658 metadata is available, but the only evidence is a news fragment. A test that runs against an index serving PEP-658 metadata, asserts no wheel bytes were fetched, and pins download_info shape is needed; otherwise the next refactor regresses this silently.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is an undocumented one-line setter with no validation or lifecycle contract.",
+        "detail": "set_dist mutates authoritative state with no docstring stating when it is legal to call, whether re-setting is allowed, or its relation to metadata_directory. Either make it a property that enforces the lifecycle (set once, metadata-only), assert the precondition, or drop the wrapper and assign the attribute directly at the single call site.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-613",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the architectural direction is right: pulling more-preparation out of the resolver so dry-run and pip lock can skip wheel downloads is the correct fix for #12603. But the execution leaks the maintainer cost it was meant to save. The resolver no longer resets prepared/needs_more_preparation, three commands now duplicate the same finalize call with no shared seam, and InstallRequirement gains a third source of distribution truth via set_dist with no invalidation. A fabricated download_info inside the metadata-only branch silently defines what --report and pip lock emit, and the headline behavior ships with no regression test. Needs-work: add the dry-run test, collapse the duplicated call behind one seam, and either restore the flag-reset contract or document and audit it."
+  }
+}

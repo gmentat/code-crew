@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() complects 'leader panicked' with 'no result' and will crash callers.",
+        "detail": "When CompareAndSwap fails and t.result.Load() is nil, run() returns nil. Every caller of run() dereferences the returned *result (output.done, output.Fatal, output.Value). The fix swaps one nil-deref for another, one frame up. The value 'leader panicked, no result exists' needs an explicit representation, not the absence of one.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code and the nil return.",
+        "detail": "The comment reads as a typo for 'did not see a result', but the behavior it documents is itself wrong. The code is making a claim about time and identity (the leader was here, then wasn't) that the comment garbles. If the team cannot state plainly what happened, the decomposition is not yet done.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "t.result is being used as three things at once: leader-election token, result handle, and liveness signal.",
+        "detail": "An atomic pointer that holds 'no leader yet', 'leader running, result pending', and 'leader gone, never coming back' is three identities sharing one place. The race exists because these states are complected into one nil/non-nil distinction. A small state value (or a sentinel for 'abandoned') would make the time semantics explicit instead of inferred from a second Load.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Double Load of t.result between CAS and the nil-check is a time-of-check/time-of-use window left open.",
+        "detail": "After CAS fails, the code Loads t.result again to capture the leader's output. Nothing prevents the leader from clearing t.result between those two operations on a future change, recreating the same class of bug this PR is patching. The fix treats one symptom; the underlying place-oriented protocol still depends on careful sequencing of reads.",
+        "file": "experimental/incremental/task.go",
+        "lines": "454-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection walks caller.path twice to build the same list it already traversed once.",
+        "detail": "checkCycle walks the path to find the match, then re-walks from the head to collect nodes up to the match, then reverses. The value being computed is 'the prefix of path up to and including the matching node, reversed, with q appended'. One pass that accumulates and trims, or building then slicing, expresses that directly. Extraction is good; the shape inside is still doing work twice.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR description defers 'dependency cycles' to a follow-up without naming what current cycle detection actually covers.",
+        "detail": "The note says cycle detection only checks the immediate call path via the path linked list, and a follow-up will handle dependency cycles. That distinction is load-bearing for anyone reading checkCycle later. It belongs in the doc comment on checkCycle, next to the code, not only in the PR body which disappears after merge.",
+        "file": "experimental/incremental/task.go",
+        "lines": "405-406",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR patches a real nil-deref but does so by introducing a new one: run() can now return a bare nil that every caller will dereference. Underneath, t.result is being asked to encode three distinct identities \u2014 unclaimed, in-flight, and abandoned \u2014 through one atomic pointer's nil/non-nil distinction, which is why the race keeps producing these shapes. The cycle-detection extraction is a clean decomplection of two concerns in run(), though the inner double-walk is still doing the same work twice. Recommend representing the 'leader abandoned' state explicitly (sentinel result with Fatal set, or a small state enum) rather than overloading nil, and fixing the contradictory comment before merge."
+  }
+}

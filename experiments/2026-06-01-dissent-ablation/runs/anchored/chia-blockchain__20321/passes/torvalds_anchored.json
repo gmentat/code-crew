@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "summary": "This is a deduplication patch that mostly does the right thing in shape \u2014 collapse three endpoints onto one \u2014 but the diff hides several real behavior changes. Tests were patched with junk `Addition(amount=0, puzzle_hash=zeros)` values to satisfy a new `len(additions) >= 1` invariant, which means the old empty-additions path silently changed semantics. A per-addition `MAX_COIN_AMOUNT` check disappeared without replacement shown. The struct is becoming a god-object with mutually-exclusive CAT/XCH/decorator fields, and the in-process JSON-round-trip via `json_serialize_for_transport` is gratuitous. NEEDS-WORK: split into three patches (helper extract, send_transaction forward, cat_spend forward), prove bounds checks and prefix validation are preserved, and stop discarding `get_wallet` return values with a comment.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests were patched with placeholder Addition values to mask a behavior change in the empty-additions path",
+        "detail": "The two test edits replace `additions=[]` with `additions=[Addition(amount=uint64(0), puzzle_hash=bytes32.zeros)]`. The new `CreateSignedTransaction.__post_init__` requires `len(additions) >= 1`, so the legacy fall-through to `amount`/`inner_address` is now unreachable when callers pass an empty list. Real callers that relied on the old shape will start raising. Add a regression test for the empty-list path or document the breaking change.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Per-addition MAX_COIN_AMOUNT bounds check silently removed from cat_spend",
+        "detail": "Old `cat_spend` explicitly raised `ValueError(f\"Coin amount cannot exceed {MAX_COIN_AMOUNT}\")` for every addition. The new code just forwards `request.additions` to `create_signed_transaction`. Either prove that path enforces the same bound (the diff doesn't show it) or restore the check. Silently dropping bounds validation in a deduplication patch is exactly how subtle regressions ship.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three unrelated changes squashed into one PR \u2014 split it",
+        "detail": "This is at least three patches: (1) extract `cat_discrepancy_validation` helper, (2) extend `CreateSignedTransaction` with CAT/decorator fields, (3) reimplement `send_transaction` and `cat_spend` as forwards. When the inevitable regression bisects to this commit, the maintainer has no way to narrow which change broke what. Split it. The helper extract is a one-line diff; do it first and standalone.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "In-process JSON round-trip via json_serialize_for_transport is gratuitous",
+        "detail": "Both new handlers build a typed `CreateSignedTransaction`, serialize it to JSON via `json_serialize_for_transport`, and pass it to `create_signed_transaction` which re-parses it. Same process, same memory. Either have `create_signed_transaction` accept the typed object, or factor a shared inner function both call. Round-tripping through the wire format internally costs cycles and creates a debugging hazard when serialization rules drift.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction is becoming a god-struct with mutually-exclusive fields",
+        "detail": "The struct now carries `extra_delta`/`tail_reveal`/`tail_solution` (CAT-only) plus `puzzle_decorator` (XCH-only, with a comment admitting the shape is wrong). The struct is the union of every endpoint's params with no enforcement of which combinations make sense. If deprecating other endpoints, define the variants properly (tagged union, separate request types, or `__post_init__` checks). Bad taste: special cases instead of structure.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1916-1963",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Discarded get_wallet return value with `# opportunity to raise` comment is unreadable",
+        "detail": "Calling `self.service.wallet_state_manager.get_wallet(...)` and throwing away the result, annotated with a comment, makes the next maintainer wonder if a deletion was forgotten. Either assign to `_`, or extract a `_assert_wallet_type(id, required_type)` helper that has an honest name. A side-effect-only call to a getter is the kind of cleverness that costs every reader a lookup.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1512, 2012-2013",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

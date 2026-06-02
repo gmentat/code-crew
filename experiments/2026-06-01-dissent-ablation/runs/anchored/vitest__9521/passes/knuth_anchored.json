@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "vitest__9521",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "findChangedFiles return contract is silently widened from 'string[] | null' to optional, masking git failures",
+        "detail": "onTestRunStart coerces a null/undefined result from VitestGit.findChangedFiles into 'this.changedFiles = undefined', which is the same state as 'feature disabled.' The invariant the rest of the code relies on is 'changedFiles set => filter to these files; unset => include everything.' A git failure therefore reports coverage for ALL files \u2014 the opposite of what the user asked for. State the invariant explicitly and fail loudly (or set changedFiles to []) when git lookup fails.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-346",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isIncluded membership test is O(n) per file via Array.includes inside a hot loop",
+        "detail": "Inside isIncluded, 'this.changedFiles.includes(filename)' is linear in the number of changed files and is called once per source file, giving O(F * C) overall where F = files audited, C = changed files. For large monorepos this is the wrong data structure. Promote changedFiles to a Set<string> at assignment time; lookup becomes O(1) and the cache layer still works.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-176",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path-shape invariant between changedFiles and the slashed/cleanUrl filename is never stated or proved",
+        "detail": "isIncluded now compares slash(cleanUrl(_filename)) against entries returned by VitestGit.findChangedFiles. The correctness of the equality test depends on git returning forward-slashed, absolute, query-stripped paths identical in shape to the audited filename \u2014 an unstated invariant. On Windows or with workspace roots this likely diverges silently and reports zero coverage. Normalize both sides through the same slash+resolve pipeline and document the postcondition.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151-176",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "globCache is cleared after changedFiles is set, but cache keys do not encode the changedFiles identity",
+        "detail": "onTestRunStart calls globCache.clear() to invalidate prior decisions, which works for a single run but the cache key (filename) doesn't reflect that 'included' is now a function of (filename, changedFiles). If onTestRunStart is ever called twice in a process (watch mode, reruns) without a clear, stale answers leak. Either re-clear on every assignment or include a generation counter in the key.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-181, 332-346",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform for coverage.changed accepts strings but never validates them as plausible git refs",
+        "detail": "The transform normalizes 'true'/'false'/'yes'/'no' and otherwise passes the string through. A typo like '--coverage.changed HAED' silently becomes the literal ref 'HAED'; VitestGit will fail downstream and (per Issue 1) coverage will then quietly include everything. A literate-programming comment stating 'any non-boolean string is forwarded to git as a ref; validation happens in VitestGit' would at least make the contract explicit.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance rule 'coverage.changed undefined => coverage.changed = changed' lacks a stated invariant for the false case",
+        "detail": "resolveConfig only inherits when coverage.changed === undefined. The test confirms 'changed=false' overrides inheritance, which is the intended behavior, but the code has no comment explaining the three-valued logic (undefined = inherit; false = explicit opt-out; truthy = explicit ref). Future maintainers reading this will not know whether 'undefined' is reachable from user config or only from defaults. Add a one-line invariant comment.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "421-424",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The feature is well-motivated and the tests exercise the happy paths nicely, but several invariants the implementation relies on are unstated, and one data-structure choice (Array.includes against changedFiles in the per-file hot path) is wrong for any non-trivial repository. The most worrying issue is silent semantic collapse: a null return from VitestGit.findChangedFiles is indistinguishable from 'feature disabled,' so a transient git failure flips the behavior from 'only changed files' to 'all files' with no warning. Path-shape equality between git output and the cleanUrl+slash filename is also load-bearing and unproved; on Windows or with non-root cwds this is the kind of bug that would only surface in user reports. Recommend: hoist changedFiles to a Set, fail loudly on git lookup failure, and add a literate comment block above isIncluded stating the (filename, changedFiles) invariant and the path-normalization contract."
+  }
+}

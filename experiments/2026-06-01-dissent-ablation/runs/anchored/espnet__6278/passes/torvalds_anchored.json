@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "espnet__6278",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Arg name mismatch: parser uses --train-config / max_steps but trainer reads trainer_args[\"max_step\"]",
+        "detail": "The docstring promises max_steps but __init__ reads trainer_args[\"max_step\"]. Similarly the trainer also reads save_interval/log_interval but never uses log_interval anywhere. A KeyError on the first run is not a hypothetical; this is what \"does it run?\" catches. Pick one spelling and use it.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "62-66",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "local_rank defaults to None then is passed to torch.cuda.set_device, which will crash on standalone runs",
+        "detail": "argparse default is None; deepspeed launchers usually set it via env or --local_rank, but the script unconditionally calls torch.cuda.set_device(args.local_rank). If the launcher passes LOCAL_RANK in env (common with deepspeed/torchrun), this dies immediately. Read int(os.environ.get(\"LOCAL_RANK\", args.local_rank or 0)) and validate.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "126-127",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Specifier parsing uses str.split() which silently drops multi-token specifiers and whitespace edge cases",
+        "detail": "valid-*-specifier is documented as colon-separated like \"asr:librispeech:valid.json\" but the loop does args.valid_unregistered_specifier.split() with no separator. Multiple specifiers presumably space-separated, but this is never documented and a single empty default \"\" splits to []. Be explicit: pick a separator, document it, and validate.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "208-216",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint dir scan blows up on non-step subdirectories",
+        "detail": "_load_checkpoint filters by \"step_\" in d.name then sorts on int(x.name.split(\"step_\")[-1]). Any directory named e.g. \"step_best\" or partially-written \"step_1234.tmp\" raises ValueError mid-sort and kills resume. Match a strict regex like r\"^step_(\\d+)$\" or skip on parse failure. Resume is exactly the path users hit at 3 AM.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "100-110",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid() all_reduces stats with SUM/world_size, but unevenly-sized validation shards make this a biased mean",
+        "detail": "Each rank averages its own batches into all_stats then SUM/world_size. If shards have different batch counts (common when world_size doesn't divide the valid set), ranks contribute equal weight to the global mean regardless of sample count. Either pad/truncate to equal shard length or weight by sample count. The number you log is not the number you think.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "190-220",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "log_interval is configured and parsed but never read; wandb.log fires every step",
+        "detail": "trainer_args[\"log_interval\"] is stored on self and then never used. Either honor it (only wandb.log every log_interval steps) or delete the knob. Dead config is worse than no config because users assume it works.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "67, 178-184",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Two new files, ~500 lines, doing one thing (DeepSpeed training launcher + trainer). Scope is fine, diff is readable, style matches surrounding espnet2 code. But the code shows signs of not having been actually run end-to-end: a max_step vs max_steps key mismatch, local_rank defaulting to None and getting passed straight to torch.cuda.set_device, a checkpoint resume that ValueErrors on any non-numeric step_ directory, and a configured log_interval that's never consulted. The valid() reduction also computes a per-rank-equal mean that lies when shards differ. NEEDS-WORK: fix the run-blockers, prove resume works with a stray directory in checkpoints/, then resubmit."
+  }
+}

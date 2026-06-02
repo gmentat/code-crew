@@ -1,0 +1,76 @@
+{
+  "task_id": "vega__4219",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "summary": "NEEDS-WORK. The PR is sold as a type-only refactor but ships two real behavior changes: an empty-domain throw replacing silent [NaN, NaN], and a coerceNumber wrapper that maps null to 0 where the old toNumber pipeline would have produced NaN. The peek overload and Domain/Anchor type work are sound, but the non-emptiness invariant is now duplicated (overload + runtime guard) and Domain is typed wider than its true two-endpoint contract. The panel recommends splitting the patch, preserving prior null/NaN semantics or documenting the change, picking one source of truth for non-emptiness, and extending the empty-domain tests to Log/Pow/Symlog.",
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "coerceNumber silently maps null/undefined to 0 where the old toNumber pipeline produced NaN, a semantic shift hidden in a refactor.",
+        "detail": "The original panLinear/zoomLinear used toNumber directly, so non-numeric domain entries propagated as NaN. The new local coerceNumber returns 0 on null via `?? 0`, silently turning bad input into a finite-but-wrong domain. This is a runtime behavior change smuggled into a type-only PR. Preserve toNumber's return shape or document and test the new semantics.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "29-31",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR labeled as type-only but introduces a new runtime throw on empty domains, a real behavior change.",
+        "detail": "The commit claims 'same runtime behavior as before,' yet the diff adds `error('Domain array must not be empty')` on a path that previously returned [NaN, NaN] silently. Callers depending on the old silent path will now throw. Split this out as its own commit with a changelog note, or rename the PR to reflect the behavior change.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 64",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Non-emptiness invariant is enforced twice \u2014 via the peek overload in the type system and via isNonEmpty at runtime.",
+        "detail": "The new peek overload already proves non-emptiness statically, but the body re-proves it with isNonEmpty and a throw. Pick one source of truth: either narrow the parameter to NonEmptyArray<number> and push the check to the edge, or keep the runtime guard and drop the overload ceremony. Today the same fact lives in two places.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "9-11, 33, 64",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Domain is typed `number[]` but the algorithm only consumes two endpoints, hiding the real contract.",
+        "detail": "pan/zoom use only domain[0] and peek(domain), so a caller passing [1,2,3,4] silently has the middle ignored. Either accept NonEmptyArray<number> or a readonly tuple like [number, number] so the type tells the same story as the algorithm. Also, length-1 arrays pass isNonEmpty but violate the two-distinct-endpoints invariant.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "32-33, 46-58",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty-domain test coverage is partial \u2014 only Linear variants are tested; Log/Pow/Symlog are unverified.",
+        "detail": "panLinear and zoomLinear get t.throws cases, but panLog/panPow/panSymlog and their zoom counterparts share the guard transitively through pan/zoom and remain untested. If anyone later inlines or refactors those helpers, the regression will not be caught. A few parameterized cases would lock the contract for all six exported functions.",
+        "file": "packages/vega-util/test/transform-test.js",
+        "lines": "68-77",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Local identity reimplementation forks a concept that already exists in accessors.js.",
+        "detail": "The old code imported identity from './accessors.js'; the new file inlines `const identity: TransformFn = x => x` instead. If accessors.identity has the wrong type, fix it at the source rather than creating a parallel name in this module. Bad taste, and it complicates future refactors that touch the shared helper.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "31",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ]
+  }
+}

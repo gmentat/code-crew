@@ -1,0 +1,76 @@
+{
+  "task_id": "protocompile__645",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Same nil/zero-guard boilerplate is copy-pasted across 15+ accessors instead of being decomplected into one helper",
+        "detail": "Every getter on *File and Type now has the same five-line shape: declare var, nil-check, assign, wrap. Fifteen near-identical blocks is a maintainer-tax. The right shape is either methods on nil receivers, a safeSlice helper, or normalizing nil at construction so the invariant lives in one place rather than N.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "179-330",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DescriptorProto and Transitive rely on an implicit invariant about i.files that is neither documented nor asserted",
+        "detail": "After the nil guard, DescriptorProto calls slicesx.Last(i.files) and Transitive slices i.files[:max(0,len-1)], both assuming the last element is descriptor.proto when non-empty. On a non-nil but empty imports, the caller silently gets a nil File. State the invariant in a comment or document the nil-return contract.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-240",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflection-driven zero test is clever but conflates return-type properties with domain correctness and under-audits the API",
+        "detail": "testZeroAny walks reflect.Method, skips anything with arguments, and special-cases ValueNodeIndex by name. It cannot distinguish should-return-0 from should-return-empty-Indexer, silently excludes methods like ImportFor and MarkUsed, and produces opaque failure messages. A table of explicit (method, expected) pairs would be simpler, document the contract, and be debuggable.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "78-137",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex returning -1 as a sentinel introduces a special case that the test then has to special-case",
+        "detail": "Element.ValueNodeIndex now returns the magic -1 on zero, and testZeroAny has a dedicated branch keyed on the method name. Either name the constant (InvalidNodeIndex) and document the contract, or change the signature to (int, bool). As written the sentinel will leak into callers and the test will drift silently if it changes.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR bundles 'add zero test' and 'fix panics it surfaced' into one commit, hurting future bisection",
+        "detail": "The commit does two things at once. When this regresses, bisect lands on a 200-line change mixing the contract and the fixes. Split into one patch that adds the red test, then per-package patches that make it green. Cleaner history, easier review, easier rollback.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR treats the symptom (panics on zero) without asking why nil *File and zero Type are reachable as valid inputs",
+        "detail": "Making every accessor nil-safe normalizes the confusion between identity (a never-constructed pointer) and value (a constructed-but-empty struct). A constructor-enforced non-nil invariant, an explicit Optional[File], or sentinel normalization at construction would decompose the concern instead of spreading defensive guards across the API surface.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the intent is correct \u2014 zero-value accessors should not panic and a regression test for that contract is good hygiene \u2014 but the execution is under-decomposed. The same five-line nil/zero guard is copy-pasted across roughly fifteen accessors where one helper or a nil-receiver method would suffice, and load-bearing invariants (descriptor.proto trailing in i.files, the -1 sentinel from ValueNodeIndex) live in the repeated structure rather than in named constants or comments. The reflection-driven test is clever but under-audits the API and special-cases a sentinel it should not need; a table-driven test would document the contract and debug cleanly. Verdict: NEEDS-WORK \u2014 split the patch, dedupe the guards, name the sentinel, and consider whether nil *File should be reachable at all."
+  }
+}

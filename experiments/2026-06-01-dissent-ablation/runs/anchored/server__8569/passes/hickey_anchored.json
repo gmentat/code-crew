@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "server__8569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig mutates is_registered in place \u2014 value, identity, and time are complected on a shared object",
+        "detail": "The same TritonLoraConfig instance is held in model metadata and mutated inside _create_trtllm_generate_request (lora_config.is_registered = True). One mutable object represents both 'the catalog entry' (identity) and 'whether the backend has seen these weights yet' (a time-varying fact). Concurrent requests will race: two callers can both observe is_registered=False, both load .npy files, and the 'caching' guarantee evaporates. Decompose: keep TritonLoraConfig as an immutable value; track registered task_ids in a separate concurrency-safe registry owned by the engine.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-241",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Disk I/O for LoRA weights performed synchronously inside the request path",
+        "detail": "_create_trtllm_generate_request now calls np.load() on potentially large .npy files during request construction, on the asyncio event loop. This complects 'build a request value' with 'read files from disk'. The first request for any LoRA blocks the loop; under bursty traffic the racing-registration bug above makes this worse. Pull the load out: register LoRAs eagerly at startup, or do it once behind a lock in a thread, and pass pure arrays into the request builder.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-241",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs complects vLLM-specific and TRT-LLM-specific parsing in one function gated by a string",
+        "detail": "One function now branches on backend == 'vllm' vs else, reads different files, builds different shapes of the same dataclass (some fields populated, some not), and is called from a site that itself second-guesses self.backend vs the per-model backend. That is three concerns braided: discovery, per-backend schema, and backend selection. Split into _parse_vllm_lora_configs and _parse_trtllm_lora_configs returning the same value type, and let the caller pick.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TritonLoraConfig is a partially-populated record whose valid shape depends on backend",
+        "detail": "task_id, path, is_registered are Optional and meaningful only for TRT-LLM; name alone is meaningful for vLLM. Readers must know the backend to know which fields are real. This is the classic 'one class, two concepts' shape. Either two record types (VllmLora, TrtllmLora) or a sum type would make the values self-describing; the current shape pushes that knowledge into every call site.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "task_id assignment is place-oriented and order-dependent across repositories",
+        "detail": "lora_task_id starts at 1 and increments as directories are walked; the identity 'task_id=3' depends on filesystem iteration order across repo_paths. Restarts, repo reordering, or partial reloads will silently reassign ids. Make the task_id derivable from the LoRA name (e.g., a stable hash) or assign it at registration time inside the engine, not while parsing on-disk config.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "627-715",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Debug print statements left in production paths (print(f\"backend: {backend}\") and traceback.format_exc() in routers)",
+        "detail": "print(f'backend: {backend}') runs on every LoRA discovered, and traceback.format_exc() is printed for every ServerError/Exception across three routers. This is debugging scaffolding that complects 'log this for me right now' with 'this is the production error path'. Remove the prints; route real diagnostics through the existing logger so operators can control verbosity.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "684, 706",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature adds real value but braids several concerns that should be kept apart. The most serious is that TritonLoraConfig is a mutable shared record whose is_registered flag is flipped inside the request-construction path \u2014 value, identity, and time semantics are collapsed into one object, and concurrent requests will race on both the flag and the synchronous .npy disk reads done on the event loop. Underneath that, _parse_lora_configs complects vLLM and TRT-LLM discovery in one function and emits a partially-populated record whose valid shape depends on the backend, with task_ids assigned by filesystem walk order. The fix is decomposition: separate per-backend parsers returning self-describing values, an explicit registry owning 'has this been sent to the backend yet', and eager (or properly-locked) weight loading. None of this is exotic \u2014 it is the ordinary work of pulling values, identities, and time apart so the concurrent case is not accidental."
+  }
+}

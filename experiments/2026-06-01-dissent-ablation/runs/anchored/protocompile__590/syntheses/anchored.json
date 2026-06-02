@@ -1,0 +1,78 @@
+{
+  "task_id": "protocompile__590",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() when leader panicked just relocates the nil-deref one frame up.",
+        "detail": "When CAS fails and t.result.Load() is nil, run() returns nil. Every caller dereferences the returned *result (output.done, output.Fatal, output.Value). The fix swaps one nil-deref for another. Synthesize a failed-result sentinel with output.Fatal set instead of returning nil, and enforce the postcondition that run() never returns nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race window remains open between CAS-fail and Load of t.result.",
+        "detail": "The fix narrows but does not close the time-of-check/time-of-use window. The leader can still panic and clear t.result between the failed CAS and the subsequent Load. The underlying protocol overloads one atomic pointer's nil/non-nil distinction to encode multiple states, so the same class of bug can recur. Represent 'leader abandoned' explicitly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "454-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' is the inverse of what the code does.",
+        "detail": "The branch is taken precisely when we did NOT see a result, but the comment claims we did. This is a typo that inverts intent and will mislead the next maintainer about which branch is which. Fix the comment and write down the actual invariant for the panic path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test exercises the panicking-leader race the PR claims to fix.",
+        "detail": "The commit message describes a specific race (leader panics, sets result to nil, waiter dereferences), but the diff adds no test that injects a panicking query with concurrent waiters and asserts no nil-deref. Prose in the PR description is not a regression suite. Add a harness that panics the leader and asserts waiters receive a propagated error.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "t.result is overloaded to encode unclaimed, in-flight, and abandoned states through one nil/non-nil distinction.",
+        "detail": "The race exists because three identities share one place: leader-election token, result handle, and liveness signal. A small state value or an explicit sentinel for 'abandoned' would make the time semantics explicit instead of inferred from a second Load. This is the root shape that keeps producing nil-deref bugs.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle walks caller.path twice to build a list it already traversed once.",
+        "detail": "The extracted checkCycle walks the path to find the match, then re-walks from the head to collect nodes up to the match. The extraction is a readability win, but one pass that accumulates and trims (or builds then slices) expresses the computation directly at the same line count. Also missing a stated loop invariant.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel converges: the PR identifies a real nil-deref race but the fix is incomplete and introduces a new failure mode. Returning bare nil from run() just relocates the crash one frame up, since every caller dereferences the returned *result \u2014 synthesize a failed-result sentinel instead. The race window between CAS-fail and the second Load is narrowed but not closed, because t.result is overloaded to encode three distinct states through one atomic pointer. A comment typo inverts the intent of the panic branch, and no regression test reproduces the panicking-leader scenario the commit message describes. NEEDS-WORK before merge."
+  }
+}

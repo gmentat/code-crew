@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check filename and CHANGELOG name mismatch metadata title 'is not publicly shared'",
+        "detail": "The check is named compute_image_not_publicly_shared (a property that should be true on PASS), but the PR title and earlier description say compute_image_publicly_shared. Worse, the semantic naming convention matters: the PASS state should match the check name. Verify the naming is consistent across metadata.json CheckID, directory, class, and CHANGELOG before merge.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.py",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-image getIamPolicy call is O(n) sequential network round-trips with no batching",
+        "detail": "_get_images iterates every custom image and issues a synchronous getIamPolicy RPC inside the list loop. For projects with many images this is O(n) latency-bound where n = image count. The surrounding service uses __threading_call__ for similar fan-outs; this method does not. Either parallelize per-image IAM lookups or document the cost; the current code is asymptotically linear but practically slow.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare Exception swallow on getIamPolicy treats permission denied as 'not public'",
+        "detail": "When getIamPolicy fails (e.g., 403, transient error, quota), the except logs and falls through with publicly_shared=False. That is a silent false-negative: an image whose policy cannot be read is reported as PASS. The invariant the check claims (publicly_shared correctly reflects IAM state) does not hold on error. Surface unknown state explicitly or skip the image rather than asserting it is safe.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "548-572",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Loop invariant for IAM-binding scan is not stated in a comment",
+        "detail": "The inner loop sets publicly_shared=True and breaks on first match. The invariant ('publicly_shared is True iff some prior binding contained allAuthenticatedUsers') is correct but unstated. One literate comment above the for-binding loop naming what is being established would make the code provably readable rather than tried-readable.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "555-565",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests never exercise the real _get_images extraction logic end-to-end",
+        "detail": "The check tests inject pre-built Image objects with publicly_shared already set; the binding-parsing logic in _get_images is only tested implicitly via the service test (truncated, unverifiable here). The actual decision point \u2014 'does allAuthenticatedUsers in members trigger publicly_shared' \u2014 should have a direct unit test against a fake IAM policy dict, including edge cases like empty bindings, allUsers (should be ignored per the documented restriction but verified), and multiple bindings.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model loses the binding role; downstream cannot distinguish viewer from owner",
+        "detail": "The Image model captures only a boolean publicly_shared. The IAM policy contains role + members; a public viewer binding and a public owner binding both collapse to True. For a security check that may inform remediation priority, preserving the offending role(s) in the model would let the report distinguish severities. Cheap to add, hard to retrofit.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The check is straightforward and the algorithm (scan IAM bindings for allAuthenticatedUsers) is correct in the happy path, but the rigor is thin. UNDER-AUDITED: the loop invariant is unstated, error handling silently maps \"policy unreadable\" to PASS, and per-image getIamPolicy is sequential while the rest of the service threads similar fan-outs (ASYMPTOTICALLY-OK-PRACTICALLY-SLOW). Tests bypass the binding-parsing logic by injecting pre-set booleans, so the actual decision rule is not directly covered. The Image model also discards binding roles, collapsing security-relevant detail. None of this is fatal; all of it would be cheap to fix before merge."
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "qutebrowser__8845",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Command names in tests don't match the Python identifiers defined in commands.py",
+        "detail": "The methods are named `quickmarks_reload` and `bookmarks_reload` (underscores), which qutebrowser exposes as `:quickmarks-reload` and `:bookmarks-reload`. The feature tests use those hyphenated forms, which is consistent \u2014 but worth verifying against the project's naming convention (other commands use singular `:quickmark-add`, `:bookmark-add`). The naming complects two facts: the command's identity and its plurality. Pick one form across the family.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1197, 1361-1368",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "reload() silently swallows partial-parse failures, complecting load semantics with error semantics",
+        "detail": "EASY-NOT-SIMPLE. `reload()` clears marks first, then re-parses. If `_init_lineparser` or `_parse_line` raises midway, the user is left with an empty or half-populated mark set and no signal about what happened. The value (old marks) and the operation (replace from disk) are entangled. Build the new map first as a pure value, then swap atomically \u2014 only emit `changed` on success.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "102-113",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Parsing loop is the same code in two places via call rather than as a named pure function",
+        "detail": "The `__init__` now calls `reload()`, which re-clears an already-empty OrderedDict and emits `changed` during construction \u2014 a signal nobody is connected to yet, but still a semantic shift. A small pure `_parse_file(lineparser) -> OrderedDict` would let both `__init__` and `reload` consume the same value-producing function without the clear/emit dance on first load.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "67-72, 102-113",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test exercises file I/O and signal plumbing instead of the parse-as-value transformation",
+        "detail": "TDD-AS-DESIGN. `test_reload` writes a file, constructs a manager, rewrites the file, calls reload, and asserts on `marks.items()`. It proves the wiring works but says nothing about edge cases: malformed lines mid-reload, duplicate keys, file disappearing. A pure parse function would be trivially testable against many input values without touching disk or qtbot.",
+        "file": "tests/unit/browser/test_urlmarks.py",
+        "lines": "116-132",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two near-identical command methods could be one data-driven dispatch",
+        "detail": "`quickmarks_reload` and `bookmarks_reload` differ only in the objreg key and the message string. Not a blocker \u2014 qutebrowser's command decorator pattern makes a shared helper awkward \u2014 but the duplication is a small signal that the manager identity ('quickmark-manager' vs 'bookmark-manager') is incidental to the operation (reload from disk and announce).",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1197, 1361-1368",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "COMPLECTED in a small way: `reload()` braids three concerns \u2014 clearing existing state, re-reading the file, and emitting a change signal \u2014 with no atomic boundary, so a parse error mid-reload leaves the user with a corrupted in-memory mark set. The simple decomposition is to parse the file into a fresh immutable OrderedDict as a value, then swap-and-emit once. The duplication between `quickmarks_reload` and `bookmarks_reload` is minor and acceptable. The test proves the plumbing works but not that the parse is correct; a pure parse function would invert that. Ship-adjacent \u2014 the atomic-swap fix is the only real concern before merge."
+  }
+}

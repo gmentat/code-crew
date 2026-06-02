@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests changed to pass a zero-amount, zero-puzzlehash Addition to satisfy CreateSignedTransaction's len>=1 invariant",
+        "detail": "The test diff replaces additions=[] with a dummy Addition(amount=0, puzzle_hash=zeros). That's not a test update; that's a workaround to slip past CreateSignedTransaction.__post_init__. It hides the fact that send_transaction and cat_spend (single-output mode) now construct a one-element additions list internally, while the caller's empty list is silently smuggled through. Decomplect: the test should exercise the real call shape, not a sentinel coin.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction now complects three independent concerns: XCH transfers, CAT discrepancy, and clawback decoration",
+        "detail": "One request type now carries extra_delta, tail_reveal, tail_solution, and puzzle_decorator alongside generic additions. The class is no longer one concept; it is three braided together, gated by None checks and per-property validators. Reviewer would refuse the framing that this is 'reducing duplication.' It is centralizing duplication into a god-request. A small dispatch over data-described intents would be simpler, even if less easy.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1910-1962",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation returns a tuple with three type: ignore arg-type suppressions",
+        "detail": "The helper is a pure function over three optional values, which is the right shape. But the body still needs three type: ignore comments because the predicate (all-None or none-None) is not expressed in the types. Lift the precondition into a small value: a frozen CatDiscrepancy dataclass with a from_optionals classmethod that returns Optional[CatDiscrepancy]. Then the int/Program coercions live with the value and mypy stops needing apologies.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction and cat_spend call get_wallet purely for its side effect of raising",
+        "detail": "The comment '# opportunity to raise' is honest about what is happening: an identity lookup is being used as a validation effect, then discarded. That complects identity resolution with input validation. Either route through a named validate_wallet_id(wallet_id, required_type) that returns None and documents the effect, or let create_signed_transaction perform the check and stop doing it twice. Right now the wallet lookup runs twice on every call.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1512, 2012-2013",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Forwarding goes through json_serialize_for_transport and back, making in-process calls pay JSON-roundtrip cost and time semantics",
+        "detail": "send_transaction builds a typed CreateSignedTransaction value, then serializes it for transport, then create_signed_transaction deserializes it. The value, the wire format, and the internal call have been complected. In-process callers should compose at the value layer; only the RPC boundary should touch JSON. As written, every internal forward pays serialization cost and inherits any wire-only coercions.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1514-1532, 2014-2042",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "puzzle_decorator typed as list[ClawbackPuzzleDecoratorOverride] with a comment admitting the type is a 'slight hack'",
+        "detail": "The field's own comment says it was meant to be polymorphic but only one variant exists, so the type was narrowed as a hack. That is incidental complexity wearing a TODO. Either commit to Clawback as the name (rename the field) or keep it as data (list[dict]) with an explicit validator. The current shape lies about its generality and will be hard to widen later without a migration.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1922-1926",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR labels itself as deduplication, but it is centralization: CreateSignedTransaction is now a god-request carrying XCH, CAT, and clawback concerns braided together, gated by None checks and three type: ignore suppressions. The forwarders use get_wallet purely as a validation side effect, then round-trip through JSON for an in-process call, complecting value, wire format, and identity lookup. The test change \u2014 inserting a sentinel zero-amount Addition to satisfy a new invariant \u2014 is a tell that the abstraction does not fit the callers it claims to subsume. EASY-NOT-SIMPLE: familiar shape, but not actually decomposed. The question that should have been asked first: what is the real shared value \u2014 and would a small typed CatDiscrepancy plus a value-layer forwarder beat one widened request type?"
+  }
+}

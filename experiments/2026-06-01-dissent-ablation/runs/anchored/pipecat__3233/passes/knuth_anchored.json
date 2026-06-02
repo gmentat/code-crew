@@ -1,0 +1,72 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "pipecat__3233",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Error logging removed without replacement, weakening observability",
+        "detail": "The old code logged each error type (logger.error/warning) before pushing the frame. The consolidated branch only calls push_error and drops the explicit logger.error for error/auth_error/quota_exceeded_error. Push_error may or may not surface to logs depending on downstream handlers; the original invariant 'every error is observable in logs' is no longer preserved. Add a single logger.error inside the consolidated branch.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-741",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Duplicate 'transcriber_error' entry in message_type tuple",
+        "detail": "The tuple lists 'transcriber_error' twice. Harmless semantically (membership test still works), but it signals the list was assembled by hand without audit. A reader will pause on it; a careful person reviewing this would catch it. Deduplicate, and consider a module-level frozenset constant ELEVENLABS_ERROR_TYPES so the set is named, testable, and not buried inside an elif.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-740",
+        "flagged_by": [
+          "knuke",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Loop termination invariant for _receive_messages is now implicit and unstated",
+        "detail": "Previously the try/except around _process_messages made the termination contract explicit: any exception exits, outer reconnect loop retries. Now _receive_messages relies on 'async for message in self._get_websocket()' raising or returning on disconnect, and the inner try/except swallows everything else. The termination/reconnect invariant should be stated in a docstring comment so the next maintainer does not reintroduce the infinite-loop bug.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "693-705",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inner try/except still swallows all exceptions, including those that should propagate",
+        "detail": "The 'except Exception as e: logger.error(...)' inside the async-for loop catches everything, including CancelledError-adjacent or programmer errors. The PR's stated goal was to stop swallowing disconnects; the remaining broad except can re-mask other faults. Narrow to (json.JSONDecodeError, KeyError, ValueError) or re-raise after logging when the cause is not a known data error.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "695-702",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "error_msg default uses message_type but loses the raw payload on unknown shapes",
+        "detail": "data.get('error', f'Unknown error - {message_type}') falls back to a synthesized string when the 'error' key is missing, but ElevenLabs may put detail under other keys (code, message, details). Consider including data.get('message') or repr(data) in the fallback so a debugger has the raw payload. Cheap, and protects against schema drift across the 14 error types.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "741-742",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changelog file missing trailing newline",
+        "detail": "changelog/3233.fixed.md ends without a newline ('\\ No newline at end of file'). Cosmetic, but most repo tooling and POSIX conventions expect a trailing newline; many lint configs flag it. One-character fix.",
+        "file": "changelog/3233.fixed.md",
+        "lines": "1-2",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The fix correctly identifies and removes a real bug \u2014 the outer try/except that swallowed websocket disconnects and trapped the reconnect loop. That is a clean win. However, the consolidation of error branches silently drops the per-branch logger.error calls, so the new code pushes error frames without logging them; the previous observability invariant ('every error type is logged') is no longer maintained. The error_type tuple contains a duplicate ('transcriber_error' appears twice), which signals the list was hand-assembled without audit and argues for a named module-level frozenset. The inner except is still broad enough to mask non-disconnect faults, and the termination/reconnect contract of _receive_messages is now implicit; both deserve a one-line literate comment so the next maintainer does not reintroduce the bug this PR fixes. None of these are blockers; the core fix is right."
+  }
+}

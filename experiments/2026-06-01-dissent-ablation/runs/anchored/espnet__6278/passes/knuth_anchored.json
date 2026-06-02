@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "espnet__6278",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Checkpoint sort key crashes on any non-step_N directory in checkpoints/",
+        "detail": "_load_checkpoint filters with 'step_' in d.name, then sorts via int(name.split('step_')[-1]). Any auxiliary directory (tmp_step_1000_bak, step_1000.old, step_latest) passes the filter but raises ValueError in the sort key, killing resume. The invariant the code assumes ('name ends with step_<int>') is never stated and not enforced by the filter. Use a regex match and skip non-matches.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "115-126",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Validation aggregation computes unweighted mean of per-batch means",
+        "detail": "all_stats accumulates one float per batch and averages them at the end. For any per-sample metric (loss, accuracy, token-level), this is only correct when all validation batches have identical sample counts; with variable-length speech batches they don't. The reported metric is then a biased estimator of the dataset mean. Either weight by batch size (tracked alongside) or sum tensors and divide by total count.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "198-225",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats mutates the model's output tensors in place",
+        "detail": "stats comes directly from out['stats'] without a clone. all_reduce(async_op=True) writes into those tensors and divides by world_size, so any reference the model retained (e.g., for logging, accumulation, autograd graph fragments) is silently corrupted across ranks. State the invariant 'stats are owned by the caller' explicitly by cloning before reducing, or document the contract loudly at the call site.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "139-168",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Argument name mismatch: docstring says max_steps, code reads max_step",
+        "detail": "The __init__ docstring lists 'max_steps' and 'val_interval' as required trainer_args keys, but the code reads trainer_args['max_step'] and never uses val_interval (valid() runs every save_interval implicitly). A user following the documented contract gets a KeyError on startup. Either rename the keys or fix the docstring; the documented invariant must match the code.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "39-60",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid() always runs over the entire validation set every save_interval steps",
+        "detail": "run() interleaves train() and valid() inside one loop with no guard. Each save_interval steps the trainer walks every batch of every validation factory, which on real speech datasets is minutes to hours of GPU time the user did not ask for. State the cadence explicitly (e.g., val_interval) and gate valid() on global_step % val_interval == 0; right now the cost is hidden and not configurable.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "170-184",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "torch.cuda.set_device(args.local_rank) runs before local_rank is validated as int",
+        "detail": "args.local_rank defaults to None; if the launcher fails to set it (or sets LOCAL_RANK env without --local_rank), set_device(None) raises a TypeError with no diagnostic context. A two-line check ('assert args.local_rank is not None, ...') turns a confusing crash into a readable error. Small literate-comment win.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "151-153",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The trainer plumbing is straightforward and mostly readable, but several invariants are unstated and bite at the boundaries: checkpoint discovery assumes a name format the filter does not enforce, validation aggregation assumes equal batch sizes, _all_reduce_stats assumes caller ownership of tensors, and the docstring contract for trainer_args drifts from the code. valid() also runs unconditionally inside the save_interval loop, making validation cost a hidden and unconfigurable function of save cadence. None of these are algorithmically deep; they are the kind of thing a literate comment plus a small guard would fix, and they should be fixed before this becomes the reference DeepSpeed path for SpeechLM."
+  }
+}

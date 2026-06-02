@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Class name in code (AWSAgentCoreProcessor) does not match PR title (AWSBedrockAgentCoreProcessor) and constructor uses camelCase agentArn",
+        "detail": "The PR title promises AWSBedrockAgentCoreProcessor but the class is named AWSAgentCoreProcessor. The constructor parameter agentArn is camelCase in a Python codebase that is otherwise PEP8 snake_case. Pick one name, pick snake_case (agent_arn), and don't ship a public API you'll have to deprecate next week.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "92-104",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "New boto3 client opened on every single inbound context frame",
+        "detail": "process_frame opens `async with self._aws_session.client(...)` per LLMContextFrame. That's a fresh TLS handshake and credential resolution for every turn of conversation. Create the client once in setup/start and reuse it, or at minimum cache it. This is the kind of code that looks fine in a demo and melts in production.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "192-198",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Bare json.loads in default_response_to_output_transformer will crash the pipeline on any non-JSON line",
+        "detail": "AgentCore streams arbitrary `data:` lines. The default transformer does json.loads with no try/except. One malformed chunk and process_frame raises out of an async for, leaving _output_response_open=True and a dangling close task. Wrap it, log it, drop the line, keep going. Real systems get garbage on the wire.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-77",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hardcoded `line[6:]` and brittle SSE parsing instead of treating the prefix as a token",
+        "detail": "Splitting on \"\\n\" and slicing six characters reinvents SSE parsing badly. SSE allows `data:` with no space, multiple data lines per event, comments starting with `:`, blank-line event terminators. Use line.removeprefix(\"data: \") at minimum, and acknowledge this is an SSE stream rather than pretending it's line-delimited JSON.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "215-225",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "1.0s timeout heuristic to close LLMFullResponse is a special case that shouldn't exist",
+        "detail": "The processor invents a wall-clock timer to decide when a response is \"done,\" then also closes explicitly at the end of the async for. The stream itself tells you when it ends \u2014 that's what `async for` finishing means. Push the End frame once, after the loop. Bad taste: special case for something the protocol already gives you.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "147-176",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Diff bundles unrelated dependency bump (aioboto3 15.0 -> 15.5, boto3 1.38 -> 1.40) with new feature",
+        "detail": "uv.lock churn on boto3/botocore/s3transfer/aiobotocore is mixed into a feature PR. If the new processor requires aioboto3 ~=15.5, say so in the commit message and split the bump from the feature so a future bisect lands on one thing. Three-patches problem.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The patch does a real thing \u2014 wires Bedrock AgentCore into a FrameProcessor \u2014 but it ships with a name mismatch against its own PR title, a camelCase public parameter in a snake_case codebase, a client opened per frame, an unguarded json.loads on streamed data, and a wall-clock timer doing work that `async for` ending should be doing. The SSE parsing is hand-rolled and brittle. The dependency bump is bundled with the feature instead of split. Fix the lifecycle (client created once, End frame pushed once when the stream ends), make the default response transformer robust to garbage, rename to snake_case and match the title, then resubmit."
+  }
+}

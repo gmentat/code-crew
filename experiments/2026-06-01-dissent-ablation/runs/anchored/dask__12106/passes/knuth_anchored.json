@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` and misuse of PerformanceWarning as an exception",
+        "detail": "The `raise PerformanceWarning(msg)` is immediately followed by `break`, which is dead code \u2014 control never reaches it. More fundamentally, PerformanceWarning is a Warning subclass being raised as an exception; the function name and test (`pytest.raises(PerformanceWarning)`) conflate `warnings.warn` semantics with `raise`. Pick one contract and state it in the docstring.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3923",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Asymptotically-wrong `safe_chunk_size` formula multiplies all axes together",
+        "detail": "`np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` computes the byte size of a full N-dimensional shard, but the loop is per-axis and the divisibility failure is per-axis. For a 3D array with shard (12,12,12) and 8-byte dtype the message recommends 13824 bytes when a single axis misalignment may need far less. The arithmetic doesn't survive audit; state and verify the invariant `chunk_bytes >= prod(shard_shape) * itemsize` explicitly.",
+        "file": "dask/array/core.py",
+        "lines": "3906-3908",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop invariant for the divisibility check is never stated and only inspects `dw[0]`",
+        "detail": "The check reads `dw[0]` as the \"nominal\" dask chunk size, but `normalize_chunks` can return heterogeneous tuples (e.g. last chunk is the remainder). The implicit invariant \u2014 \"every interior chunk along axis ax is a multiple of zw\" \u2014 is neither written down nor verified. A literate comment naming the invariant and a check over all-but-last entries would make the intent provable rather than tried.",
+        "file": "dask/array/core.py",
+        "lines": "3898-3905",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Double-negative `not nominal_dask_chunk_size % zw == 0` is unreadable",
+        "detail": "Due to Python precedence this parses as `not ((x % zw) == 0)`, which happens to be correct, but it forces the reader to re-derive the precedence rules. Write `if nominal_dask_chunk_size % zw != 0:` \u2014 the reader is the constraint, and this is library code that will outlive its author.",
+        "file": "dask/array/core.py",
+        "lines": "3905",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test asserts `pytest.raises` on a class named `PerformanceWarning` \u2014 contract confusion leaks into tests",
+        "detail": "`test_zarr_risky_shards_warns` is named \"warns\" but uses `pytest.raises`, not `pytest.warns`. Either the production code should `warnings.warn(...)` and the test use `pytest.warns`, or the class should be renamed (e.g. `ShardAlignmentError`) and the test renamed accordingly. The current pairing teaches future maintainers the wrong mental model.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5205-5215",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Open design question in PR description is not resolved in code or comment",
+        "detail": "The author asks whether an exception is appropriate when global `array.chunk-size` competes with shard shape; the diff silently chooses \"raise\" without recording the decision near the raise site. A short literate comment stating the policy (\"global config wins for safety; we refuse rather than silently misalign\") would make the next maintainer's job tractable.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3922",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The change is directionally right \u2014 using shard shape as `previous_chunks` to let `auto_chunks` pick a shard-aligned multiple is a sound data-structure-first move. But the safety net has two audit failures: the `raise` is followed by an unreachable `break`, and the recommended `safe_chunk_size` multiplies all shard dimensions together while the divisibility check is per-axis, so the suggested config value is asymptotically wrong for N>1. The loop invariant (\"every interior dask chunk along each axis is a multiple of the shard length along that axis\") is never stated, and the code inspects only `dw[0]` as if it were representative. Verdict: UNDER-AUDITED, with one ASYMPTOTICALLY-WRONG arithmetic bug in the user-facing remediation message. Fix the invariant and the bytes formula, decide between raise-vs-warn, and add one literate comment block; the rest is fine."
+  }
+}

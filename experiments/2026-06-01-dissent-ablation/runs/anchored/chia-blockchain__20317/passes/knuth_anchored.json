@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "chia-blockchain__20317",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "sign_message branches on (is_hex, safe_mode) with no invariant comment or table",
+        "detail": "signing_mode_enum() maps two booleans to four SigningMode values via if/elif chain. The mapping is not obviously correct without staring at it: safe_mode=True implies CHIP_0002 (with or without hex), safe_mode=False implies BLS augmentation. A small truth-table comment above the function would make the invariant inspectable; right now the reader must reverse-engineer it.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "~398-407",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sign_message default-branch silently treats unknown modes as CHIP_0002 UTF-8",
+        "detail": "In signing.py sign_message(), the final else branch handles 'any mode not explicitly named' as CHIP_0002 UTF-8 prefix-hashing. SigningMode is an enum; an unmatched value indicates the caller passed something the function does not actually support. Better to raise ValueError as verify_signature() does (asymmetric handling between the two functions is itself a smell). Silent fallthrough hides bugs in callers.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "~76-84",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated four-way mode-to-bytes computation between sign_message and verify_signature",
+        "detail": "The message-encoding logic appears twice in the same new file with subtly different mode coverage (sign_message has CHIP_0002_HEX_INPUT; verify_signature groups CHIP_0002 with CHIP_0002_P2_DELEGATED_CONDITIONS). Extracting an _encode_message(mode, message) helper would make divergence impossible and let the literate comment about CHIP-0002 live in exactly one place.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "23-43, 76-84",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "verify_signature docstring is a stub copied from old RPC handler",
+        "detail": "The docstring says ':param request:' but the function no longer takes a request object; it takes five keyword args. For a freshly extracted library function this is exactly the place to write the literate-programming comment: what each parameter means, what the address check enforces, and which error strings callers may rely on. The stale stub is worse than no docstring.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "19-24",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test_sign_message_by_nft_id asserts signatures but never exercises verify_signature()",
+        "detail": "The new test reconstructs the expected message bytes in each branch and calls AugSchemeMPL.verify directly. That validates the signer but does not cross-check the new verify_signature() library function against the new sign_message() library function. A round-trip assertion (sign then verify_signature) on each mode would catch mode-mapping drift between the two halves of the new module with one extra line per case.",
+        "file": "chia/_tests/wallet/nft_wallet/test_nft_wallet.py",
+        "lines": "~720-785",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test_sign_message_by_address does not assert verify_signature result",
+        "detail": "The test awaits client.verify_signature(...) and discards the return value. verify_signature returns VerifySignatureResponse(isValid=..., error=...); a False result with an error string would pass this test silently. Add `assert resp.isValid is True` to make the test actually witness the property it claims to test.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "~3150-3163",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The extraction itself is clean and the new chia/wallet/util/signing.py is the right shape: a small library with sign_message() and verify_signature() that the RPC and wallets delegate to. UNDER-AUDITED on two fronts. First, the (is_hex, safe_mode) -> SigningMode mapping is encoded as a four-arm if/elif with no invariant comment, and the same four-mode dispatch appears twice in the new file (once in sign_message, once in verify_signature) with subtly different groupings \u2014 a helper would make divergence impossible. Second, sign_message silently falls through to CHIP_0002 UTF-8 for any unrecognized mode while verify_signature raises; the two halves of the same module should agree on what an unknown enum value means. Tests are a real improvement (sign_message_by_id was previously untested) but verify the signer in isolation rather than round-tripping signer-then-verifier, and test_sign_message_by_address never asserts the response's isValid flag, so a False result would pass silently. NEEDS-LITERATE-COMMENT on the verify_signature docstring, which still says ':param request:' from its previous life as an RPC handler."
+  }
+}

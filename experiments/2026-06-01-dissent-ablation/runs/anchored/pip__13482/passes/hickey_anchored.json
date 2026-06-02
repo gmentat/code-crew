@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer marks requirements as prepared, silently shifting that responsibility to every caller",
+        "detail": "The resolver used to set req.prepared = True and req.needs_more_preparation = False after the more-prep step. Removing it without giving callers a single place to do the same complects 'resolved' with 'prepared' across three command files. Each command must now remember to call prepare_linked_requirements_more in the right place and order. That is place-oriented state spread across files instead of one explicit transition.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InstallRequirement now has three overlapping sources of distribution truth",
+        "detail": "get_dist() now branches over _distribution, metadata_directory, and local_file_path. These are three identities for what is conceptually one value: 'the distribution this requirement represents at time T.' Whichever was set last wins, with no invariant stating why. This is COMPLECTED state where one explicit field (or a discriminated value) would make the time semantics clear.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "604-620",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info side-effect buried inside _fetch_metadata_only path leaks dry-run policy into the preparer",
+        "detail": "Setting req.download_info = direct_url_from_link(...) inside prepare_linked_requirement is the preparer deciding what 'dry-run mode' means for downstream commands like pip lock and --report. That policy belongs to the caller, not the metadata fetch branch. This complects metadata fetching, download tracking, and reporting contracts in one if-block.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist/get_dist accessor pair re-introduces place-oriented mutation where a value would do",
+        "detail": "The new _distribution field plus setter/getter is a mutable slot on a long-lived object, used to communicate between two phases of the same pipeline. A return value from _fetch_metadata_only threaded through the caller would express the same fact without an extra identity. The accessor pair is EASY-NOT-SIMPLE: familiar OO shape, not actually decomposed.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 611-613",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "prepare_linked_requirements_more call is duplicated verbatim across download, install, and wheel commands",
+        "detail": "Three commands now contain the same one-liner in the same logical position. That is incidental duplication arising because the resolver stopped doing the step and no single seam took it over. A small explicit 'finalize(requirement_set)' function, or having the resolver expose an explicit two-phase API, would name the transition once.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test or assertion encodes the new invariant that dry-run must not download wheels",
+        "detail": "The whole point of the change is a behavioral guarantee: under --dry-run with PEP-658 metadata, no full wheel is fetched. That guarantee currently lives only in the absence of a call site. A test that asserts the network/file fetch did not happen would pin the property; without it, any future caller re-adding prepare_linked_requirements_more silently regresses #12603.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The change correctly identifies that 'resolve' and 'fully prepare' were complected in the resolver and pulls them apart \u2014 that direction is right. But the decomposition stops halfway. The resolver no longer finalizes prepared/needs_more_preparation state, yet no single seam takes that role, so three commands each carry the same one-liner and the invariant lives in their collective memory. Inside InstallRequirement, a new _distribution slot plus set_dist/get_dist adds a third source of truth for 'the distribution', and a download_info side-effect inside the metadata-fetch branch quietly encodes dry-run policy in the preparer. The fix is closer to simple than what was there, but it is still place-oriented; a small explicit finalize step and a single discriminated distribution value would make the time semantics honest."
+  }
+}

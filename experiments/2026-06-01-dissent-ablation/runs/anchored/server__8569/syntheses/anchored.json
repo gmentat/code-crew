@@ -1,0 +1,78 @@
+{
+  "task_id": "server__8569",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "is_registered mutation on shared TritonLoraConfig races under concurrent requests",
+        "detail": "TritonLoraConfig is shared across requests and is_registered is flipped to True after issuing the first request, but weights only ride that single in-flight call. Concurrent first-time requests can both observe False and both load weights, or later requests can ship only the task_id before the backend has actually cached the adapter. Needs a lock, an explicit backend ack, or an engine-owned registry.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-243",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Synchronous np.load of LoRA weights blocks the asyncio event loop on every cold request",
+        "detail": "_create_trtllm_generate_request calls np.load on .lora_weights.npy and .lora_config.npy during request construction on the event loop. For multi-MB adapters this stalls the loop and compounds the registration race. Pre-load eagerly at parse time, or offload via run_in_executor, so request building stays a pure value transformation.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-241",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_task_id assignment is order-dependent and not unique across model repositories",
+        "detail": "task_id starts at 1 and increments via filesystem walk inside _parse_lora_configs, which is called per base model. Two base models on the TRT-LLM backend will collide on ids 1, 2, 3..., and restarts or repo reordering silently reassign ids. Derive task_id from a stable hash of the LoRA name/path, or assign at registration time in the engine.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "619-715",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print statements left in production hot paths",
+        "detail": "print(f\"backend: {backend}\") fires inside the per-LoRA discovery loop, and print(traceback.format_exc()) was added to three FastAPI router exception handlers. These bypass the logger, cannot be filtered, and spam stdout. Route through the existing logger at debug/error level so operators control verbosity.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "682-712",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stale return type annotation on _parse_lora_configs misleads readers and type checkers",
+        "detail": "Signature says `-> None | List[tuple[str, str]]` but the function actually returns `List[TritonLoraConfig]` or None. The annotation is a leftover from the rename and is now actively wrong. Update to `Optional[List[TritonLoraConfig]]`.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_get_lora_config can AttributeError on unknown model_name and has a wrong return annotation",
+        "detail": "self.model_metadata.get(model_name) can return None, after which `.lora_configs` raises AttributeError instead of a clean ClientError or None. The signature also says `-> TritonLoraConfig` but the function returns None on the common path. Add an explicit None check and annotate as Optional.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1089-1098",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The load-bearing defect is the shared, mutable is_registered flag on TritonLoraConfig: all three reviewers independently flag that concurrent first-time requests will race and that later requests can ship a task_id before the backend has cached the adapter. Compounding this, synchronous np.load on the asyncio path and filesystem-order-dependent task_id assignment make the failure mode worse and non-deterministic across base models. The remaining issues are scaffolding that should not have landed: stray print/traceback debugging, a lying return-type annotation, and a None-unsafe accessor. The feature shape is right; the concurrency, identifier allocation, and logging hygiene need another pass before merge."
+  }
+}

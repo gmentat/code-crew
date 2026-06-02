@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3113",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Bedrock client is opened on every inbound context frame instead of once at start/stop lifecycle",
+        "detail": "process_frame does `async with self._aws_session.client(...)` per LLMContextFrame, paying TLS handshake and credential resolution per turn. In a streaming voice pipeline this is a brutal constant-factor hit. Hoist client construction into start() and tear down in stop(); the session is already stored.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "192-220",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "default_response_to_output_transformer calls json.loads with no try/except and will crash the pipeline on malformed lines",
+        "detail": "One non-JSON SSE line (heartbeat, comment, partial reconnect chunk) raises out of process_frame, aborting the stream and leaving _output_response_open=True with a dangling close task. The signature already returns Optional[str]; catch JSONDecodeError, log once, and return None so the loop stays total.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-87",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public parameter agentArn is camelCase, violating PEP 8 and the surrounding snake_case API",
+        "detail": "Every other kwarg is snake_case (aws_access_key, aws_region). agentArn mirrors the AWS wire field but freezes that choice into public surface area. Rename to agent_arn and map to agentRuntimeArn at the boto3 call site. Torvalds also flags a class-name mismatch with the PR title (AWSAgentCoreProcessor vs AWSBedrockAgentCoreProcessor).",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "92-149",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SSE parsing is brittle: rigid `data: ` prefix check plus hardcoded line[6:] slice",
+        "detail": "SSE allows `data:` with no space, multiple data lines per event, and comment lines starting with `:`. startswith(\"data: \") + line[6:] silently drops or corrupts valid events. Use line.removeprefix(\"data:\").lstrip() or a real SSE parser, and document the accepted grammar.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "215-243",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Response bookend state machine complects a mutable flag, a timestamp, and a 1.0s racing close task",
+        "detail": "_output_response_open, _last_text_frame_time, and _close_task encode 'is a response open' across three places with no stated invariant. Concurrent context frames or a late-firing timer can produce unbalanced Start/End frames. Model a response segment as one value with one owner, or close explicitly when the async for ends rather than racing a wall-clock timer.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "147-217",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Manual os.getenv credential fallbacks short-circuit aioboto3's resolution chain and break credential refresh",
+        "detail": "Reading AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN manually freezes credentials at init time and bypasses shared config and instance metadata that aioboto3 already handles. Pass None through and let the SDK own credential identity-over-time; this matters for assumed roles that refresh.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "145-150",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "Panel verdict: NEEDS-WORK before merge. Three independent reviewers converge on the same lifecycle and robustness defects: a new Bedrock client opened per inbound frame, an unguarded json.loads in the default transformer that will abort the stream on any malformed SSE line, and a public camelCase agentArn parameter (plus a class-name mismatch with the PR title) that bakes inconsistency into the API. Two reviewers additionally flag brittle hand-rolled SSE parsing and a place-oriented response-bookend state machine using a 1.0s racing close task where the async-for ending already signals completion. The underlying mechanism is sound; the implementation needs the client hoisted to start/stop, total parsing functions, snake_case naming, and one explicit owner for response-segment start/end."
+  }
+}

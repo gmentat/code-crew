@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "The `service` field on the frame complects a value (the request) with an identity (a live FrameProcessor reference).",
+        "detail": "A control frame is a value travelling through a pipeline; stuffing a mutable FrameProcessor object into it braids value and identity. Equality becomes object identity, the frame can never be serialized, logged faithfully, or replayed, and downstream code now holds a reference to a processor it has no business touching. A stable service name or id (data) would carry the same routing intent without the entanglement.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Routing logic is complected across the switcher and every service that handles the frame.",
+        "detail": "The switcher decides whether to consume the frame by comparing `frame.service == self.strategy.active_service`, but the STT service and mock also re-push it unconditionally. The 'who consumes this' contract is now split between two places that must agree. A single decomposed rule \u2014 switcher consumes when target matches, services always forward \u2014 would be one concept in one place.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "230-240",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting non-active services is silently undefined behavior rather than explicit data.",
+        "detail": "`push_frame` only suppresses the frame when `frame.service == active_service`. If a frame targets an inactive service (a perfectly reasonable future case), it escapes the switcher and leaks downstream. The time semantics \u2014 'who is active when this frame arrives' \u2014 are never made explicit. Either forbid non-active targets in the type, or handle both branches as named cases.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Renaming `RequestMetadataFrame` to `ServiceSwitcherRequestMetadataFrame` couples the frame's name to one caller.",
+        "detail": "The frame is a generic request: 're-emit your metadata.' Naming it after the switcher binds a value-shaped concept to one identity that happens to send it today. If another component ever needs the same request, the name lies. `RequestServiceMetadataFrame` would describe the value; the switcher prefix describes who sends it, which is incidental.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1723",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: why does metadata need a pull request at all?",
+        "detail": "Metadata is a value about a service at a moment. If services published their current metadata value (and switches were observable), downstream processors could read it without a round-trip control frame. The current design \u2014 switch, then ask the new service to re-announce \u2014 exists because metadata is treated as an event rather than a queryable value. Worth a hammock pass before extending the request protocol further.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "255-261",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The rename is fine; the new `service: FrameProcessor` field is where the design takes on incidental complexity. A control frame is a value, and embedding a live processor reference complects value with identity, makes the frame unserializable, and splits the 'who consumes this' decision between the switcher and every service that handles it. The target-mismatch case is silently undefined. None of this is essential \u2014 a service id (data) plus a single consume rule in the switcher would be SIMPLE; the current shape is EASY-NOT-SIMPLE because it reuses the object reference already in hand. Worth one hammock pass on whether metadata should be a pulled event or a published value before extending this protocol further."
+  }
+}

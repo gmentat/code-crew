@@ -1,0 +1,71 @@
+{
+  "persona": "knuth",
+  "anchored": "anchored",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Bedrock client is created and torn down on every LLMContextFrame instead of once at startup",
+        "detail": "Each invocation opens a new aioboto3 client inside `async with` \u2014 credential resolution, TLS handshake, and connection pool setup pay full cost per turn. For a streaming voice pipeline where context frames arrive frequently, this is asymptotically O(1) per call but with brutal constants. Hoist the client to start()/stop() lifecycle; the session is already stored.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "219-220",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Concurrent LLMContextFrames race on shared `_output_response_open` and `_close_task` state without a stated invariant",
+        "detail": "The bookend state machine has no documented invariant. If a second context frame arrives while the first is still streaming (or the close-timeout task fires mid-stream of a new invocation), `_output_response_open` and `_close_task` can interleave \u2014 producing unbalanced Start/End frames. State the invariant explicitly (\"open == exactly one StartFrame pushed since last EndFrame\") and serialize, or document the single-flight assumption.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "190-217",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`line[6:]` assumes exactly one space after `data:` and silently corrupts otherwise",
+        "detail": "SSE spec allows `data:` with zero or one optional space, and some emitters use neither. `startswith(\"data: \")` then `line[6:]` is brittle: a `data:foo` line is dropped with a warning, and `data:  foo` keeps a leading space that the JSON parser may or may not tolerate. Use `line.removeprefix(\"data:\").lstrip()` or a proper SSE parser; state the accepted grammar in a comment.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "236-243",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`default_response_to_output_transformer` will raise on any non-JSON line, killing the whole stream",
+        "detail": "`json.loads(response_line)` has no try/except. One malformed SSE line \u2014 heartbeat, comment, partial chunk during reconnect \u2014 propagates an exception up through `process_frame` and aborts the entire response. Either catch JSONDecodeError and return None (logging once), or document that the transformer contract is \"raises on malformed input and caller must handle.\" The current code does neither.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-77",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`agentArn` parameter name violates PEP 8 and the rest of the file's snake_case convention",
+        "detail": "Every other parameter is snake_case (`aws_access_key`, `aws_region`); `agentArn` is camelCase mirroring the AWS API field. This is public API surface \u2014 once shipped, renaming is a breaking change. Use `agent_arn` and pass it as `agentRuntimeArn=self._agent_arn` at the call site. Readability matters more than mirroring the wire format.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "118, 149",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Magic timeout constant `1.0` and `[6:]` slice lack literate explanation",
+        "detail": "`self._output_response_timeout = 1.0` has no comment explaining why one second is correct (round-trip jitter? inter-token gap budget?) \u2014 the next reader will either tune it blind or leave it forever. Similarly `line[6:]` should be `len(\"data: \")` or a named constant. Small literate-comment fixes; the algorithm is fine, the explanation is missing.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "169, 242",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "Verdict: UNDER-AUDITED with one NEEDS-LITERATE-COMMENT cluster. The core algorithm \u2014 invoke agent, parse SSE-or-single-part response, bookend with Start/End frames \u2014 is reasonable, but several invariants are unstated and one perf cost is real. The bookend state machine across concurrent context frames has no written invariant; the per-call client construction is an unforced constant-factor hit; and the SSE line parsing has two correctness gaps (rigid `data: ` prefix, unguarded JSON parse) that will surface as silent stream aborts in production. Public API uses camelCase `agentArn` which will be hard to fix once shipped. Recommend hoisting the client, stating the bookend invariant, hardening the SSE parser, and renaming `agentArn` before merge."
+  }
+}

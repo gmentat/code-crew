@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Root ACL check uses substring match instead of strict ancestor relation, granting cross-namespace root",
+        "detail": "ns.HasParent(a.root) is the only gate after a.root is non-nil. If HasParent is path-prefix based (common in this codebase), namespaces like 'foobar' and 'foo' can collide, and root in namespace 'foo' may grant privileges in unrelated sibling paths. Show the actual HasParent implementation and a test that proves a sibling with a shared prefix is rejected, or this is a privilege-escalation patch. This is the whole reason the PR exists; it needs an explicit test.",
+        "file": "vault/acl.go",
+        "lines": "342-361",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that always returns false and is already wired into security-relevant paths",
+        "detail": "(*Core).NamespaceSealed unconditionally returns false with a TODO. ListAllNamespaces is described as 'currently stubbed with NamespaceSealed stub' so sealed namespaces are listed as unsealed. Landing a sentinel error + response_util mapping + Core method that lies is worse than not landing it: every reader now assumes the check exists. Either implement it or don't add the call sites. Ship the SealManager in the same series or revert the stub.",
+        "file": "vault/core.go",
+        "lines": "1397-1403",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Diff bundles six unrelated changes; should be three or four patches, not one",
+        "detail": "ACL root semantics, ErrNamespaceSealed plumbing, NamespaceSealed stub, ListAllNamespaces rewiring, namespaceMountEntryView removal, rootToken adjustments, and a dozen test ctx rewrites are shipped as one PR. When the root-ACL change regresses, bisect lands on a commit that also reshapes views and error mapping. Split: (1) ACL root per-ns, (2) view consolidation, (3) sealed-namespace sentinel + stub. THREE-PATCHES.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently denies on namespace.FromContext error instead of failing loudly",
+        "detail": "The new code path returns an empty ACLResults (Allowed=false) when FromContext fails, before any policy check. Previously the root fast-path ran first. A missing namespace in context is a programmer error, not a permission denial; swallowing it produces confusing 403s that look like policy bugs. At minimum log; better, distinguish 'no namespace' from 'denied'.",
+        "file": "vault/acl.go",
+        "lines": "340-345",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "errwrap.Contains on error message strings is a fragile sealed-namespace detection mechanism",
+        "detail": "AdjustErrorStatusCode now matches ErrNamespaceSealed by substring of its .Error() text ('namespace is sealed'). Any unrelated error whose message contains that substring gets remapped to 503. Use errors.Is once you control the sentinel; you already own both sides of this boundary. The existing ErrSealed pattern is legacy debt, not a template to extend.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment on ACL.root field is grammatically misleading about what 'non-nil' means",
+        "detail": "'root property is a non-nil namespace if the \"root\" named policy (and only \"root\") is present' reads as if non-nil is the type, not the state. Just say: 'If non-nil, the ACL was built from a sole root policy in this namespace; root privileges apply to this namespace and its descendants.' Comments are read more than code; make them carry their weight.",
+        "file": "vault/acl.go",
+        "lines": "37-39",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK bordering on REFUSE. The headline change \u2014 per-namespace root ACL \u2014 hinges entirely on HasParent semantics and ships without a test that proves a sibling namespace with a shared path prefix is denied; that is the one test this patch exists to justify. Worse, NamespaceSealed is a stub that returns false and is already wired into ListAllNamespaces and a new sentinel + status-code mapping, so the system now lies about sealed namespaces in a security-relevant code path. The PR also bundles six unrelated changes (ACL semantics, view consolidation, error plumbing, ctx threading across tests) into one commit \u2014 split it so bisect can find regressions. Fix the root-ancestor check with a real test, land NamespaceSealed with its implementation or not at all, and use errors.Is instead of substring matching the error text."
+  }
+}

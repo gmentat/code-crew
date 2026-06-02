@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Third metric-key concept complects with detailed_metric and FullKey instead of decomposing them",
+        "detail": "GetLimit now maintains three parallel metric-key concepts (default, detailedMetricFullKey, valueToMetricFullKey) and braids them with an override block at the end that conditionally rebuilds RateLimit via NewRateLimit, then immediately overwrites Stats and FullKey. Value (the key string), identity (the RateLimit struct), and time (when stats are bound) are all entangled. Extract a single pure key-builder taking (entries, descriptor-chain) and bind stats once.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Per-entry key-construction logic has three branches that compute the same string",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default-key branches all reduce to: if valueToMetric and entry.Value != \"\" then key_value else key. The cascade of if/else hides one rule behind three near-identical blocks. This is incidental complexity from inlining the decision into traversal. Collapse to a single helper: appendSegment(b, entry, descriptor.valueToMetric).",
+        "file": "src/config/config_impl.go",
+        "lines": "350-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rateLimitDescriptor switched from named-field to positional struct literal, complecting field order with construction",
+        "detail": "Changing `&rateLimitDescriptor{map[...]{}, rateLimit, nil}` to `{..., nil, descriptorConfig.ValueToMetric}` is place-oriented: the next field added breaks every call site silently. Use named fields (descriptors:, limit:, wildcardKeys:, valueToMetric:). Simple, not easier, but resilient to time.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Dead NewRateLimit reconstruction in the value_to_metric override path",
+        "detail": "The branch builds a fresh RateLimit via NewRateLimit using rateLimit.FullKey, then immediately assigns Stats and FullKey to the enhanced key. The reconstruction's stats object is discarded on the next line. Either the rebuild is needed (then justify it and don't throw away its Stats) or it isn't (delete it). Right now it is incidental noise that obscures intent.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-428",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Semantic overlap with detailed_metric is resolved by precedence rather than by naming the distinction",
+        "detail": "value_to_metric and detailed_metric now both answer 'include the runtime value in the metric.' The README explains the precedence rule, but the underlying concepts have been complected: one is per-descriptor opt-in for unspecified-value cases, the other is leaf-level opt-in for all values. Consider whether a single field with an enum (none|leaf|path) would decompose this more honestly than two booleans with a precedence rule.",
+        "file": "src/config/config_impl.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "'still append something deterministic' fallback hides an unreachable or unspecified case",
+        "detail": "The else branch when nextDescriptor == nil appends entry.Key to valueToMetricFullKey, but if no descriptor matched the traversal returns early elsewhere and this key is never used. Either prove it is reachable and document why, or remove the branch. Defensive code without a stated invariant is incidental complexity.",
+        "file": "src/config/config_impl.go",
+        "lines": "385-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature is reasonable and the tests are thorough, but the implementation is COMPLECTED: GetLimit now juggles three parallel key-builders inline with traversal, then patches the resulting RateLimit value after the fact. The per-entry branching has three cases that collapse to one rule (valueToMetric ? key_value : key), and the positional struct literal change is PLACE-ORIENTED \u2014 fragile across time. The conceptual overlap with detailed_metric is resolved by a precedence rule rather than by decomposing what 'include the value' actually means. The question that should have been asked first: what is the single value-shaped function that maps (descriptor-chain, entries) to a metric key, and where does it live so that detailed_metric, value_to_metric, and the default are three configurations of one thing rather than three intertwined branches?"
+  }
+}

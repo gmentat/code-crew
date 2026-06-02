@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil when leader panicked will crash every caller that dereferences the result",
+        "detail": "In the CAS-failed branch, when `t.result.Load()` is nil the function returns `nil` directly. Every caller of `run` expects a non-nil `*result` (the deferred `closed(output.done)` check, the `output.Fatal` writes, the outer `run` consumer). Returning nil just relocates the nil-deref one frame up. Either synthesize a failed result with a sentinel error or loop/retry the CAS. The comment 'Leader panicked but we did see a result' is also typo'd to the opposite of intent.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race still open: result can be set then cleared between CompareAndSwap-fail and Load",
+        "detail": "The fix narrows the window but does not close it. Between the failed CAS at line 454 and the Load at line 456, the leader can panic and store nil. More importantly, in the *pending* branch (line 444 onward) `t.checkCycle` and `waitUntilDone` still race against leader nil-out; `output` is captured from `t.result.Load()` somewhere, but the pending branch reuses the named return `output` which is the zero result, not the loaded one. Read the diff again.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pending-branch `output` shadow: `output.Fatal = err` writes into the named return, not the in-flight result",
+        "detail": "In the refactored pending branch, `output.Fatal = err; return output` returns the zero-value named return rather than the actual pending result the waiter was joining. The previous code had the same shape but the new `waitUntilDone(caller, output, async)` call now requires an explicit result pointer that nobody loaded here. This branch needs `output := t.result.Load()` with a nil check just like the CAS branch \u2014 currently it dereferences blindly through `output.done` inside waitUntilDone.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-448",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two unrelated changes in one patch: cycle-check extraction and race fix should be separate commits",
+        "detail": "The cycle-detection extraction into `checkCycle` is a pure refactor. The race fix is a behavioral change. Squashing them makes the bisect land on a commit that does two things, and makes the race fix harder to review on its own merits. THREE-PATCHES: refactor first, race fix second, follow-up dependency-cycle work third.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-470",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for the panicking-leader path",
+        "detail": "The commit message describes a specific race: leader panics, sets result to nil, waiter dereferences. There is no test in the diff that reproduces this \u2014 no goroutine harness, no panic injection, no assertion that waiters receive a sensible error instead of crashing. Prose in the PR description is not a regression suite. Add a test that panics in the leader and asserts waiters get `ErrCycle`-style or a propagated panic, not nil deref.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typo inverts the meaning: 'but we did see a result' should be 'didn't'",
+        "detail": "`return nil // Leader panicked but we did see a result.` reads as the opposite of what the code does \u2014 the branch is taken precisely when we did NOT see a result. Trivial, but the next maintainer will read this and be confused about which branch is which.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch identifies a real race but the fix is incomplete and the diff does two unrelated things at once. Returning bare `nil` from `run` just relocates the nil deref up one frame \u2014 every caller assumes a non-nil `*result`. The pending branch wasn't updated symmetrically with the CAS branch, so `output` shadowing means `output.Fatal = err` writes to the wrong struct and `waitUntilDone` still races. No regression test reproduces the panicking-leader scenario the commit message describes. NEEDS-WORK: split into refactor + race fix, synthesize a failed-result sentinel instead of returning nil, fix both branches symmetrically, add a test that actually panics the leader."
+  }
+}

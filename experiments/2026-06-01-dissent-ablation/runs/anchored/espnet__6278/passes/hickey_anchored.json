@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "espnet__6278",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Checkpoint, training loop, and step-counting time semantics are complected and will misbehave on resume",
+        "detail": "save_checkpoint runs after train() but train() advances global_step inside its inner loop. On resume, global_step is restored, but train_data_factory.build_iter is called with that same global_step and length=save_interval, so the loop will run save_interval more steps regardless of how far into the previous interval we were. The 'when does what change' model is implicit. Make the time semantics explicit: pass an explicit step_budget value, separate from identity.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-165, 167-191",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch between docstring (max_steps) and code (max_step) \u2014 config is untyped data treated casually",
+        "detail": "The docstring promises max_steps, log_interval, val_interval, save_interval; code reads max_step (singular) and never reads val_interval or log_interval. The trainer_args dict is a value but is being accessed by string keys with no schema, so the contract drifts silently. Define the trainer_args shape as data once (a dataclass or validated schema) and read from that.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "37-50, 64-67",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "wandb is complected into the trainer as a mandatory global side-channel identity",
+        "detail": "DeepSpeedTrainer requires a process-global wandb.run to exist, calls wandb.config.update and wandb.log directly, and the train script must remember to wandb.init first. Logging (a value stream) is intertwined with a stateful global. Decompose: have the trainer return or yield a stats dict per step; let the caller decide where it goes. Then wandb is one sink among many, not a precondition.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "16-21, 91, 198-200, 230",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint discovery parses identity out of directory names \u2014 place-oriented, fragile",
+        "detail": "Latest checkpoint is found by scanning iterdir() and parsing 'step_N' out of names with split('step_')[-1]. The step number is a value living only in a filesystem place. A sibling 'step_bad' or any rename breaks sort. Keep an explicit checkpoints index (a small JSON log of {step, path, timestamp}) as the source of truth; the directory layout becomes derived data, not the API.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "104-122",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Validation aggregation by appending to lists then averaging \u2014 values and reduction strategy are complected and lossy",
+        "detail": "all_stats collects per-batch floats into Python lists then averages. This drops the per-batch token/sample counts, so unequal batch sizes are weighted incorrectly. Also the per-batch all_reduce inside the inner loop is wasteful when a single end-of-epoch reduce on running sums would suffice. Carry (sum, count) as the value; reduce once at the end. Same essential information, less code, correct math.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "201-225",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Data specifier strings are easy-not-simple \u2014 a positional micro-DSL where a list of records would be clearer",
+        "detail": "'task:name:data_json[:factor]' parsed by .split() encodes structured data as a colon-delimited string parsed by whitespace split. It's familiar (CLI-flag-friendly) but not simple: optional fields, escaping, and validation are all implicit. Accept a YAML/JSON list of {task, name, data_json, factor} records; keep the string form only as a thin CLI sugar that immediately parses to that data.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-79, 214-222",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The two files mix several concerns that should be separable: training-loop time semantics are entangled with checkpoint cadence and step counting; configuration is an untyped dict accessed by drifting string keys (max_step vs documented max_steps); wandb is a mandatory global side-channel rather than a sink the caller composes. Checkpoint identity lives only in directory names, and validation aggregation throws away batch-weight information. The data specifier strings are easy (CLI-friendly) but not simple \u2014 a small DSL where a list of records would say the same thing with less ambiguity. The essential complexity of distributed mixed-precision training is real; most of what is added here is incidental, and a thinking pass before the next iteration would let the values, identities, and time model show through."
+  }
+}

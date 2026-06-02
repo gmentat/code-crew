@@ -1,0 +1,71 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "openbao__1906",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "revoke_error is a free-form string field surfaced to API consumers without a defined shape",
+        "detail": "RevokeErr is a stringified error \u2014 opaque text whose contents depend on every backend that ever failed to revoke. The API now treats it as a value, but the value has no schema: callers cannot match on it, and operators cannot predict what leaks. Either give it a typed shape (code + message) or document the contract; do not ship an untyped string as a public field.",
+        "file": "vault/logical_system.go",
+        "lines": "2200-2202",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport silently complects redaction policy with field selection",
+        "detail": "The function is the trust boundary \u2014 it decides what leaves the expiration manager \u2014 but that decision is expressed as an ad-hoc struct literal. Adding Path, RevokeErr, and namespace was a one-line change; the next field will be too. The list of exported fields should be data (an explicit allowlist) reviewed independently of the copy mechanics, so security review has one place to look.",
+        "file": "vault/expiration.go",
+        "lines": "1739-1748",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR author explicitly raises a security question about revoke_error that is not resolved",
+        "detail": "The description asks whether displaying revoke_error is safe and notes it may contain sensitive information. That is the question that should have been answered before coding, not after. Hammock first: decide the threat model, then decide whether the field ships, then write the line. Merging with the question still open is shipping a policy decision by omission.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename FetchLeaseTimes to FetchLeaseInfo is honest about the widened contract but the metric name was not updated",
+        "detail": "The metric key `expire.fetch-lease-times` still reflects the old, narrower meaning. Small thing, but the rename was done precisely because the function no longer just returns times; the observable name should follow the same logic or the metric becomes a lie over time.",
+        "file": "vault/expiration.go",
+        "lines": "1710",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts only a happy-path path value; namespace_path and revoke_error have no coverage",
+        "detail": "The new test checks `path == secret/foo` and stops. The two genuinely new behaviors \u2014 conditional inclusion of namespace_path when a namespace exists, and conditional inclusion of revoke_error when one is set \u2014 are not exercised. Tests should follow the branches that were added, not just the field that was easiest to assert.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Response assembly conflates field presence policy with value extraction across scattered conditionals",
+        "detail": "handleLeaseLookup now interleaves: always-present fields, conditional fields (namespace_path, revoke_error, last_renewal, expire_time), and derived fields (ttl, renewable). The shape of the response is a data question; expressing it as a sequence of `if` blocks against a map hides what the contract actually is. A small descriptor \u2014 field, source, condition \u2014 would make the API surface auditable in one read.",
+        "file": "vault/logical_system.go",
+        "lines": "2183-2208",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The change is small and the rename FetchLeaseTimes -> FetchLeaseInfo is the honest move: the function no longer returns just times, and the name now matches. What is complected is the redaction policy: leaseInfoForExport is the trust boundary, but the allowlist of exported fields is expressed as a struct literal that anyone can extend in one line \u2014 there is no separate, reviewable description of what leaves the expiration manager. The author's own open question about revoke_error sensitivity is the question that should have been answered before the code was written; shipping with it unresolved is a policy decision by omission. Test coverage follows the easy field (path) and skips the two conditional branches that were actually added. None of this is hard to fix, but \"easy to add a field\" is exactly the failure mode the design should resist on a security-sensitive API."
+  }
+}

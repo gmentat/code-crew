@@ -1,0 +1,71 @@
+{
+  "persona": "torvalds",
+  "anchored": "anchored",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Dead `break` after `raise` \u2014 unreachable code proves nobody ran this branch",
+        "detail": "Line after `raise PerformanceWarning(msg)` is `break`. That's unreachable. It means the author wrote the loop, wrote the raise, wrote the break, and never actually executed the failure path \u2014 because if they had, they'd have noticed the break is dead. The test calls it, so the break should have been flagged by coverage. Delete the break, or \u2014 better \u2014 change the raise to a warning if you actually want a 'performance warning' semantic instead of crashing the write.",
+        "file": "dask/array/core.py",
+        "lines": "~3915",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Raising `PerformanceWarning` as an exception is wrong-shape \u2014 pick warn or raise, not both",
+        "detail": "`PerformanceWarning` is a Warning subclass. The code does `raise PerformanceWarning(msg)`, turning a perf advisory into a hard failure that kills the write. The PR description literally asks 'Would an exception be appropriate here?' \u2014 that question belongs in design, not in a merged patch. Decide: `warnings.warn(msg, PerformanceWarning)` (advisory, write proceeds with safe chunks) or `raise ValueError(msg)` (hard refusal). Don't smuggle a refusal under a warning class name.",
+        "file": "dask/array/core.py",
+        "lines": "~3914",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`np.prod(zarr_write_chunks)` computes total element count, not bytes \u2014 wrong on shape tuple",
+        "detail": "`zarr_write_chunks` is a normalized tuple-of-tuples from `_get_zarr_write_chunks`, or a shape tuple \u2014 either way `np.prod` on it does not give what the error message claims ('size in bytes of a single on-disk chunk'). For a tuple-of-tuples it returns nonsense; for a shape tuple it returns element count, then multiplied by itemsize gives bytes. The user-facing recommended config value is therefore likely wrong. Verify what `zarr_write_chunks` actually is at that line and compute bytes correctly.",
+        "file": "dask/array/core.py",
+        "lines": "~3908-3910",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Only checks `dw[0]` \u2014 assumes uniform chunks along an axis, silently passes ragged tails",
+        "detail": "`nominal_dask_chunk_size = dw[0]` checks the first chunk on each axis. `normalize_chunks(chunks='auto', ...)` can produce a ragged last chunk that isn't a multiple of the shard. The last chunk being ragged is fine (it's the boundary), but the logic doesn't say that \u2014 it just checks index 0 and moves on. State the invariant: 'all interior chunks must be shard-multiples; the tail may be short.' Then check that, or document why dw[0] is sufficient.",
+        "file": "dask/array/core.py",
+        "lines": "~3901-3905",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test uses `pytest.raises(PerformanceWarning, ...)` \u2014 encodes the wrong-shape decision into the suite",
+        "detail": "The test asserts the warning class is raised as an exception. That locks in the bad design from the previous issue. When you fix the raise-vs-warn question, this test changes shape entirely. Right now the test is proving the bug is reproducible, not that the behavior is correct. Decide the semantic first, write the test to that.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "test_zarr_risky_shards_warns",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message recommends a chunk-size that may itself be misaligned; no guidance on the real fix",
+        "detail": "The message says 'set array.chunk-size to at least <safe_chunk_size> bytes'. But the user's real choice is: accept misalignment, raise the config, or pick a different shard layout upstream. The message points at one knob without naming the tradeoff. A maintainer six months from now sees the user followed the advice, hit a different edge, and files a bug. Either own the recommendation fully (and test it round-trips) or state the tradeoff plainly.",
+        "file": "dask/array/core.py",
+        "lines": "~3910-3920",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK, leaning REFUSE in current shape. The core idea \u2014 use shard shape as `previous_chunks` so `auto_chunks` produces larger shard-aligned chunks \u2014 is good taste; it eliminates a special case rather than adding one. But the patch ships with an unreachable `break` after a `raise` (proves the failure path was never executed), a `raise PerformanceWarning` that the PR description itself flags as undecided design, a `np.prod` on a chunks structure that likely doesn't compute the bytes the error message claims, and a test that locks the undecided semantic in. Fix the raise-vs-warn question first, then the dead code and the byte math fall out. The test parametrization over region_spec is good; keep that."
+  }
+}

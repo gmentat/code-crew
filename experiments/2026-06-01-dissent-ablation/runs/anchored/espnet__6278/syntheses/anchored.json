@@ -1,0 +1,79 @@
+{
+  "task_id": "espnet__6278",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring/parser say max_steps but trainer reads max_step (and log_interval is dead config)",
+        "detail": "__init__ docstring and the CLI promise max_steps/log_interval/val_interval, but the code reads trainer_args['max_step'] and never consults log_interval or val_interval. A user following the documented contract gets a KeyError on first run. Pick one spelling, honor or delete log_interval, and validate the trainer_args schema.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "39-67",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint discovery crashes on any non-step_<int> directory under checkpoints/",
+        "detail": "_load_checkpoint filters by 'step_' in name then sorts via int(name.split('step_')[-1]). Auxiliary directories (step_best, step_1234.tmp, step_1000.old) pass the filter and raise ValueError mid-sort, killing resume. Use a strict regex match like ^step_(\\d+)$ and skip non-matches, or keep an explicit checkpoints index file as the source of truth.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "100-126",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Validation aggregation averages per-batch means with equal weight, biasing the reported metric",
+        "detail": "all_stats collects one float per batch and averages, then all_reduces SUM/world_size across ranks. With unequal batch sizes or uneven shards (common for variable-length speech and non-divisible valid sets), ranks and batches contribute equal weight regardless of sample count. Carry (sum, count) per metric and reduce once at the end so the logged number matches the dataset mean.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "190-225",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "local_rank defaults to None and is passed unguarded to torch.cuda.set_device",
+        "detail": "argparse default is None; DeepSpeed/torchrun commonly set LOCAL_RANK via env without forwarding --local_rank, so set_device(None) raises TypeError with no context. Read int(os.environ.get('LOCAL_RANK', args.local_rank or 0)) and assert a valid int before the set_device call.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "126-153",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Data specifier parsing uses bare str.split() with an undocumented separator and silent edge cases",
+        "detail": "valid/train specifier strings are documented as colon-delimited 'task:name:data_json[:factor]' but the loop calls .split() with no separator, so the per-item delimiter is implicit whitespace and an empty default yields []. Pick a separator, document it, validate, and prefer accepting a YAML/JSON list of records with the string form as thin CLI sugar.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-79, 208-222",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Training loop entangles step budget, save cadence, and validation cadence with no explicit val_interval",
+        "detail": "run() calls valid() every save_interval steps with no guard, walking the full validation set each time \u2014 minutes to hours of unsolicited GPU work. On resume, train_data_factory.build_iter is called with restored global_step and length=save_interval, so the next interval runs a full save_interval regardless of progress. Separate step_budget from identity and gate valid() on an explicit val_interval.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-191",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a NEEDS-WORK verdict: this DeepSpeed trainer pair is readable and appropriately scoped but shows signs of not having been run end-to-end. A documented-vs-actual key mismatch (max_steps vs max_step, dead log_interval) is a P0 startup crash, and local_rank/None plus a fragile checkpoint-name parser will bite users on first launch and first resume respectively. Validation aggregation computes an unweighted mean of per-batch means across uneven shards, so the logged metric is a biased estimator. Training-loop time semantics, save cadence, and validation cadence are complected with no explicit val_interval, and the data-specifier micro-DSL is parsed by bare str.split() with an undocumented separator. Fix the run-blockers, prove resume works with a stray checkpoint directory, then resubmit."
+  }
+}

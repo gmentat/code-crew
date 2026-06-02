@@ -62,8 +62,23 @@ Headlines from [`experiments/`](experiments/) (read each run's `SUMMARY.md` for 
 - **Named archetypes don't improve recall over generic numbered reviewers** (Δ ≈ 0, p=0.50). What they do is produce ~18% more semantic divergence between passes, which surfaces as auditable disagreement. Names are for interpretability, not output quality.
 - **Preserved-dissent synthesis ≠ better outputs.** Dissent visibility is a UX product (reviewer can see who said what); it doesn't improve recall over consensus synthesis.
 - **K+H+T is the best tested default, not a magic formula.** A follow-up triple search tested 10 of 20 possible 3-persona combinations and found no challenger with a better point estimate, but several challengers are statistical ties and the untested 10 remain open.
+- **Direct-naming briefs (`"X — author of TAOCP, ..."`) underperformed archetype-inspired briefs** (−3.9pp recall, −3.5pp precision, +9.9pp fabrication; paired n=50). Don't rewrite persona briefs to lead with the person's name and accomplishments.
 
 The repo includes the runnable harness so anyone can re-test these claims (or refute them) on `foundry-ai/swe-prbench` from inside Claude Code.
+
+## Research grounding
+
+Code Crew's design and empirical claims are grounded in the multi-agent-debate, persona-prompting, and persona-fabrication research literature. See [`RESEARCH.md`](RESEARCH.md) for the verified canonical reference list with one-paragraph summaries — including:
+
+- Zheng et al. 2024 *When "A Helpful Assistant" Is Not Really Helpful* — personas don't reliably improve LLM task performance on average.
+- Luz de Araujo et al. EMNLP 2025 *Principled Personas* — irrelevant biographical surface attributes can swing performance by ~30pp.
+- Hu et al. 2026 *Expert Personas Improve LLM Alignment but Damage Accuracy (PRISM)* — accomplishment-list framings degrade closed-form work.
+- Du et al. 2023 *Multi-Agent Debate* + Liang et al. EMNLP 2024 *Encouraging Divergent Thinking* — the canonical multi-agent setup and the Degeneration-of-Thought failure mode the K+H+T crew is designed against.
+- Kong et al. NAACL 2024 *Role-Play Prompting* + Salewski et al. NeurIPS 2023 *In-Context Impersonation* — what the *role description* does, not the persona name.
+- Wang et al. ICLR 2023 *Self-Consistency* — the cheap baseline every multi-agent design has to beat.
+- Deshpande et al. EMNLP 2023 *Toxicity in ChatGPT* + Kim et al. 2024 *Persona is a Double-edged Sword* — persona-induced fabrication and the role-play accuracy hit.
+
+The full literature synthesis that informed individual design decisions (a 4-survey LLM workflow report, with broader citations not all independently verified) lives at [`experiments/2026-06-01-dissent-ablation/RESEARCH_PERSONA_PROMPTING.md`](experiments/2026-06-01-dissent-ablation/RESEARCH_PERSONA_PROMPTING.md).
 
 ## Why Knuth + Hickey + Torvalds?
 

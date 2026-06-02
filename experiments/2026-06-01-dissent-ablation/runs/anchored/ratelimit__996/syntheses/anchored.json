@@ -1,0 +1,78 @@
+{
+  "task_id": "ratelimit__996",
+  "anchored": "anchored",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Dead NewRateLimit call whose stats are immediately overwritten on the next line.",
+        "detail": "In the value_to_metric override branch, NewRateLimit(...) is invoked (which registers a stats struct via statsManager.NewStats(rateLimit.FullKey)), then rateLimit.Stats is immediately replaced with NewStats(enhancedKey). The first allocation is discarded \u2014 wasted work and a stray metric registration per GetLimit call. Delete the NewRateLimit reconstruction.",
+        "file": "src/config/config_impl.go",
+        "lines": "419-429",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Three near-identical key-building branches that collapse to one rule.",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default-key branches all reduce to: write entry.Key, then if (valueToMetric || matchedUsingValue) and entry.Value != \"\" append _value. Collapse into a single appendSegment helper expressing the invariant once. This removes ~25 lines of incidental complexity and makes the rule legible.",
+        "file": "src/config/config_impl.go",
+        "lines": "330-388",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "FullKey comparison guard is unreliable because FullKey is not consistently populated upstream.",
+        "detail": "The guard `if enhancedKey != rateLimit.FullKey` depends on FullKey being set on the non-detailed_metric path, but it is only assigned in the DetailedMetric branch. The override therefore fires accidentally or relies on an undocumented cross-function invariant. Either always override deliberately or compare against the actual existing stats key.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-430",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valueToMetricFullKey builder runs on every GetLimit call even when no descriptor uses the flag.",
+        "detail": "GetLimit is a hot path. The new strings.Builder allocates and appends unconditionally, paying cost for every deployment that never enables value_to_metric. Track at config-load time whether any descriptor in the tree sets valueToMetric and skip the builder when false. No benchmark accompanies the change.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-321",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rateLimitDescriptor switched to positional struct literal \u2014 fragile across future field additions.",
+        "detail": "Calls now read `&rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric}`. Adding a field silently risks misassignment at every call site. Use named fields (descriptors:, limit:, wildcardKeys:, valueToMetric:) \u2014 costs nothing, prevents a real class of bug.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Feature semantically overlaps detailed_metric and is resolved by precedence rather than decomposition.",
+        "detail": "value_to_metric and detailed_metric both answer 'include the runtime value in the metric.' Two booleans plus a precedence rule complect two concepts that could be one enum (none|leaf|path) or a per-descriptor flag on detailed_metric. Worth a maintainer conversation before landing a second parallel codepath that will likely grow a third flag.",
+        "file": "src/config/config_impl.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. Three concrete defects dominate: a dead NewRateLimit allocation whose stats are immediately discarded, a FullKey comparison guard that relies on an undocumented and inconsistently-held invariant, and three near-identical key-building branches that collapse to a single rule. Secondary concerns are hot-path cost paid by deployments that don't use the flag, a fragile positional struct literal, and unresolved semantic overlap with detailed_metric. The feature is reasonable; the implementation needs consolidation and one real bug fix before merge."
+  }
+}

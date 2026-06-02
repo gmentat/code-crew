@@ -1,0 +1,61 @@
+{
+  "persona": "hickey",
+  "anchored": "anchored",
+  "task_id": "agents__3608",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR description says CloseStream but code sends Close \u2014 message type mismatch with stated API contract.",
+        "detail": "The background section cites Deepgram's requirement for {\"type\": \"CloseStream\"}, yet _CLOSE_MSG serializes {\"type\": \"Close\"}. Either the description is wrong or the code is. The value flowing on the wire is a fact about the protocol; that fact is in two places and they disagree. Pick one and make the truth singular.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws complects three concerns: protocol shutdown handshake, drain wait, and socket close.",
+        "detail": "What used to be one operation (close the socket) is now three intertwined effects: send flush, send close, await ack, then close \u2014 with one try/except wrapping all of them. A pure send_shutdown(ws) returning a value (acked or timed out) composed with ws.close() would separate the handshake protocol from the transport teardown, and make each piece independently testable.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Single ws.receive() conflates ack, data frame, and close frame as if they were the same event.",
+        "detail": "The code waits for any next message and treats arrival as success. But receive() can return an audio chunk, a control ack, or a close frame, and the time semantics of each differ. If the goal is \"server confirmed shutdown,\" name that fact and check the message type; if the goal is \"some bounded delay,\" use asyncio.sleep and say so.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-138",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_FLUSH_MSG and _CLOSE_MSG are class-level json.dumps strings \u2014 values masquerading as constants.",
+        "detail": "These are facts about the Deepgram protocol, not implementation details of SynthesizeStream. They live as private class attributes on a class that does not use them in _close_ws (which reaches across to SynthesizeStream._CLOSE_MSG from a sibling). Hoist them to module-level plain data, or even a dict, and let both call sites refer to the same value.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare Exception swallow on the shutdown handshake hides protocol-level failures.",
+        "detail": "The except Exception logs a warning and proceeds to close. That is reasonable for transport errors during teardown, but it also swallows JSONDecodeError, cancellation propagation issues, and contract violations. Narrow the except to the connection-related exceptions actually expected here; let programmer errors surface.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-141",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The fix points in the right direction \u2014 making the shutdown handshake explicit instead of relying on TCP close semantics is the right shape. But the implementation complects protocol handshake, drain wait, and transport teardown into one method with one broad try/except, and the message payload disagrees with the PR description (Close vs CloseStream). The values on the wire are facts about Deepgram's protocol; treat them as data, hoist them to module scope, and decompose _close_ws into a send-shutdown step that returns a result and a close step that just closes. Decision: COMPLECTED, with one P1 protocol-contract question that has to be resolved before merge."
+  }
+}
