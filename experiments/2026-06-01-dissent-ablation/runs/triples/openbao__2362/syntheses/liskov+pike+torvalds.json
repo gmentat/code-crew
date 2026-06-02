@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub returns false unconditionally while live callers already depend on it",
+        "detail": "Core.NamespaceSealed always returns false with a TODO, yet ListAllNamespaces, ACL paths, and ErrNamespaceSealed handling are wired against it. Shipping a permanently-false security predicate in production is a regression. Either land SealManager in the same patch, return an error/panic until it exists, or gate callers behind a build tag.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently broadened from boolean to ancestor-namespace check without spec or test coverage",
+        "detail": "ACL.root changed from bool to *namespace.Namespace, and AllowOperation now grants root via ns.HasParent(a.root) \u2014 a root token in ns A now grants root across all descendants. No doc comment states the new invariant, and tests only cover self-ns allow plus root-context deny. Add explicit sibling/cousin/deep-descendant denial and ancestry-allow tests, and document the new contract.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 100-110, 339-360",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-error detection uses substring matching on err.Error() instead of errors.Is on the sentinel",
+        "detail": "AdjustErrorStatusCode dispatches via errwrap.Contains(err, ErrNamespaceSealed.Error()), so any error text containing 'namespace is sealed' \u2014 including handler/plugin/audit messages \u2014 gets coerced to 503. Errors are values, not strings. While refactoring this function into a switch, switch to errors.Is on the sentinel and fix ErrSealed the same way.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently denies when namespace.FromContext errors instead of failing loud",
+        "detail": "The new fast-path returns an empty ACLResults (deny) when ns is missing from context, with no log or signal. Previously root ACLs did not require ns at all, so background jobs and tests hitting this path silently lose root privileges. Distinguish 'no namespace' from 'denied,' log the case, or preserve prior root behavior.",
+        "file": "vault/acl.go",
+        "lines": "339-360",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces -> ListNamespaces swaps at multiple call sites without contract clarity",
+        "detail": "Calls in loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, and countActiveTokens were swapped to ListNamespaces(ctx). It is unclear which postcondition (includes-sealed vs not) each caller requires, risking silent skips of sealed namespaces in MFA, locked-user, and token-count paths. Document the contract for each method before merge.",
+        "file": "vault/core.go, vault/core_metrics.go, vault/counters.go",
+        "lines": "3287, 3395, core_metrics 416, counters 31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength built via byte indexing of a string literal is gratuitously clever",
+        "detail": "Writing TokenLen + \".\"[1] + nsID to compute a length indexes a literal for a separator byte. Name a const for the separator and use plain addition or len(Separator). Same result, far more readable, and survives a future delimiter change.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on two P0 concerns: NamespaceSealed ships as a stub that returns false while production callers (ListAllNamespaces, ACL paths, error handling) already trust it, and the ACL root contract has been silently widened from a boolean to an ancestor-namespace check via HasParent without spec documentation or a full ancestry test matrix. Sealed-error classification relies on substring matching of err.Error() and should use errors.Is on the sentinel. AllowOperation now silently denies on a missing namespace context, and several ListAllNamespaces callers were swapped to ListNamespaces without clarifying which postcondition each requires. The diff should be split: the security-critical ACL change deserves an isolated, exhaustively tested patch."
+  }
+}

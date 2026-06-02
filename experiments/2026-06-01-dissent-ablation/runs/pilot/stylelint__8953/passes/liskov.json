@@ -1,0 +1,54 @@
+{
+  "persona": "liskov",
+  "task_id": "stylelint__8953",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Normalization contract covers ClassName only; other escapable selector types silently violate the same invariant",
+        "detail": "The abstract data type here is `normalizeSelector`: given two selectors that denote the same CSS, return values that compare equal. `normalizeNodeEscaping` only handles `parser.isClassName(node)`, but IDs (`#u-m\\+` vs `#u-m\\00002b`), attribute values, type/tag selectors, and pseudo-class arguments are equally subject to CSS escape equivalence. A caller writing `.foo` and `.foo` will now be normalized correctly, but a caller writing `#foo\\+ {} #foo\\00002b {}` will still slip through. The contract of the function is 'normalize escaping across selector nodes'; the implementation honors that contract for one subtype only. Either narrow the spec (rename to `normalizeClassNameEscaping` and document the gap) or extend the implementation to all node kinds whose value getter/setter performs the same normalization.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "98-105",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: relies on undocumented getter/setter side effect of a third-party type",
+        "detail": "The mechanism `node.value = node.value` depends on postcss-selector-parser's ClassName implementation choosing to re-encode on assignment. That is an implementation detail of a supertype the module does not own; it is not part of the published Node contract. If postcss-selector-parser ever changes ClassName's setter (or a future Node subtype overrides `value` without this behavior), this rule silently regresses to the pre-fix bug with no test signal beyond the two added fixtures. At minimum the JSDoc should state the precondition ('requires postcss-selector-parser ClassName.value setter to canonicalize escapes') and the postcondition ('node.value is in canonical escape form'), and the test suite should pin the assumption with a direct unit test on the helper rather than only end-to-end rule tests.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "89-106",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "LEAKY-ABSTRACTION: helper reaches into `node.raws` past the public type",
+        "detail": "The `@ts-expect-error` on `node.raws?.value` is an admission that the abstraction is leaking: the helper is reading a private field of the Node type to optimize a hot path. This is acceptable as a local optimization but it couples `normalizeSelector` to the internal shape of postcss-selector-parser nodes. Consider isolating the raws probe behind a small typed helper (e.g. `hasRawValue(node)`) so the leak is named and locatable, and add a comment that the optimization is correctness-preserving (skipping nodes with no raws cannot change the canonical form because there is nothing to renormalize).",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "102-104",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module boundary: escape normalization belongs in the same pass as whitespace/comment normalization, but the ordering invariant is implicit",
+        "detail": "`normalizeSelector` now performs three ordered steps: escaping, whitespace/comments, then node order. The ordering matters (escape normalization must precede order normalization if order ever compares values), but the contract is not stated. Adding a one-line invariant comment at the top of `normalizeSelector` ('post: returned node is canonical w.r.t. escaping, whitespace, comments, and ordering \u2014 in that order') makes the module's promise legible to future maintainers and to any new normalization step added later.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "12-22",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The fix is sound for the reported bug and uses a clever, minimal mechanism \u2014 the `node.value = node.value` trick correctly delegates canonicalization to postcss-selector-parser's ClassName setter. From an ADT perspective, however, the contract is under-specified and asymmetric across subtypes: the helper normalizes ClassName escaping only, while ID, attribute, tag, and pseudo selectors are equally subject to CSS escape equivalence and will continue to produce false negatives in `no-duplicate-selectors`. The implementation also depends on an undocumented getter/setter behavior of a third-party type and reaches into `node.raws` past the public interface, so the abstraction is mildly leaky and the spec is missing. Recommend stating the pre/postconditions explicitly, pinning the third-party assumption with a direct unit test, and either extending the helper to the other escapable node kinds or narrowing the function's name and docstring to match what it actually promises. Decision label: SPEC-MISSING with a partial LSP-VIOLATION across selector-node subtypes."
+  },
+  "raw": ""
+}

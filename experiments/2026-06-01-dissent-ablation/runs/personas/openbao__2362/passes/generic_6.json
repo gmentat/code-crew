@@ -1,0 +1,70 @@
+{
+  "name": "generic_6",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root check uses HasParent which excludes same-namespace match",
+        "detail": "In vault/acl.go AllowOperation, `ns.HasParent(a.root)` likely returns false when ns and a.root are the same namespace. A root-policy ACL created in namespace X would then deny operations on X itself, only allowing descendants. The check should be `ns == a.root || ns.HasParent(a.root)` (or equivalent). The added test only verifies child rejection from root scope, not the same-ns case.",
+        "file": "vault/acl.go",
+        "lines": "350-360",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Sealed-namespace error matching is substring-based and overly broad",
+        "detail": "In sdk/logical/response_util.go, `errwrap.Contains(err, consts.ErrNamespaceSealed.Error())` matches the literal string \"namespace is sealed\" anywhere in the error chain. Because `ErrSealed` and `ErrNamespaceSealed` share the word \"sealed\" but matching is on full string, any user-supplied error containing the phrase \"namespace is sealed\" will be coerced to 503. Consider errors.Is or sentinel-typed checks.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-167",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed is stubbed to always return false, masking future seal semantics",
+        "detail": "vault/core.go adds `(*Core).NamespaceSealed` that unconditionally returns false with a TODO. Callers (ListAllNamespaces, rootToken paths) will silently behave as if no namespace is ever sealed. If this PR ships before SealManager, sealed namespaces will be transparently treated as unsealed in any caller relying on this signal \u2014 risk of subtle production behavior when SealManager lands and inverts assumptions.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces->ListNamespaces substitution may change filtering semantics",
+        "detail": "Multiple callers in core.go, core_metrics.go, counters.go switched from `c.namespaceStore.ListAllNamespaces(ctx, true)` to `c.ListNamespaces(ctx)`. These methods likely differ in whether they include the root namespace, respect ctx namespace scoping, or include sealed entries. MFA/locked-user/metrics/token-count loops may now miss or double-count namespaces. Needs explicit verification that ListNamespaces returns the same set.",
+        "file": "vault/core.go",
+        "lines": "3287, 3395",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removed root-namespace restriction for root policy weakens invariant",
+        "detail": "vault/acl.go previously rejected attaching the \"root\" policy outside the root namespace (`root policy is only allowed in root namespace`). That check is deleted. If any code path constructs an ACL with the root policy from a non-root-namespace context (e.g., legacy token decoding, tests, stored policies), a root token is silently created scoped to that ns. This should be gated explicitly until namespace-owned root tokens are intentionally enabled.",
+        "file": "vault/acl.go",
+        "lines": "101-109",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switch-case rewrite in AdjustErrorStatusCode changes precedence",
+        "detail": "Previous code applied each status adjustment independently (multiple ifs could match in sequence). The new switch returns on first match. If an error contained both \"sealed\" and an HTTPCodedError, prior behavior would let the HTTPCoded passthrough overwrite the 503; new behavior picks whichever case matches first. Confirm intended precedence; document if changed.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The PR makes a meaningful step toward per-namespace root tokens but ships with two correctness concerns worth blocking: the ACL fast-path now uses `ns.HasParent(a.root)` which likely fails when ns equals a.root, and substring matching on the new `ErrNamespaceSealed` in response_util.go is fragile. A stubbed `NamespaceSealed` returning false and the broad swap from `ListAllNamespaces(true)` to `ListNamespaces(ctx)` are P1 risks because they silently change semantics for MFA, metrics and token-count paths. The removal of the root-policy/root-namespace invariant should be gated until SealManager lands."
+  }
+}

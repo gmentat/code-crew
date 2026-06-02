@@ -1,0 +1,60 @@
+{
+  "name": "hickey",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "needs_more_preparation and prepared flags are no longer cleared by the resolver, complecting requirement state across phases",
+        "detail": "The resolver previously cleared needs_more_preparation and set prepared=True after its bulk prep. Now each command must remember to call prepare_linked_requirements_more before consuming dists. The flag's lifecycle is split across resolver, preparer, and command \u2014 three places mutating one piece of identity. Either centralize the transition inside prepare_linked_requirements_more or make the dist-readiness a value (a returned PreparedRequirement) rather than a mutable flag scattered across the system.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-186",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist complects metadata-only distribution with installed distribution under one accessor",
+        "detail": "get_dist() now returns whichever of three sources happens to be populated: cached _distribution, metadata_directory, or local wheel. Callers cannot tell whether they hold a metadata-only view or a real installable dist. That is identity-vs-value confusion: the same name refers to different kinds of fact about the world depending on lifecycle phase. Consider distinct accessors (get_metadata_dist vs get_installed_dist) or a tagged value.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is set inside the metadata-fetch branch as a side effect, complecting fetch with reporting",
+        "detail": "_fetch_metadata_only's caller now mutates req.download_info as a side effect to keep pip lock / --report working. The fact 'where this came from' is a value that belongs to the link resolution, not something the preparer should patch in conditionally. Compute download_info once at link time as a pure function of the link, independent of whether the wheel was downloaded.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three commands now duplicate the same prepare_linked_requirements_more call site",
+        "detail": "download.py, install.py, and wheel.py each independently call preparer.prepare_linked_requirements_more right after resolve(). This is incidental complexity migrated out of the resolver into every caller. The right shape is probably a single 'finalize for installation' step the commands opt into, or a lazy dist accessor that triggers preparation on demand. Easy to copy-paste, not simple.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked: what is a 'prepared' requirement, as a value",
+        "detail": "The whole bug stems from InstallRequirement being a mutable place that accumulates state (metadata_directory, _distribution, download_info, needs_more_preparation, prepared) across phases. A hammock pass would model this as a sequence of immutable values: ResolvedLink -> MetadataOnlyReq -> FullyPreparedReq. The patch threads one more flag through the existing place-oriented design instead of separating the phases.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The patch fixes the reported behavior (dry-run no longer downloads wheels) by moving a call site out of the resolver and into each command, and by caching a metadata-only distribution on the requirement. It works, but it is EASY-NOT-SIMPLE: it threads another mutable flag through an already place-oriented InstallRequirement instead of asking why 'prepared-ness' is mutable state shared across resolver, preparer, and three commands. The complecting of metadata-only dist and installed dist behind one get_dist() accessor, plus the side-effect assignment of download_info inside the fetch branch, will produce a follow-up bug the next time someone adds a phase. The right hammock question \u2014 what is a prepared requirement as a value \u2014 was not asked."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "coreos-assembler__4381",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "nevra[0] indexes the first character of the filename, not the first letter of the package name",
+        "detail": "Koji's canonical path uses the lowercase first letter of the package NAME, but nevra is the filename like 'kernel-6.x...rpm'. nevra[0].lower() happens to work for normal names but breaks when filenames start with non-letters or when callers expect the name component (e.g. '389-ds-base' -> '3'). Koji path is /Packages/<name[0]>/<name>/<version>/<release>/<arch>/<nevra>, not /Packages/<nevra[0]>/<nevra>. The constructed URL here will 404.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "22-26",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Constructed koji URL omits required name/version/release/arch path components",
+        "detail": "The canonical kojipkgs path is .../Packages/<n>/<name>/<version>/<release>/<arch>/<nevra>.rpm. This code builds .../latest/<arch>/Packages/<letter>/<nevra>, which does not exist on kojipkgs. Every non-coreos-pool URL will be rewritten to a broken link, causing hermetic builds to fail to fetch RPMs.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "19-26",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "extract_arch_from_url silently returns None, producing a malformed URL",
+        "detail": "If the regex does not match (e.g. 'noarch' packages, or unexpected URL shape), arch is None and the f-string yields '.../latest/None/Packages/...'. The function should either treat noarch explicitly or raise so the failure is visible rather than silently emitting an invalid URL into rpms.lock.yaml.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "30-46",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "noarch packages are not handled by the arch list",
+        "detail": "The arches list omits 'noarch', but repoquery returns --arch noarch results too. A noarch RPM URL will not match the regex, extract_arch_from_url returns None, and the rewritten URL is invalid. Noarch packages must either be detected from the NEVRA suffix or kept on their original URL.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "37-46",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Substring check 'coreos-pool' is fragile vs the koji_url_base constant",
+        "detail": "use_koji_url_only checks 'if koji_url_base in url' while query_packages_location checks 'coreos-pool' in url. Mixing these is inconsistent; a URL containing 'coreos-pool' but a different host (mirror, staging) would be treated differently in each function. Pick one canonical check and reuse it.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "16-19, 161",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Race condition with koji tagging is acknowledged but unguarded",
+        "detail": "The PR description notes a race between bump-lockfile merge and coreos-koji-tagger applying the tag. There is no retry, verification, or warning emitted when constructed URLs do not yet resolve. At minimum a HEAD probe or comment in the lockfile noting the dependency would aid debugging when Konflux fetches fail.",
+        "file": "src/konflux-rpm-lockfile",
+        "lines": "9-27",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The patch replaces a DNF5 workaround with URL rewriting to point at coreos-pool, but the constructed koji path does not match the canonical kojipkgs layout: it uses nevra[0] (filename's first char) instead of the package name's first letter, and omits the name/version/release/arch directories. As written, every rewritten URL is likely a 404, which would break Konflux hermetic builds. Additional gaps: noarch packages are not in the arch regex list, extract_arch_from_url silently returns None instead of failing loudly, and the coreos-pool detection is inconsistent between functions. The acknowledged koji-tag race should at least be guarded with a sanity check."
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "task_id": "pipecat__3692",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Frame holds a live FrameProcessor reference where a stable identifier would do.",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service is typed as a full FrameProcessor, coupling a control-frame ADT to a heavy mutable abstraction. Targeting needs only 'is this for me?' \u2014 a name, id, or weakref would keep the frame flat, loggable, serializable, and free of object-graph baggage while narrowing the contract.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Suppression invariant relies on object-identity equality of FrameProcessor instances.",
+        "detail": "`frame.service == self.strategy.active_service` depends on whatever __eq__ FrameProcessor inherits and on the active service not being wrapped, proxied, or re-instantiated. A future __eq__ override or proxy silently breaks routing. Comparing stable identifiers (or using `is`) would make the invariant explicit and testable.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Consumer/re-push contract for the request frame is unstated and split across components.",
+        "detail": "Previously the switcher dropped the frame unconditionally; now STTService re-pushes it and the switcher only suppresses for the active service. The postcondition (frame invisible downstream, services must re-push after handling, behavior outside a switcher) is undocumented, creating an LSP hazard for STTService subclasses overriding process_frame.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switcher silently leaks request frames targeting inactive services.",
+        "detail": "push_frame only consumes the frame when it targets the active service; behavior for inactive-target frames reaching the switcher boundary is undefined. Today the dispatcher only sends to the active service so it cannot happen, but the invariant is implicit. Either assert it, document it, or drop all request frames at the boundary.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-240",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The rename clarifies intent and the targeted-dispatch semantics are an improvement, but the panel converges on one structural smell: putting a live FrameProcessor on a control frame instead of a stable identifier. That choice forces object-identity equality at the suppression site, which is fragile under proxies, wrapping, or future __eq__ overrides. The consumer/re-push contract is also split across the switcher and STTService without being written down, creating a latent LSP hazard for subclasses. Behavior for inactive-target frames is undefined and should be asserted or documented."
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "task_id": "pip__13482",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "Severity of the missing prepared/needs_more_preparation flag reset after removing the resolver bookkeeping",
+        "positions": [
+          {
+            "persona": "Torvalds",
+            "position": "P0 \u2014 downstream code will misbehave; either show where the flags get flipped now or the patch is broken."
+          },
+          {
+            "persona": "Dijkstra",
+            "position": "P0 \u2014 UNREASONED; the post-resolve invariant on prepared/needs_more_preparation is silently abandoned and no test enforces it."
+          },
+          {
+            "persona": "Knuth",
+            "position": "P1 \u2014 invariant violated on the resolver exit path; fix by re-establishing it in prepare_linked_requirements_more itself."
+          },
+          {
+            "persona": "Hickey",
+            "position": "P1 \u2014 state semantics complected; flag should be derived from the distribution or owned in one place."
+          },
+          {
+            "persona": "Liskov",
+            "position": "P1 \u2014 LSP-style postcondition weakening of resolve(); contract for who finishes preparation is undocumented."
+          },
+          {
+            "persona": "Pike",
+            "position": "P1 \u2014 data structure now fights the algorithm; either drop the flags or own staging in one place."
+          }
+        ]
+      },
+      {
+        "topic": "Severity / shape of the install.py call placement and the dry-run guard",
+        "positions": [
+          {
+            "persona": "Knuth",
+            "position": "P1 \u2014 the call appears placed before the dry-run early-return, likely defeating the headline optimization unless guarded with `if not options.dry_run`."
+          },
+          {
+            "persona": "Dijkstra",
+            "position": "P0 \u2014 SMUGGLED-GOTO; the call is placed AFTER the dry-run return and AFTER the pip-self-update lookup, so consumers between resolve() and the new call see half-prepared state."
+          },
+          {
+            "persona": "Torvalds",
+            "position": "Did not call out an install.py placement bug specifically; flagged download.py re-ordering as P1 needing justification but considered the order correct."
+          }
+        ]
+      },
+      {
+        "topic": "How to address the three-way duplication of prepare_linked_requirements_more across commands",
+        "positions": [
+          {
+            "persona": "Knuth",
+            "position": "P2 \u2014 collapse to one named operation/finalize helper; duplication is a drift hazard."
+          },
+          {
+            "persona": "Hickey",
+            "position": "P1 \u2014 the policy 'when does more preparation happen?' deserves one home, not a copy-pasted line."
+          },
+          {
+            "persona": "Liskov",
+            "position": "P1 \u2014 WRONG-BOUNDARY; introduce a single finalize operation on the preparer that owns the postcondition."
+          },
+          {
+            "persona": "Pike",
+            "position": "P1 \u2014 obvious candidate for composition; today they agree, in a year they won't."
+          },
+          {
+            "persona": "Torvalds",
+            "position": "Framed as part of THREE-PATCHES (P1) \u2014 split the commit rather than (only) deduplicate."
+          },
+          {
+            "persona": "Dijkstra",
+            "position": "P2 \u2014 duplicated control flow that structured programming forbids."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer sets req.prepared / needs_more_preparation = False; post-resolve invariant abandoned with no replacement",
+        "detail": "The deleted block in resolver.py set `req.prepared = True` and `req.needs_more_preparation = False` after calling prepare_linked_requirements_more. The new commands call prepare_linked_requirements_more themselves but nothing in the diff flips those flags afterward. Downstream code that reads `prepared` or `needs_more_preparation` will see stale values; future callers will leave requirements half-prepared. Fix is either to re-establish the invariant inside prepare_linked_requirements_more (one site, one truth) or drop the flags entirely and make preparation idempotent.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185 (deleted)",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "install.py call placement vs dry-run / pip-self-update phase boundary likely defeats the headline optimization or leaves consumers reading half-prepared state",
+        "detail": "Knuth reads the new `prepare_linked_requirements_more` call as inserted before the dry-run early-return, which would still trigger the very downloads the PR claims to avoid; the headline claim depends on guarding the call with `if not options.dry_run`. Dijkstra reads the same code as the inverse problem: the call is placed AFTER the dry-run report writer and pip-self-update lookup, so intervening code runs against requirements whose `get_dist()` returns a metadata-only distribution. Either reading exposes a SMUGGLED-GOTO: a one-line move reorders an entire phase boundary without a stated precondition for the consumers between resolve() and the new call.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-426",
+        "flagged_by": [
+          "Knuth",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist / get_dist cache has no invalidation contract and creates a third source of truth alongside metadata_directory and local_file_path",
+        "detail": "get_dist now branches across cached `_distribution`, `metadata_directory`, and `local_file_path` with `_distribution` taking precedence. No documented invariant says which fields may coexist, who wins when more than one is set, or whether the cache is invalidated once the full wheel is materialized. The metadata-only distribution cached during dry-run can silently shadow the real installed distribution downstream. Either invert priority so metadata_directory/local_file_path win when present, invalidate `_distribution` on full preparation, or collapse to a single canonical `dist` field set once by the preparer.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 608-620",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info populated via direct_url_from_link(req.link, req.source_dir) where req.source_dir is unspecified during metadata-only fetch",
+        "detail": "In dry-run/metadata-only mode the package has not been unpacked, so `req.source_dir` is typically None or stale. `direct_url_from_link`'s contract with a None source_dir is not stated; if it crashes or produces a bogus DirectUrl, `pip lock` / `--report` will emit it. download_info has an implicit contract (it describes what was actually downloaded and verified); populating it from a non-download path silently weakens that contract. Either narrow the field to indicate metadata-only provenance, guard the assignment with an explicit precondition, or have the metadata fetcher return (dist, download_info) so the caller assigns explicitly.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three command files duplicate the same prepare_linked_requirements_more invocation; preparation policy is no longer owned in one place",
+        "detail": "download.py, install.py, and wheel.py each grow an identical `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` call right after `resolver.resolve(...)`. The invariant once centralized in the resolver is now scattered across three call sites with no shared helper, no shared comment, and no shared test \u2014 exactly the WRONG-BOUNDARY problem. A new command (or `pip lock`) will forget the call and silently regress to half-prepared requirements. Fix: introduce a single `finalize_for_install` / `finalize` operation on the preparer or requirement_set that owns the postcondition.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422 (parallel sites in download.py, wheel.py)",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Headline behavioural claim (no full wheel download under --dry-run / pip lock when PEP-658 metadata exists) ships with no test",
+        "detail": "The whole point of this patch is that `pip install --dry-run` and `pip lock` stop downloading full wheels when PEP-658 metadata is available. That is a verifiable postcondition: 'for every requirement resolved via PEP-658 metadata under --dry-run, no wheel file is fetched.' The diff contains zero test changes enforcing it. Without a regression test, the optimization will silently come back as a bug. TESTED-NOT-PROVED.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "Torvalds",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three semi-independent changes mashed into one commit (THREE-PATCHES)",
+        "detail": "The PR mixes (1) moving prepare_linked_requirements_more out of the resolver into each command, (2) adding the `_distribution` cache with set_dist/get_dist, and (3) populating download_info during metadata-only fetch. Each is reviewable on its own; together they are harder to bisect when something regresses, and the news entry only describes the user-visible win. Split it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "Torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "News entry mentions pip lock but no pip lock command path is modified",
+        "detail": "news/12603.feature.rst claims `pip lock` benefits from this change, yet no lock command file is modified and the new `prepare_linked_requirements_more` calls live only in install/download/wheel. If `pip lock` relies on the resolver's previous postcondition (full preparation during resolve), this PR may have silently regressed or improved it depending on its current call pattern. The contract is not stated; verify and document the lock path explicitly.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "Liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Re-ordering of prepare_linked_requirements_more before save_linked_requirement in download.py is not justified in the commit message",
+        "detail": "In commands/download.py the prepare_more call was moved before the save_linked_requirement loop. The new order is plausibly correct for download (you need the file before saving), but previously save happened on metadata-only reqs and prepare_more ran after. The patch never explains why the re-ordering is safe for the existing download flow \u2014 state it in the commit message or the next reader has to assume it wasn't thought through.",
+        "file": "src/pip/_internal/commands/download.py",
+        "lines": "130-140",
+        "flagged_by": [
+          "Torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no validation, no precondition, and no invariant",
+        "detail": "`def set_dist(self, distribution): self._distribution = distribution` is Java-style ceremony in Python \u2014 no validation, no event, no laziness. Either drop the underscore and expose `distribution` as a plain attribute, make it a property with a real invariant (e.g. clear metadata_directory when set, or assert link match), or add an `assert self._distribution is None or self._distribution is distribution` to guard double-assignment. The getter/setter pair as written buys nothing.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "Torvalds",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist accepts BaseDistribution with no subtype audit; metadata-only dist may not honor all BaseDistribution operations (LSP surface)",
+        "detail": "BaseDistribution is the supertype; metadata-only distributions returned by `_fetch_metadata_only` are a subtype with weaker preconditions (no installed files, no wheel-derived hashes). Caching one under the general `get_dist()` name invites callers to invoke operations the metadata-only distribution cannot honor. Either narrow the return type in metadata-only mode or document which BaseDistribution operations are safe pre-finalization.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-620",
+        "flagged_by": [
+          "Liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_distribution field has no documented invariant relative to metadata_directory / local_file_path",
+        "detail": "The new `_distribution` cache is introduced without a one-line contract: is it authoritative once set? May it disagree with `metadata_directory`? Can `set_dist` be called twice with different values? Without a written invariant the field will accrete uses that violate whatever the author had in mind.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172",
+        "flagged_by": [
+          "Hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Setting req.download_info inside _fetch_metadata_only complects 'fetch metadata' with 'record provenance for reporting'",
+        "detail": "`prepare_linked_requirement` now does two things in the metadata-only branch: producing a metadata distribution (a value) and recording a `download_info` side-effect on the requirement (an identity update for downstream consumers). These concerns should be separated \u2014 the fetcher should return a value; whoever needs `download_info` for reporting should derive it. The current shape is a filter with a hidden side channel.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "Hickey",
+          "Pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment 'Ensure download_info is available even in dry-run mode' explains what, not why",
+        "detail": "The comment restates the line. The interesting question is why `download_info` was previously None here and what downstream consumers (`pip lock`, `--report`) actually need from it. Put the rationale in the commit message or expand the comment so the next maintainer doesn't have to git-blame their way to the answer.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "Torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info synthesis would benefit from a literate-comment-grade clarification that source_dir is intentionally None",
+        "detail": "`direct_url_from_link(req.link, req.source_dir)` is called where `req.source_dir` is typically None during metadata-only fetch. Either pass `None` explicitly with an inline comment (`# no source_dir yet; metadata-only fetch`) or `assert req.source_dir is None` so the reader does not have to chase whether this is a bug. As-is it reads like the value matters.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "Knuth"
+        ]
+      }
+    ],
+    "summary": "All six reviewers independently converge on the same skeleton of complaints: removing the resolver's `prepared` / `needs_more_preparation` bookkeeping without relocating the invariant (Torvalds and Dijkstra rate this P0; Knuth/Hickey/Liskov/Pike rate it P1), introducing a `_distribution` cache whose precedence over `metadata_directory` and `local_file_path` is undocumented and lacks invalidation when the full wheel arrives, populating `download_info` from `req.source_dir` at a lifecycle point where that field is unspecified, and copy-pasting `prepare_linked_requirements_more` into three command files instead of giving the preparation phase one owner. The headline behavioural claim (no full wheel download under `--dry-run` / `pip lock` when PEP-658 metadata exists) ships with no test, and Liskov notes the news entry advertises `pip lock` while no lock command path is touched. The strongest preserved disagreement is about install.py's call placement: Knuth reads the new `prepare_linked_requirements_more` call as before the dry-run return (which would defeat the optimization without an `if not options.dry_run` guard), while Dijkstra reads it as after the dry-run report and pip-self-update lookup (so consumers in between see half-prepared state). Both readings argue the same root cause \u2014 a SMUGGLED-GOTO phase-boundary move with no stated precondition for the intervening consumers \u2014 and together they make a strong case that the change cannot ship until the resolver's post-condition is written down and owned in a single place."
+  },
+  "raw": ""
+}

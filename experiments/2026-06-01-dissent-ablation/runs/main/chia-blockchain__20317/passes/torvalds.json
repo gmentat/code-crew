@@ -1,0 +1,114 @@
+{
+  "persona": "torvalds",
+  "task_id": "chia-blockchain__20317",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Three patches submitted as one",
+        "detail": "This diff does three things: (1) extract sign/verify into a shared util, (2) replace per-wallet sign_message with current_p2_puzzle_hash helpers, (3) add tests for sign_message_by_id and sign_message_by_address. Each is reviewable on its own and bisectable on its own. Submitted together they make the diff harder to read and harder to revert if one piece regresses. THREE-PATCHES.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Duplicated signing-mode branch logic in sign_message and verify_signature",
+        "detail": "chia/wallet/util/signing.py:sign_message and verify_signature each carry their own if/elif chain over SigningMode, and the property signing_mode_enum on the request types is a third copy of similar branching. The whole point of extracting a library is to have one place where the mode-to-bytes mapping lives. Pull the mode-to-message-bytes computation into one helper and call it from both sign and verify. Right now we have parallel ladders that will drift.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-45, 75-85",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "verify_signature docstring is a leftover lie",
+        "detail": "The new free function carries ':param request:' in its docstring even though it takes no request object - it takes five keyword arguments. This was copy-pasted from the RPC method and never updated. Maintainer-six-years-from-now reads that and wonders where 'request' is. Fix the docstring or delete it.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "18-26",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module-level signing_mode_enum function shadows the property of the same name",
+        "detail": "wallet_request_types.py defines a top-level function signing_mode_enum(request) and then defines a @property signing_mode_enum on two classes that calls it. Same name, two scopes, easy to misread which one is called. Either rename the helper (_compute_signing_mode) or make it a static/class method. Naming collisions like this are gratuitous.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-440",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SignMessageResponse dataclass is gratuitous",
+        "detail": "A new module-private @dataclass(kw_only=True, frozen=True) with two fields (pubkey, signature) is introduced just to be unpacked at every call site into a separate response type (SignMessageByAddressResponse / SignMessageByIDResponse). The previous code returned a tuple[G1Element, G2Element] and that was fine for an internal helper. Adding a class that nothing else uses, just to wrap a 2-tuple, is the kind of abstraction-for-its-own-sake that adds nothing. Return the tuple, or have callers consume the existing response types directly. BAD-TASTE.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "62-85",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum property is called repeatedly per request - compute once",
+        "detail": "In sign_message_by_address and sign_message_by_id the property request.signing_mode_enum is invoked three times in the same function (once for mode, once for the response value). The property re-runs the if/elif ladder each access. Bind it to a local variable once. Cheap fix, removes wasted work and makes the call sites read better.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1849-1862, 1893-1928",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message inconsistency between DID wallet ValueErrors",
+        "detail": "did_wallet.current_p2_puzzle_hash raises 'Missing DID inner puzzle.' for one path and 'Invalid DID inner puzzle.' for the other; the original code said 'Invalid inner DID puzzle.' Word-order shuffled for no reason. Either revert the wording or leave it - just don't churn an error message in a refactor PR.",
+        "file": "chia/wallet/did_wallet/did_wallet.py",
+        "lines": "898-906",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test_sign_message_by_address never asserts the verification result",
+        "detail": "The new test calls client.verify_signature(...) and discards the return value. The endpoint returns VerifySignatureResponse(isValid=bool, error=...) which can come back isValid=False with no exception. A test that doesn't assert the thing it's testing is decoration. Add `assert res.isValid is True`.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "3147-3163",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert_secret_key_to_synthetic placed on base Wallet but called via main_wallet only",
+        "detail": "The new helper sits on Wallet, but every caller in wallet_rpc_api uses `self.service.wallet_state_manager.main_wallet.convert_secret_key_to_synthetic(...)`. It does not depend on any wallet instance state - it's pure. Either make it a module-level function in signing.py (where it belongs) or a @staticmethod. Hanging it off main_wallet as an instance method on the base class is misleading; it implies per-wallet behavior that does not exist.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "111-115",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests duplicate the implementation's mode-to-bytes ladder",
+        "detail": "test_sign_message_by_nft_id manually constructs `Program.to((CHIP_0002_SIGN_MESSAGE_PREFIX, message)).get_tree_hash()` and `bytes(message, 'utf-8')` etc. inline to verify each mode. That is the same ladder as in signing.py. The natural test is to call verify_signature() with the appropriate mode - which is the function the PR just shipped. Otherwise the test is a parallel reimplementation that will pass even if both sides drift together.",
+        "file": "chia/_tests/wallet/nft_wallet/test_nft_wallet.py",
+        "lines": "668-784",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The direction is right - pulling sign/verify out of the RPC into a library is the correct shape, and the per-wallet sign_message methods becoming current_p2_puzzle_hash is a clean simplification. But the patch leaves duplicated mode-to-bytes ladders in three places (sign, verify, request-property), introduces a one-shot SignMessageResponse dataclass that earns nothing, ships a verify_signature docstring that still talks about a 'request' parameter that does not exist, and bundles three distinct changes into one diff. The new test_sign_message_by_address forgets to assert isValid. Fix the dedup, the docstring, the assertion, and consider splitting; then it lands."
+  },
+  "raw": ""
+}

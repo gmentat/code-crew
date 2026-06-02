@@ -1,0 +1,60 @@
+{
+  "name": "generic_2",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close message uses {\"type\": \"Close\"} but PR description and Deepgram docs specify \"CloseStream\"",
+        "detail": "The PR description, title, and linked Deepgram SDK docs all reference the control message {\"type\": \"CloseStream\"}, but the code defines _CLOSE_MSG as json.dumps({\"type\": \"Close\"}). If Deepgram rejects unknown types or silently ignores them, this fix does not actually achieve graceful shutdown. Verify the exact type string against the Speak v1 socket client.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout may consume a useful audio frame instead of the close acknowledgment",
+        "detail": "After Flush/Close, Deepgram may still emit queued binary audio frames before the close ack. A single receive() call will grab whichever message arrives first and drop it on the floor, potentially truncating the very audio this fix is meant to preserve. Should loop until close/error or drain into the emitter.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-139",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sending on a possibly already-closed WebSocket will raise and only be logged as a warning",
+        "detail": "_close_ws is called during teardown paths where the socket may already be closed by the server (network error, prior CLOSE frame). send_str will raise ConnectionResetError/ClientConnectionError; the broad except swallows it as a warning, which is fine, but no check of ws.closed before sending means every shutdown after an error logs noisy warnings.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-140",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Concurrent _run task may still be reading from ws while _close_ws calls receive()",
+        "detail": "If the main receive loop in the synthesis task is concurrently calling ws.receive(), adding another receive() here races for messages and can interleave reads unpredictably. Consider coordinating shutdown via the existing receive loop (e.g., signaling it to drain) rather than reading directly in _close_ws.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-139",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Existing _FLUSH_MSG reference predates this PR but is now defined here; confirm no duplicate definition",
+        "detail": "The diff defines _FLUSH_MSG at class level, but _close_ws already references SynthesizeStream._FLUSH_MSG as if it existed. If it was previously defined elsewhere (e.g., module level or _run), this introduces a duplicate or shadowed constant. Worth a quick grep to ensure single source of truth.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies the need to signal Deepgram before tearing down the WebSocket, and the try/finally structure is sound. However, the actual control message string ({\"type\": \"Close\"}) does not match the \"CloseStream\" type advertised in the PR description and Deepgram's documented API \u2014 this should be verified before merge. Additionally, the single receive() with a 1s timeout risks consuming a final audio frame rather than the close ack, partially defeating the purpose of the fix. Minor concerns around concurrent reads with the main receive loop and noisy warnings on already-closed sockets."
+  }
+}

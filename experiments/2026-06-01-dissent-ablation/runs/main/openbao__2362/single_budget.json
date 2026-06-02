@@ -1,0 +1,164 @@
+{
+  "task_id": "openbao__2362",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Per-namespace root ACL: scope of authority granted by a non-root root token",
+        "positions": [
+          {
+            "persona": "feature-correct",
+            "position": "Using HasParent so that a ns1/-bound root token also covers ns1/ns2/, ns1/ns2/ns3/... is the intended hierarchical-root semantics and matches how namespace ownership works elsewhere in OpenBao."
+          },
+          {
+            "persona": "principle-of-least-privilege",
+            "position": "A 'root token for namespace ns1/' that automatically also rules every descendant namespace is a significant authority expansion vs. the prior model. Operators creating ns1/ns2/ may not expect a root token issued at ns1/ to dominate their child. Worth an explicit design note / docs entry, and probably a test that pins the descendant-domination behavior (currently the new tests only cover (allowed at same ns) and (denied when checked from root)). "
+          }
+        ]
+      },
+      {
+        "topic": "AdjustErrorStatusCode refactor from cascading ifs to switch",
+        "positions": [
+          {
+            "persona": "readability-first",
+            "position": "The switch is cleaner, deduplicates the StatusServiceUnavailable assignment for the new ErrNamespaceSealed case, and is exactly the kind of refactor reviewers want when adding parallel branches."
+          },
+          {
+            "persona": "behavior-preservation",
+            "position": "The original cascading ifs would re-overwrite *status; if an error contained both ErrSealed AND wrapped an HTTPCodedError, the final status used to be the HTTPCoded code (the HTTPCoded if was last). With the new switch, the first matching case wins, so sealed/api-locked now strictly override HTTPCoded codes. That is a behavior change that should be called out and confirmed-or-fixed, not slipped in as a 'cleanup'."
+          }
+        ]
+      },
+      {
+        "topic": "NamespaceSealed stub returning false",
+        "positions": [
+          {
+            "persona": "ship-incrementally",
+            "position": "Stubbing as false is exactly right for a 'core stubs' PR \u2014 non-breaking, lets dependent surface area (ListAllNamespaces, error sentinel, response_util case) be wired up now and the SealManager land later. Returning false preserves current behavior identically."
+          },
+          {
+            "persona": "future-hazard",
+            "position": "Once a real implementation lands, every caller of ListAllNamespaces(_, _, false) silently changes behavior: MFA configs, locked-user updates, entity-counter, etc. will quietly skip namespaces that the seal manager classifies as sealed. That class of silent regression deserves at minimum a TODO inventory of impacted callers, and a comment on Core.NamespaceSealed making the deadlock concern explicit (it is called from inside the namespace store lock)."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Switch in AdjustErrorStatusCode silently changes precedence between ErrSealed/ErrAPILocked and HTTPCodedError",
+        "detail": "Previously each condition was an independent `if` that overwrote *status, so for an error wrapping both consts.ErrSealed (or ErrAPILocked) and an HTTPCodedError the HTTPCoded code won (the HTTPCoded block ran last). The new `switch { case ...:; case ...:; case errwrap.ContainsType(err, hce): ... }` short-circuits on the first match, so an error that contains 'Vault is sealed'/'API access is locked' will now force 503 regardless of any wrapped HTTPCodedError. This is a public-API behavior change inside the request-response path and should either be preserved or explicitly documented as intentional, with tests pinning the new precedence.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rootToken now requires a namespace on ctx; callers passing context.Background() will fail",
+        "detail": "Old rootToken force-injected RootNamespace into ctx (`ctx = namespace.ContextWithNamespace(ctx, namespace.RootNamespace)`). The new implementation calls namespace.FromContext(ctx) and returns ErrNoNamespace if the caller did not seed one. The PR updates http/sys_init.go (handleSysInitPut, handleSysInitGet) and many tests to add RootContext(...). Non-test callers (vault/init.go Initialize, vault/generate_root.go generate) inherit the caller's ctx \u2014 any future caller that forgets to attach a namespace gets a non-obvious 'no namespace' error during init/root-gen. Worth adding a defensive fallback to RootNamespace when ctx has no namespace, or at minimum an audit comment on the function.",
+        "file": "vault/token_store.go",
+        "lines": "1133-1156",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation now does namespace.FromContext before the root-policy fast path, changing behavior on namespace-less contexts",
+        "detail": "Previously a root ACL granted access without ever calling namespace.FromContext \u2014 `if a.root { ... return allowed }` was unconditional. Now the function calls namespace.FromContext(ctx) first and returns an empty (denied) ACLResults on error, then checks `a.root != nil`. Any caller that constructed a root ACL and invoked AllowOperation with a ctx that did not carry a namespace would have been allowed before, and is now denied. Worth verifying no in-tree caller relies on the old contract (audit/sealwrap/internal paths in particular), and worth a test for the 'root ACL + no-ns ctx' case.",
+        "file": "vault/acl.go",
+        "lines": "339-359",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent semantics combined with Path-prefix matching is the load-bearing security check; tests use a non-canonical Namespace{Path: \"ns1\"}",
+        "detail": "The non-root root-token authority decision reduces to `ns.HasParent(a.root)` which is `strings.HasPrefix(ns.Path, a.root.Path)` (with empty-path special cases). In production all namespace paths are run through Canonicalize() and end with a trailing slash, which is what protects against `ns1` matching `ns11/`. The new test in vault/acl_test.go constructs `&namespace.Namespace{Path: \"ns1\"}` without trailing slash, which would have matched `ns123/`/`ns1abc/` via raw prefix \u2014 the test happens to pass because there is no sibling, but it codifies the wrong invariant. Either use namespace.Canonicalize / a constructor, or add a test that explicitly proves `ns1/` does not authorize ops in a sibling namespace whose path starts with `ns1` (e.g. `ns11/`).",
+        "file": "vault/acl_test.go",
+        "lines": "294-342",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces calls Core.NamespaceSealed while holding the namespace-store lock",
+        "detail": "ListAllNamespaces takes ns.lockWithInvalidation and then, per-entry, calls ns.core.NamespaceSealed(entry). The current stub returns false, so this is safe today. Once SealManager lands and NamespaceSealed acquires any lock that is ever held in the inverse order (e.g. seal-manager lock that itself reads from namespace store), this becomes a deadlock. Either document the lock-ordering contract on NamespaceSealed now (must be lock-free, must not touch namespaceStore), or snapshot entries under the lock and filter after release.",
+        "file": "vault/namespace_store.go",
+        "lines": "904-924",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "mountEntryView for mountTypeToken now namespace-scopes the storage path; previously it was always root-scoped",
+        "detail": "Old code: `case mountTypeToken: return NewBarrierView(c.barrier, systemBarrierPrefix+tokenSubPath)`. New code: `case mountTypeToken: return NamespaceView(c.barrier, me.Namespace()).SubView(systemBarrierPrefix + tokenSubPath)`. If a token mount entry can ever carry a non-root namespace (today or in any future code path), the storage prefix shifts from `sys/token/` to `namespaces/<uuid>/sys/token/`. The PR claims 'non-breaking, existing behavior retained' \u2014 that holds only if every token mount today has me.Namespace() == nil or RootNamespace. Please confirm explicitly, ideally with a test case in TestCore_MountEntryView that pins the root behavior for mountTypeToken.",
+        "file": "vault/mount.go",
+        "lines": "2349-2360",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "rootToken stores a namespace-prefixed storage-style path in TokenEntry.Path",
+        "detail": "`Path: NamespaceBarrierPrefix(ns) + \"auth/token/root\"` produces e.g. `namespaces/<uuid>/auth/token/root` for non-root namespaces. TokenEntry.Path is also surfaced in audit/lease/display contexts; mixing storage-prefix syntax into a logical path field is a smell and may surprise tooling that parses Path expecting only `auth/...`. Consider storing only `auth/token/root` and relying on NamespaceID for scoping.",
+        "file": "vault/token_store.go",
+        "lines": "1141-1148",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inconsistent includeSealed argument across the new ListAllNamespaces callsites",
+        "detail": "Core.ListNamespaces and logical_system_user_lockout.getLockedUsersResponses pass `includeSealed: false` (hide sealed from user-facing surfaces); the four token_store gauge collectors pass `includeSealed: true` (include sealed in metrics). The intent is defensible, but there is no comment near the call sites explaining the policy, so a later refactor will easily flip these. A two-line comment at each call site or a typed enum (IncludeSealed / ExcludeSealed) would prevent that.",
+        "file": "vault/token_store.go",
+        "lines": "3866, 3925, 3987, 4059 (and vault/namespace_oss.go, vault/logical_system_user_lockout.go)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength comment is opaque, MaxNsIdLength removal not noted as breaking for any external consumer",
+        "detail": "`NSTokenLength = TokenLength + namespaceIdLength + 1` with the comment `(TokenLen + \".\"[1] + nsID)` is cryptic \u2014 `\".\"[1]` is not valid Go and reads like an attempt to denote 'the byte length of the dot'. Prefer something like `// TokenLength + 1 ('.' separator) + namespaceIdLength`. Also: MaxNsIdLength was removed; if anything outside this repo references it via the public sdk path, that is a breaking API change.",
+        "file": "vault/token_store.go",
+        "lines": "76-83",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test uses t.Context() mixed with t.Parallel() and namespace.RootContext; correctness fine, style is inconsistent",
+        "detail": "Many test changes replace `namespace.RootContext(nil)` and `context.Background()` with `namespace.RootContext(t.Context())`. That is strictly better. But several files still mix the two in adjacent functions; a follow-up pass to converge on `t.Context()` everywhere would reduce diff churn next time.",
+        "file": "vault/expiration_test.go",
+        "lines": "various",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Core.NamespaceSealed comment claims 'in direct ancestry line' but stub returns false unconditionally",
+        "detail": "The doc-comment promises a hierarchical check (any ancestor sealed -> namespace is effectively sealed), but the body is `return false`. Either qualify the comment as 'will check ancestry once SealManager lands' or drop the ancestry language until the implementation exists; mismatched doc vs. body misleads call sites that already pass `includeSealed: false` thinking the filter does ancestry.",
+        "file": "vault/core.go",
+        "lines": "1396-1406",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The PR is a careful preparatory step toward per-namespace seals: it generalizes the ACL `root` flag from `bool` to `*namespace.Namespace`, plumbs namespaces through tests/contexts, adds the `ErrNamespaceSealed` sentinel and `Core.NamespaceSealed` stub, and extends `ListAllNamespaces` with an `includeSealed` filter. The core ACL change is sound \u2014 `HasParent`-based ancestor check preserves root-namespace behavior exactly and is the right shape for hierarchical root tokens \u2014 but several load-bearing changes are riskier than the PR description suggests. The `AdjustErrorStatusCode` refactor is a precedence change (sealed/api-locked now strictly override HTTPCoded), `rootToken` and `AllowOperation` now hard-require a namespace on `ctx` and silently deny otherwise, `mountEntryView` for `mountTypeToken` shifted from always-root-scoped to namespace-scoped, and the new `NamespaceSealed` is invoked under the namespace-store lock (lock-ordering hazard for the future real impl). The test for the new child-namespace root case uses a non-canonical `Path: \"ns1\"` (no trailing slash), which is fine in isolation but does not exercise the sibling-prefix collision case that `HasParent` relies on canonicalization to defend against. None of these are confirmed bugs given the stubs, but each warrants either a pinning test, a clarifying comment, or an explicit acknowledgement in the PR before merge."
+  },
+  "raw": ""
+}

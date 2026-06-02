@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests fabricate a zero-amount, zero-puzzle-hash Addition to bypass the non-empty additions invariant.",
+        "detail": "Tests changed additions=[] to Addition(amount=0, puzzle_hash=bytes32.zeros) so CreateSignedTransaction.__post_init__'s len<1 check passes. This is the data model lying: cat_spend with request.additions=None cannot produce that payload in production. Either the invariant is wrong or the test no longer exercises the original case. Fix the model, not the tests.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "send_transaction silently changes puzzle_decorator semantics from [0]-only slicing to forwarding the entire list.",
+        "detail": "The original code forwarded only request.puzzle_decorator[0]; the new path passes the full list, and _generate_signed_transaction iterates all entries. Meanwhile cat_spend never forwards puzzle_decorator at all despite CATSpend accepting it. Two endpoints, two unannounced semantic divergences. Pick one contract, document it, and honor it consistently.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1507-1534, 2009-2044",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction complects XCH-send, CAT-spend, and signed-tx creation into one frozen record with unstated valid field combinations.",
+        "detail": "Adding extra_delta, tail_reveal, tail_solution, and puzzle_decorator to CreateSignedTransaction collapses three distinct request shapes into one type. Callers must know which subset is meaningful for which path. A small sum of explicit request values or a shared builder over values would preserve the dedup win without lying about cardinality (puzzle_decorator typed list but only [0] consumed).",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1910-1962",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation uses None in {set} membership and carries forward three type: ignore suppressions instead of clean narrowing.",
+        "detail": "The extracted helper still uses set-membership for tri-state None checks and three # type: ignore[arg-type] comments. Extraction was the moment to fix it: explicit if x is None or y is None or z is None narrows for mypy, deletes the ignores, and reads as one stated invariant. Better still, lift to a CatDiscrepancy value type constructed once at the boundary.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1484",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_spend silently drops the per-addition MAX_COIN_AMOUNT precondition check.",
+        "detail": "The removed branch explicitly raised ValueError when an addition exceeded MAX_COIN_AMOUNT. The new path assumes create_signed_transaction enforces the same postcondition. If equivalent, remove deliberately with a citation; if not, a precondition has been silently dropped. State the equivalence claim before merge.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_wallet is called purely for its raising side effect, labeled only by a comment.",
+        "detail": "The pattern '# opportunity to raise' followed by a discarded call is a smuggled assertion: a lookup used as validation effect. The intent ('assert wallet of type X exists') is not in the name and a future reader will delete the dead-looking line. A named guard like validate_wallet_type(id, Wallet) would make the contract explicit.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1510, 2012",
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the deduplication direction is right but the execution leaks observable behavior changes and complects request shapes. Two P0 issues stand out: tests fabricate a junk zero-amount Addition to satisfy a non-empty invariant the production caller cannot honor, and puzzle_decorator handling silently diverges (send_transaction forwards the full list instead of [0]; cat_spend drops it entirely). CreateSignedTransaction now bundles three distinct request types into one record with unstated valid combinations. The extracted cat_discrepancy_validation helper carries its bad-taste None-in-set check and type:ignore comments forward instead of cleaning them up. Fix the data model, pin down the semantic changes explicitly, and consider splitting into reviewable commits before merge."
+  }
+}

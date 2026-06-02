@@ -1,0 +1,79 @@
+{
+  "task_id": "metaflow__2653",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Inner blocking read loop drops timeout and process-exit safeguards, risking indefinite hang on a stuck writer.",
+        "detail": "Once O_NONBLOCK is cleared, the inner while-True read has no poll timeout and no check_process_exited backstop. A writer that opens the FIFO but never closes it (hung child, inherited fd in a grandchild) blocks the parent forever. The patch trades an intermittent 86KB truncation for a potential deadlock.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-144",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "fcntl mode switch has no error handling or try/finally to restore fd state on exception.",
+        "detail": "F_GETFL/F_SETFL can raise OSError, and any exception in the inner read loop leaks the blocking flag on a caller-owned fd. The frame property that the caller's fd flags are unchanged on return is silently violated. Wrap in try/finally and restore O_NONBLOCK on exit, or handle fcntl failure explicitly.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-137",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test accompanies a fix for an intermittent race condition.",
+        "detail": "A deterministic fixture that writes >64KB and closes the writer fast would pin down the original truncation and prevent regression. Race fixes without tests get re-broken by the next refactor. Add a test before merge.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch bundles a race fix with deletion of a MacOS-specific workaround without justification.",
+        "detail": "The removed block existed because POSIX EOF behavior was not observed on MacOS FIFOs in practice. The commit message asserts POSIX semantics now suffice but provides no evidence the MacOS path is subsumed. Either prove the new approach covers MacOS or split the patch.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "139-158",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Function contract is unstated and the postcondition under writer-crash is now inconsistent.",
+        "detail": "Old code raised CalledProcessError on empty content; new code may return a partial buffer because the blocking drain has no abnormal-exit check. Write down preconditions on fifo_fd ownership, postconditions under writer-crash and writer-hang, and the frame on fd state. The POSIX EOF guarantee also assumes a single writer fd, which should be stated.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError handler and surrounding two-phase logic are under-commented after cleanup.",
+        "detail": "The collapsed `pass` branch and removed has_blocking_error bookkeeping obscure why the non-blocking branch still exists once data has arrived. Add a literate comment stating phase 1 = wait-for-first-byte with timeout, phase 2 = drain via blocking read, and clarify check_process_exited's new role as fallback EOF oracle.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "146-162",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel agrees the diagnosis is correct and the two-phase poll-then-blocking-drain shape is sound, but execution regresses two safety invariants the old code upheld: bounded wait on a hung writer and the frame property on the caller's fd flags. The unconditional blocking read with no timeout, process-exit backstop, or try/finally trades an intermittent truncation for a potential deadlock. The patch also bundles a silent deletion of a MacOS-specific workaround with no justification and ships no regression test for a race that already hit production. Fix error handling and restore a safety backstop on the drain path, document the contract, justify the MacOS removal, and add a test before merge."
+  }
+}

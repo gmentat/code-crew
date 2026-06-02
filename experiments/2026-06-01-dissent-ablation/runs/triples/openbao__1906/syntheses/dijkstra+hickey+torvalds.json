@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__1906",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "revoke_error exposed on lease lookup without sanitization or auth gating despite author flagging it as sensitive",
+        "detail": "All three reviewers flag this as the central problem. The PR author asks if exposing RevokeErr is safe and ships it anyway. Backend error strings routinely leak paths, endpoints, and credential fragments. Either redact, restrict to a sudo/root-capable endpoint, or state and prove the precondition that no sensitive content can land in this string.",
+        "file": "vault/logical_system.go",
+        "lines": "2195-2199",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FetchLeaseTimes rename churns exported API while leaving metric label and test name stale",
+        "detail": "FetchLeaseTimes is an exported method consumed by downstream forks; the rename is cosmetic. The metrics.MeasureSince key still reads fetch-lease-times and TestExpiration_FetchLeaseTimesIrrevocable was not updated. Either keep the old name (or alias it), or do the rename consistently across metric label and tests so code and telemetry agree.",
+        "file": "vault/expiration.go",
+        "lines": "1703-1714",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport redaction is enumeration-based with no structural guarantee against future field leaks",
+        "detail": "The function returns *leaseEntry and allowlists fields by hand, conflating the authoritative record with the exported view. When leaseEntry gains a new field nothing forces a redaction decision. Introduce a distinct LeaseView struct (or typed projection) so the redaction property is enforced by the type system, not by reviewer vigilance.",
+        "file": "vault/expiration.go",
+        "lines": "1738-1755",
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests cover only path; namespace_path and revoke_error branches are unexercised",
+        "detail": "TestSystemBackend_leases adds one equality check on path=secret/foo. The two new conditional branches that carry the security-relevant content have zero coverage and no negative assertions that sensitive leaseEntry fields (InternalData, ClientToken, Auth) are absent. Add cases for child-namespace lookup, populated revoke_error, and absence-of-sensitive-fields.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI schema marks path as Required but Path may be empty for some lease shapes",
+        "detail": "Required:true is a contract claim. Irrevocable leases loaded from disk or other edge shapes may carry an empty Path, in which case clients generated from the schema will trust a guarantee the code does not keep. Confirm every leaseEntry reaching handleLeaseLookup has a non-empty Path, or drop Required.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Drive-by t.Context() substitution buried in a rename commit",
+        "detail": "TestExpiration_revokeEntry_rejected_fairsharing swaps namespace.RootContext(nil) for namespace.RootContext(t.Context()) in one spot while other touched tests keep nil. Either it fixes a real cancellation bug and deserves its own commit and justification, or it is inconsistent noise that should be reverted to match the rest of the file.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a small patch with one real security question and one gratuitous API churn. The author's own open question \u2014 is it safe to expose revoke_error? \u2014 must be answered with sanitization, auth gating, or a stated precondition before merge. The FetchLeaseTimes rename breaks an exported symbol while leaving the metric label and a test name stale, and should be reverted or completed consistently. The redaction property of leaseInfoForExport is enumeration-based and will silently leak the next field added to leaseEntry; a distinct view type would enforce it structurally. Test coverage exercises only one of three new fields and asserts no absence of sensitive members. Verdict: needs work, not a structural rewrite."
+  }
+}

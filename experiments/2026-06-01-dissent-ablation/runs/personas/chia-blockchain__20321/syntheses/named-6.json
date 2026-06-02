@@ -1,0 +1,88 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests fabricate a zero-amount, zero-puzzle-hash Addition to satisfy CreateSignedTransaction's non-empty additions invariant",
+        "detail": "Tests changed `additions=[]` to `additions=[Addition(amount=0, puzzle_hash=bytes32.zeros)]` purely to get past `__post_init__`'s `len(additions) < 1` guard while real outputs come from cat_discrepancy. This is a sentinel value standing in for absence \u2014 a clear LSP/contract violation. Either relax the precondition when cat_discrepancy is present, or model absence honestly.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "send_transaction silently changes puzzle_decorator semantics from `[0]`-only slicing to forwarding the whole list",
+        "detail": "The old code passed `[request.puzzle_decorator[0].to_json_dict()]` \u2014 exactly one decorator. The new path forwards the entire list to CreateSignedTransaction, while cat_spend drops puzzle_decorator entirely. Two endpoints, two divergent silent semantic changes. Pick one contract and document it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction complects three distinct request shapes by absorbing CAT and decorator fields",
+        "detail": "Adding extra_delta, tail_reveal, tail_solution, and puzzle_decorator onto a general transaction type collapses XCH-send, CAT-spend, and signed-tx-creation into one record with unstated valid field combinations. No __post_init__ check guards mutually exclusive combinations. Define a small CatDiscrepancy value type and keep request shapes honest.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1910-1962",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation duplicates the tri-state invariant across two dataclasses instead of owning it once",
+        "detail": "Both CATSpend and CreateSignedTransaction carry the same three Optional fields and the same forwarding property. The validation belongs to a CatDiscrepancy ADT constructed once at the boundary; as written, the two classes are kept in sync by convention and a future field rename will silently break one. The extracted free function captures behavior but not the type.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1919-1923",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation preserves opaque `None in {set}` membership and type: ignore comments instead of clean narrowing",
+        "detail": "The helper is moved verbatim with three `# type: ignore[arg-type]` and a set-membership trick whose correctness depends on hashing semantics of mixed bytes/str/None. An explicit `any(x is None for x in (...))` or a TypeGuard would narrow properly and delete the ignores. Extracting bad taste into a function makes it reusable, not better.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_wallet called purely for its raising side effect with `# opportunity to raise` is a smuggled assertion",
+        "detail": "The discarded call hides intent behind a comment, and create_signed_transaction will redo the same lookup. Extract a named `validate_wallet_type(id, Wallet)` helper so the precondition is structural, not folkloric. The current shape will confuse the next reader and is duplicated at two call sites.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511, 2012",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the deduplication instinct is right but the execution leaks. The loudest signal \u2014 flagged by all six reviewers \u2014 is that tests had to fabricate a zero-amount, zero-puzzle-hash Addition to satisfy CreateSignedTransaction's non-empty-additions invariant, indicating the data model does not fit the wrapped call. Two silent behavior changes were also caught: send_transaction now forwards the whole puzzle_decorator list instead of just `[0]`, while cat_spend drops it entirely. The widened CreateSignedTransaction complects three request shapes, the moved cat_discrepancy_validation preserves its opaque set-membership check and type: ignores, and `get_wallet` calls survive only for side-effect raising. Fix the additions contract, capture the CAT discrepancy as its own ADT, and pin down the semantic changes before merge."
+  }
+}

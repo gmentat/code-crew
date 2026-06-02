@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning is wrong control flow; warnings are not exceptions",
+        "detail": "The code does `raise PerformanceWarning(msg)` \u2014 PerformanceWarning is a Warning subclass, meant for warnings.warn(), not raise. The accompanying test asserts pytest.raises(PerformanceWarning), which institutionalizes the mistake. Either warn (and let the user proceed) or raise a real error (ValueError/RuntimeError). Mixing the two confuses the contract.",
+        "file": "dask/array/core.py",
+        "lines": "~3905-3925",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "unreachable `break` after `raise` inside the loop",
+        "detail": "The `break` immediately following `raise PerformanceWarning(msg)` is dead code \u2014 control never reaches it. This is a tell that the author was unsure whether to warn-and-continue or fail-fast. Pick one and delete the other. Dead code in a hot validation path is exactly the kind of cleverness-without-purpose to strip.",
+        "file": "dask/array/core.py",
+        "lines": "~3923-3925",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "validation loop tangled with rechunk dispatch; extract a small pure function",
+        "detail": "The new 20-line block computing dask_write_chunks, iterating axes, formatting a multi-line error, and the subsequent if/else region branch all live inline in to_zarr. This is the filter shape Pike wants: a pure `validate_shard_alignment(zarr_chunks, dask_chunks, dtype) -> Optional[str]` returning the message or None, then `to_zarr` decides what to do. Data in, message out, no state.",
+        "file": "dask/array/core.py",
+        "lines": "~3889-3935",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`np.prod(zarr_write_chunks) * max(1, dtype.itemsize)` quietly assumes itemsize >= 1",
+        "detail": "`max(1, z.dtype.itemsize)` guards against zero-itemsize dtypes, but numpy itemsize is always >= 1 for real dtypes. Either the guard is dead (delete it) or it papers over an unhandled case (object/structured dtypes) that deserves explicit handling. Pick a posture; don't half-defend.",
+        "file": "dask/array/core.py",
+        "lines": "~3910-3912",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`not nominal_dask_chunk_size % zw == 0` reads backwards; precedence is fragile",
+        "detail": "Python parses this as `(not (nominal % zw)) == 0`, which happens to do the right thing but is brittle and unclear. Write `nominal_dask_chunk_size % zw != 0` \u2014 one operator, obvious intent. Clarity over cleverness; a junior reader should not have to re-derive precedence on a guard clause.",
+        "file": "dask/array/core.py",
+        "lines": "~3907",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "open design question (config vs shard shape) left unresolved in the PR description",
+        "detail": "The author asks whether exception-or-warning is correct when config competes with shard shape. The diff ships `raise`, the docstring says \"performance warning,\" and the message text says \"to avoid risk of data loss.\" Three different stories. Decide the contract before merge and make code + tests + message tell the same story.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The data structure work here is sound \u2014 using shard shape as `previous_chunks` to let `auto_chunks` produce a shard-aligned multiple is the right move, and collapsing two branches onto a single `dask_write_chunks` is good composition. But the new validation block has a control-flow bug (`raise` on a Warning subclass with unreachable `break` after) that the test then enshrines, and the inline 20-line guard wants to be a small pure function. The contract is also undecided: warning, exception, or both? Fix the dispatch, extract the check, pick one posture, and the diff lands cleanly."
+  }
+}

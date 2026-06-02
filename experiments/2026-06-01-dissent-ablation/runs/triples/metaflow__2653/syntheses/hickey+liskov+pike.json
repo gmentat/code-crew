@@ -1,0 +1,76 @@
+{
+  "task_id": "metaflow__2653",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking inner read loop removes the timeout/process-exit safety net and can hang indefinitely on a stuck writer",
+        "detail": "The new inner while-True blocking os.read has no poll timeout and no check_process_exited gate. A writer that opens the FIFO, writes one byte, then hangs will hang the parent forever. The original non-blocking loop preserved a bounded-wait invariant; the fix trades a truncation race for an unbounded hang. Reassert the timeout/liveness check in the drain phase.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-150",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fcntl mode switch mutates caller-owned fd flags and never restores them",
+        "detail": "The function flips fifo_fd to blocking via fcntl mid-call and leaves it that way on all exit paths. Since fifo_fd is passed in, its blocking state is part of the caller's observable state \u2014 a frame violation. Wrap the mode transition in try/finally that restores the original flags, or document that the function takes ownership.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-145",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel read loops with different EOF semantics for one byte stream",
+        "detail": "The function now has an outer non-blocking poll loop and an inner blocking drain loop, each appending to content with its own termination rule. The data is one stream of bytes until EOF; the shape should be one loop with one termination rule. Extract wait_for_first_byte() and drain_to_eof() so each phase has a single clear contract.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "127-160",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError branch and has_blocking_error variable are now vestigial",
+        "detail": "After switching to blocking mode on first read, BlockingIOError can only fire on the pre-data reads, and has_blocking_error is no longer set or consumed. The except clause reduces to pass, duplicating the poll-timeout branch. Delete the dead variable and either remove the except or comment why it remains defensive.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Function contract under writer-crash and writer-hang is unstated",
+        "detail": "The postconditions for abnormal writer exit, partial writes, and fd ownership are not written down. Old code raised CalledProcessError on empty content; new code may return a partial buffer silently. Add a docstring naming the two phases (poll-until-first-byte, then blocking-drain-to-EOF) and stating behavior under writer-crash, writer-hang, and fd ownership.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "120-162",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Root cause is writer-side missing flush; reader patch tolerates an underspecified IPC protocol",
+        "detail": "The underlying issue is that the writer subprocess does not flush-and-frame deterministically before exit. The reader change is valid but compensates for a framing gap (no length prefix, no delimiter). Name the writer-side fix \u2014 framed messages or explicit flush+close \u2014 even if this reader change ships, so EOF detection stops being load-bearing.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix correctly diagnoses a real POSIX race and that switching to blocking mode after the first byte is the right shape. But the implementation regresses two invariants the old code held: bounded wait on a hung writer (the blocking drain loop has no timeout or process-liveness check) and the frame property that the caller's fd flags are unchanged on return. Structurally, the function grew two parallel read loops with different EOF semantics where one phase-split would do, and left vestigial BlockingIOError handling behind. Fix: restore timeout/liveness in the drain phase, wrap the fcntl flip in try/finally, collapse to one loop per phase via small helpers, and document the contract. The deeper smell \u2014 an unframed IPC making EOF detection load-bearing \u2014 is worth naming on the writer side."
+  }
+}

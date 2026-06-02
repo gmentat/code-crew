@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ACL.root field overloads a *Namespace pointer to mean two things at once",
+        "detail": "The root field is now a *namespace.Namespace where nil means 'not root' and non-nil means 'root, scoped to this namespace'. That's a sentinel-pointer trick masquerading as data. A struct{IsRoot bool; NS *Namespace} or a small RootScope type would make AllowOperation read itself. Right now the reader has to know the convention.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 339-360",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed stub returns false unconditionally and is already called by callers",
+        "detail": "Core.NamespaceSealed always returns false with a TODO. ListAllNamespaces and other callers are wired up against it now, so the seal-aware code path is dead until SealManager lands. Either gate the callers behind a build tag or land both halves together; shipping a permanently-false security predicate invites someone forgetting to revisit it.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-error detection uses substring matching on error strings",
+        "detail": "AdjustErrorStatusCode dispatches on errwrap.Contains(err, consts.ErrNamespaceSealed.Error()), i.e. a substring search of error text. That is the wrong data shape: errors are values, not strings. errors.Is on the sentinel would be obvious and robust; the current form will misfire on any wrapped error whose text happens to contain 'namespace is sealed'.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength built as TokenLen + \"\\.\"[1] + nsID is cute, not clear",
+        "detail": "Adding a byte literal extracted by indexing a string to compute a length is the kind of cleverness rule 4 warns about. A named const for the separator byte and plain addition reads the same and survives someone changing the separator. Small thing, but it is exactly the shape of code that confuses the next reader.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test context plumbing is repeated by hand in every test function",
+        "detail": "Roughly two dozen tests now open with ctx := namespace.RootContext(t.Context()) and thread it through. That is fine, but a tiny test helper (testRootCtx(t)) would shrink the diff and make future namespace-scoped variants a one-line swap. The current churn is exactly what a small composable helper exists to absorb.",
+        "file": "vault/expiration_test.go",
+        "lines": "various",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switch in AdjustErrorStatusCode is a small win worth keeping",
+        "detail": "Collapsing the sequential ifs into a switch with the HTTPCoded case folded in is the right direction. One nit: the hce := &codedError{} sentinel exists only to give errwrap a type to match; a package-level var of that type would make the intent obvious and stop allocating a throwaway per call.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-180",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The data-structure changes are mostly sound: collapsing namespaceMountEntryView into NamespaceView(...).SubView(...) is exactly the right move, and the response_util switch is cleaner than the chain of ifs. The biggest smell is ACL.root, which now encodes two facts (is-root and which-namespace) into one nillable pointer; a small named type would make AllowOperation self-evident. NamespaceSealed shipping as a permanently-false stub with live callers is a footgun waiting for SealManager. Error-classification by substring match on err.Error() is the wrong shape for the data and should use errors.Is on the sentinels. The test churn is fine but begs for a one-line helper."
+  }
+}

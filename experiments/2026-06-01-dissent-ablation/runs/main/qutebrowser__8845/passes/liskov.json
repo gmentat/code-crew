@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "qutebrowser__8845",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Command names break the established singular-form naming convention",
+        "detail": "The new methods are named `quickmarks_reload` and `bookmarks_reload`, which qutebrowser's `cmdutils.register` exposes as `:quickmarks-reload` and `:bookmarks-reload`. Every other command in this family uses the singular form (`:quickmark-add`, `:quickmark-save`, `:quickmark-load`, `:bookmark-add`, `:bookmark-load`). The command-surface ADT has an implicit naming contract that callers and user configs depend on; introducing plural-form siblings is a SPEC-MISSING/contract-consistency violation. Rename to `quickmark_reload` / `bookmark_reload` to preserve substitutability of the command-name family.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1196, 1361-1367",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "reload() is not atomic on parse failure \u2014 leaves manager silently empty",
+        "detail": "`reload()` calls `self.marks.clear()` first, then re-reads and parses. If `_init_lineparser()` or `_parse_line()` raises (InvalidUrlError, IO error, malformed user edit), the manager is left empty with marks lost and no rollback. The postcondition of `reload()` should be: either (a) marks reflects current disk state, or (b) marks is unchanged and an error is raised. The current implementation provides neither \u2014 it provides a third, worse outcome: silent partial loss. Build the new mapping into a local variable, parse fully, then swap atomically into `self.marks`.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "102-112",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "reload() changes the observable contract of __init__ by emitting changed during construction",
+        "detail": "Before this refactor, the constructor parsed the file inline and did NOT emit `self.changed`. After the refactor, `__init__` calls `self.reload()`, which emits `changed` at the end. Any observer attached to a manager between construction and `_init_savemanager` now sees an extra `changed` signal. The contracts of `__init__` and `reload()` should be stated and made consistent \u2014 either suppress `changed` on the initial load (e.g., parameterize reload, or inline initial load), or explicitly document that construction emits `changed`.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "67-72, 102-112",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_init_lineparser idempotency not specified in its contract",
+        "detail": "`_init_lineparser` was previously called exactly once at construction. It is now called once at construction (via reload) and again on every `reload()`. Whether it is safe to call repeatedly \u2014 whether it rebinds `self._lineparser` to a fresh object or mutates a shared one, whether the second call leaks the first lineparser's resources \u2014 is not stated. Add a docstring on `_init_lineparser` clarifying that it is idempotent and constructs a fresh lineparser each call.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "74-83, 102-112",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests don't cover the failure-mode contract of reload()",
+        "detail": "`test_reload` exercises only the happy path: a valid file replaced with another valid file. The feature's whole purpose is to recover from on-disk edits a user just made, so the malformed-file case is exactly the case worth specifying. Add tests for: (a) the new file contains a malformed line; (b) the file has been deleted between construction and reload; (c) a parse error occurs mid-file. These tests would also drive the atomicity fix above.",
+        "file": "tests/unit/browser/test_urlmarks.py",
+        "lines": "115-132",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated command bodies hint at a missing abstraction at the command layer",
+        "detail": "`quickmarks_reload` and `bookmarks_reload` are structurally identical: fetch a manager from objreg, call `.reload()`, emit an info message. The `UrlMarkManager` superclass already factors the shared behavior at the model layer \u2014 `reload()` is on the supertype and substitutable across both subtypes, so LSP holds cleanly there. The command layer duplicates the call site rather than dispatching through the shared type. Acceptable as-is for two instances; flag for a future refactor if a third urlmark variety is added.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1196, 1361-1367",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The refactor correctly lifts the load logic into a shared `reload()` method on `UrlMarkManager`, and LSP holds across `QuickmarkManager`/`BookmarkManager` \u2014 both subtypes inherit the contract cleanly. However, the `reload()` contract is under-specified in three ways: it is not atomic under parse failure and can silently empty the marks; it changes the observable behavior of `__init__` by emitting `changed` during construction; and the failure-mode postcondition is untested. At the command-surface ADT, the new command names (`:quickmarks-reload`, `:bookmarks-reload`) break the established singular-form naming convention used by every other quickmark/bookmark command. Recommended fixes: state the `reload()` contract in its docstring, build-then-swap to make it atomic, add malformed-file tests, and rename the commands to the singular form."
+  },
+  "raw": ""
+}

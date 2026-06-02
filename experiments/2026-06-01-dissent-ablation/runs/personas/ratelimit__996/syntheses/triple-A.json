@@ -1,0 +1,78 @@
+{
+  "task_id": "ratelimit__996",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit allocates and discards a stats counter per request and mutates shared RateLimit state without locking",
+        "detail": "When the enhanced key differs from FullKey, code calls NewStats via NewRateLimit then again for enhancedKey, throwing the first away \u2014 per-request allocation registering counters in the stats store. Worse, rateLimit is a shared pointer from the loaded config tree; reassigning its Stats and FullKey on the hot path is a data race. Resolve stats into a local, allocate once at load.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three branches of the value_to_metric key builder collapse to one rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default branch all reduce to: always append key; if matchedUsingValue or (valueToMetric && value != ''), append '_' + value. The current 30-line switch obscures a 3-line decision and makes the equivalence non-obvious. Collapse to a single conditional.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hot-path key builder runs unconditionally even when no descriptor in chain enables value_to_metric",
+        "detail": "valueToMetricFullKey is built for every GetLimit call regardless of whether any matched descriptor sets valueToMetric. GetLimit is the hottest path. Track a boolean at load time indicating whether any descriptor in the chain enabled the feature, and skip the builder and override entirely otherwise.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-432",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "RateLimit is reconstructed via NewRateLimit then immediately mutated \u2014 identity confusion",
+        "detail": "The override block calls NewRateLimit for 'a clean stats struct' then overwrites Stats and FullKey on the returned value. This complects construction with mutation within four lines and the comment doesn't explain whether NewRateLimit is load-bearing. Compute the final key first and construct once, or document the aliasing invariant.",
+        "file": "src/config/config_impl.go",
+        "lines": "420-430",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "value_to_metric duplicates detailed_metric with hand-waved precedence instead of generalizing",
+        "detail": "detailed_metric already encodes 'put runtime value into the metric key.' This PR adds a parallel mechanism, a second builder, and a rule that detailed_metric wins \u2014 two flags doing nearly the same job. Model the per-descriptor render decision as a single MetricMode enum (KeyOnly | KeyValue | Detailed) computed at load, or extend detailed_metric with per-level scope.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-46, 316-430",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile",
+        "detail": "Both construction sites use positional initialization: {map{}, rateLimit, nil, descriptorConfig.ValueToMetric}. Adding a future field will silently shift meaning if types align. Use named-field initialization at both call sites; this PR is itself evidence that fields will keep accreting.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel converges on two real bugs on the hot path: GetLimit allocates a throwaway Stats counter per request and mutates a shared RateLimit's Stats/FullKey without locking, which is a data race under concurrent traffic. Beyond the bugs, the implementation is over-complected: a three-arm key-builder collapses to one rule, the override runs unconditionally even when no descriptor in the chain enables the feature, and RateLimit is reconstructed then immediately mutated. Conceptually, value_to_metric duplicates detailed_metric with a hand-waved precedence rule; the right shape is a single per-descriptor MetricMode computed at load. Fix the race, allocate once, collapse special cases, and use named-field struct literals."
+  }
+}

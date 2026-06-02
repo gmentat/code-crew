@@ -1,0 +1,177 @@
+{
+  "task_id": "openbao__2362",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "AdjustErrorStatusCode switched from sequential if statements to switch \u2014 HTTPCodedError no longer overrides Sealed/APILocked/body-too-large",
+        "detail": "The original code ran all four if blocks sequentially, meaning an HTTPCodedError that also wrapped consts.ErrSealed (or ErrAPILocked, or 'request body too large') would set 503/413 first and then be overwritten by the HTTPCodedError's explicit code. The new switch-case only executes the first matching arm, so an HTTPCodedError that also contains ErrSealed.Error() in its message chain will now resolve to 503 instead of the coded error's code. This is a behavioral change not described in the PR; the refactor is sold as a cleanup but it silently changes precedence.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-187",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IsSSCToken length threshold shifted by 1 byte (34 -> 35), changing SSC-vs-legacy token classification at the boundary",
+        "detail": "Old expression: len(token) > MaxNsIdLength + TokenLength + TokenPrefixLength = 6 + 24 + 4 = 34. New expression: len(token) > NSTokenLength + TokenPrefixLength = (24+6+1) + 4 = 35. The old MaxNsIdLength comment described '5 characters prepended by a .' for upstream Vault, while OpenBao actually uses a 6-char namespaceIdLength \u2014 so the new value is arguably more correct, but the change still moves the classification boundary and the PR description does not flag this token-format compatibility implication. Any token of exactly 35 chars that previously parsed as SSC will now fail IsSSCToken.",
+        "file": "vault/token_store.go, vault/version_store.go",
+        "lines": "token_store.go ~76-80; version_store.go ~193-196",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Root ACL fast-path now uses strings.HasPrefix via HasParent, with no defense against future non-canonicalized namespace paths",
+        "detail": "ACL.AllowOperation now calls ns.HasParent(a.root) where HasParent is implemented as strings.HasPrefix(n.Path, possibleParent.Path). This is safe as long as both paths are canonicalized (always trailing '/'), which Canonicalize enforces in production code, but the new TestACL_Root child-namespace case uses &namespace.Namespace{Path: \"ns1\"} (no trailing slash, empty ID). Tests should exercise sibling rejection ('ns1/' parent vs 'ns11/' or 'ns1-evil/' child) and parent-vs-ancestor cases to lock in the prefix semantics; the current test only proves same-ns allow and child-token-in-root deny. A future caller constructing a Namespace without Canonicalize would silently grant cross-namespace root privileges.",
+        "file": "vault/acl.go, vault/acl_test.go",
+        "lines": "acl.go 339-360; acl_test.go 154-180",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "switchedGetPolicy now returns a synthetic root policy in every namespace, not just root",
+        "detail": "Previously the special-case branch was guarded by 'ns.ID == namespace.RootNamespaceID'. Now any caller doing GetPolicy(childNsCtx, \"root\", PolicyTypeACL) receives a non-nil Policy with namespace=childNs. This is necessary for namespace-owned root tokens to load their ACL, but it is a wide change to policy lookup semantics: callers that previously relied on the root policy being absent in child namespaces (policy enumeration, UI views of resultant ACL, anything checking 'does policy named root exist here') will now see one. The PR adds no tests for this lookup-path behavior change.",
+        "file": "vault/policy_store.go",
+        "lines": "444-455",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListNamespaces wrapper hardcodes includeSealed=false while token_store metrics paths pass includeSealed=true \u2014 inconsistent policy across call sites",
+        "detail": "c.ListNamespaces calls ListAllNamespaces(ctx, true, false), so the MFA loader, locked-user updater, entity gauge, and active-token counter will silently start excluding sealed namespaces once NamespaceSealed is implemented. Meanwhile vault/token_store.go gaugeCollector*, and logical_system_user_lockout.go explicitly pass includeSealed=true or false directly. There is no documented rule for which subsystems must see sealed namespaces (e.g., revocation, gauges, audit must arguably still see them so their data is not orphaned). This is the kind of decision that should be made before the SealManager lands, not after.",
+        "file": "vault/namespace_oss.go, vault/core.go, vault/core_metrics.go, vault/counters.go, vault/token_store.go, vault/logical_system_user_lockout.go",
+        "lines": "namespace_oss.go 16-20; core.go 3284, 3392",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed is a permanent 'return false' stub with no panic, log, or build-tag guard \u2014 easy to ship to production unimplemented",
+        "detail": "Core.NamespaceSealed always returns false with a TODO comment. ListAllNamespaces now calls it inside a hot loop (every namespace, every call), and ErrNamespaceSealed has been added to the SDK error consts and the HTTP status mapper. Together this creates the illusion of a feature that does nothing \u2014 no caller will ever observe a sealed namespace until SealManager lands, but reviewers and operators reading the diff might believe per-ns sealing already works. Recommend at minimum a log line on first call, a feature-flag check, or returning an explicit 'not implemented' error from a public API.",
+        "file": "vault/core.go",
+        "lines": "1396-1404",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "mountEntryView audit case now scopes audit storage to the namespace barrier instead of root barrier",
+        "detail": "Old: 'case auditTableType, configAuditTableType: NewBarrierView(c.barrier, auditBarrierPrefix+me.UUID+\"/\")' \u2014 always under root barrier regardless of namespace. New: 'NamespaceView(c.barrier, me.Namespace()).SubView(path.Join(auditBarrierPrefix, me.UUID) + \"/\")' \u2014 scoped under the namespace's barrier prefix. For root namespace these resolve to the same path, but for child namespaces audit storage will now live under the namespace prefix. This may be intentional (and the rest of mountEntryView already namespace-scopes other tables), but it is a storage-layout change for audit devices created in child namespaces and is not called out in the PR.",
+        "file": "vault/mount.go",
+        "lines": "2349-2365",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "TestACL_Root child-namespace case constructs Namespace with Path:\"ns1\" (no trailing slash, no ID) \u2014 does not exercise the real production shape",
+        "detail": "Production namespaces are canonicalized to '<segments>/' and have a 6-character ID. The test happens to pass because HasPrefix(\"ns1\",\"ns1\") is true and RootContext(ctx) sets ns to RootNamespace which short-circuits HasParent. Stronger tests would (a) use namespace.Canonicalize or a real created namespace, (b) include a sibling-namespace case ('ns2/' should be denied by a 'ns1/' root token), and (c) include a deeper-child case ('ns1/sub/' should be allowed by a 'ns1/' root token).",
+        "file": "vault/acl_test.go",
+        "lines": "156-181",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "rootToken() no longer forces ctx to RootNamespace before create() \u2014 silent behavioral change for callers that pass non-root ctx",
+        "detail": "Old code began with 'ctx = namespace.ContextWithNamespace(ctx, namespace.RootNamespace)'. New code derives ns from ctx and uses it as the token's namespace and storage path. Every existing call site in the PR's test updates passes namespace.RootContext(...) explicitly, so behavior is preserved in tests \u2014 but any non-test caller that previously relied on rootToken implicitly normalizing the namespace will now create a token scoped to whatever ctx happens to contain. Worth a grep across the codebase before merge to confirm no caller depends on the old normalization.",
+        "file": "vault/token_store.go",
+        "lines": "1134-1158",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NamespaceBarrierPrefix(nil) now silently returns \"\" \u2014 convenient but loses an invariant",
+        "detail": "The nil-guard 'if ns == nil || ns.ID == namespace.RootNamespaceID { return \"\" }' was added so callers (notably the refactored mountEntryView paths) can pass me.Namespace() which can be nil. This trades a panic on nil deref for silently treating nil as the root namespace, which is a subtle invariant change. A defensive return-error or a documented contract ('nil is treated as root') would be safer than silent absorption.",
+        "file": "vault/namespace_store.go",
+        "lines": "125-131",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Massive test-only ctx threading (many test files) does the same edit hundreds of times \u2014 maintenance and review burden",
+        "detail": "The bulk of the diff is mechanical s/context.Background()/namespace.RootContext(t.Context())/ across expiration_test.go, init_test.go, mount_test.go, namespace_store_test.go, sys_seal_test.go, testing.go, etc. The change is correct (tests should consistently use a namespace-bearing ctx), but it would have been worth a single test helper (e.g., testCtx(t) returning the right ctx) so that future changes happen in one place. Not blocking, but flags a maintainability opportunity.",
+        "file": "multiple test files",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "NSTokenLength threshold shift in IsSSCToken",
+        "positions": [
+          {
+            "persona": "regression-framing",
+            "position": "The boundary moved from >34 to >35; any 35-char tokens that were classified as SSC will now be rejected \u2014 a backwards-incompatible token-parsing change that deserves at least a CHANGELOG note."
+          },
+          {
+            "persona": "bugfix-framing",
+            "position": "The old constant (MaxNsIdLength=6) was derived from upstream Vault's 5-char namespace IDs plus a dot, but OpenBao uses a 6-char namespaceIdLength \u2014 so the old threshold was undersized by 1 and the new value is the correct one for OpenBao's actual token layout. Treat as a fix, not a regression."
+          }
+        ]
+      },
+      {
+        "topic": "Switch refactor in AdjustErrorStatusCode",
+        "positions": [
+          {
+            "persona": "behavior-preserving review",
+            "position": "The new switch changes precedence: HTTPCodedError no longer wins over a wrapped ErrSealed/ErrAPILocked. This is a real semantic change and should be reverted to independent if-blocks or proven irrelevant via tests."
+          },
+          {
+            "persona": "intentional-cleanup review",
+            "position": "In practice no openbao error currently wraps both an HTTPCodedError and ErrSealed; the original 'last-if-wins' behavior was probably accidental and the switch encodes the intended priority (sealed always 503). The refactor is fine; if anything, a comment should document the precedence."
+          }
+        ]
+      },
+      {
+        "topic": "Stub NamespaceSealed returning false",
+        "positions": [
+          {
+            "persona": "ship-it pragmatist",
+            "position": "The stub preserves existing behavior exactly, lets the ACL and ListAll changes land independently of SealManager, and makes the SealManager PR smaller. This is exactly how incremental refactors are supposed to work."
+          },
+          {
+            "persona": "defense-in-depth",
+            "position": "Adding a sentinel error, an HTTP mapping, and a hot-path call to a function that is hardcoded to return false invites a future bug where someone implements only half of SealManager and ListAllNamespaces starts silently excluding namespaces in production. At minimum the stub should log-once or be gated behind a build tag."
+          }
+        ]
+      },
+      {
+        "topic": "ACL.root as *Namespace vs root bool plus separate ownerNs field",
+        "positions": [
+          {
+            "persona": "minimal-diff",
+            "position": "Encoding the owning namespace into the existing root field (nil = not root, non-nil = root from that ns) keeps the ACL struct small and the change tightly scoped."
+          },
+          {
+            "persona": "type-clarity",
+            "position": "Overloading 'root' to mean both 'is a root ACL' and 'who owns it' makes the field name lie; a separate 'rootOwnerNS *Namespace' (with root remaining bool) would read more obviously at call sites and avoid the awkward 'a.root != nil' idiom standing in for 'is root'."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR is a coherent, mostly mechanical step toward namespace-owned root tokens and per-namespace sealing: ACL.root becomes a *Namespace, NewACL/AllowOperation/switchedGetPolicy stop hardcoding RootNamespaceID, NamespaceView/NamespaceBarrierPrefix subsume the deleted namespaceMountEntryView helper, and a NamespaceSealed stub plus ErrNamespaceSealed wire up the future SealManager. The riskiest changes are not the ACL refactor (which is correct and adequately tested for the root and same-ns cases) but the quieter ones: the switch-statement refactor in AdjustErrorStatusCode silently changes HTTPCodedError precedence, the IsSSCToken length threshold moves by one byte, and ListNamespaces now hardcodes includeSealed=false while other call sites pass true \u2014 a divergence that will become a real behavior decision the moment NamespaceSealed actually returns true. New tests cover same-ns allow and root-from-child-token deny, but miss sibling and deeper-child cases that would lock in the HasPrefix-based HasParent semantics. Nothing here is a clear merge-blocker on a feature branch, but the AdjustErrorStatusCode and IsSSCToken changes deserve explicit CHANGELOG mention and the stub NamespaceSealed should not be allowed to drift unnoticed."
+  },
+  "raw": ""
+}

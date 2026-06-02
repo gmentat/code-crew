@@ -1,0 +1,134 @@
+{
+  "persona": "torvalds",
+  "task_id": "espnet__6325",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "db.sh has TAL_ZH_ADULT_TEACH defined twice \u2014 once in TEMPLATE/db.sh and again as a duplicate file in recipe dir",
+        "detail": "The diff modifies egs2/TEMPLATE/asr1/db.sh to add TAL_ZH_ADULT_TEACH=downloads, AND creates egs2/tal_zh_adult_teach/asr1/db.sh as a symlink to the very same TEMPLATE file. That's fine in itself \u2014 but then local/data.sh sources ./db.sh after parse_options.sh, which means downloads_dir parsing happens before db.sh is loaded. Worse, the README links to ./conf/train/train_asr_branchformer_e24_amp.yaml (a path that doesn't exist \u2014 actual file is conf/train_asr_branchformer_e24_amp.yaml). Broken link in the README that's literally the headline artifact of the recipe. Fix the path.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "16",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "download_and_untar.sh prints 'unzip is not installed' but does not exit \u2014 script will continue and silently fail",
+        "detail": "Lines 9-11: `if ! command -v unzip ...; then echo '...'; fi`. No exit. So if unzip is missing the script merrily proceeds to call `unzip` in three branches and dies with an opaque 'command not found' instead of the clear precondition message. Either `exit 1` after the echo, or don't bother with the check. This is sloppy.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-11",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "download_and_untar.sh usage block doesn't exit either \u2014 bad-arg path falls through to realpath of $1 which may be unset",
+        "detail": "Lines 13-21: if argc<1 or >2, prints usage to stdout and... continues. Then `realpath $1` runs with $1 unset under `set -u` and dies with a confusing error. Add `exit 1` after the usage block. Same class of bug as the unzip check above \u2014 half-finished error handling is worse than none.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "13-23",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh sources db.sh AFTER parse_options.sh, but parse_options needs no db vars \u2014 still, the ordering is the inverse of every other egs2 recipe",
+        "detail": "Every other recipe in egs2 sources db.sh / path.sh / cmd.sh BEFORE parse_options. Here it's reversed. Works by accident because --downloads_dir doesn't reference any db var, but it breaks the convention reviewers and future maintainers expect. Match the existing style of the codebase. This is the textbook 'matched-to-codebase' violation.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "12-15",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh hard-codes punctuation-stripping with a chain of sed calls \u2014 fragile, undocumented, no test",
+        "detail": "Lines 47-49: `sed 's/\uff21/A/g' | sed 's/#//g' | sed 's/=//g' | sed 's/\u3001//g' | sed 's/\uff0c//g' | sed 's/\uff1f//g' | sed 's/\u3002//g'`. Six sed processes in a pipe to strip a hand-picked list of CJK punctuation. No comment explaining why these and not others (no \u300c\u300d\uff01\uff1a\uff1b\u2026). One `tr -d` or a single `sed -e ... -e ...` would do it. Worse, this list is almost certainly incomplete for the dataset \u2014 the CER numbers may reflect that. State the normalization rule once and apply it once.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "47-49",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh overwrites utt.list mid-pipeline \u2014 file used as both intermediate and final, race-prone under reruns",
+        "detail": "Line 41 creates utt.list from wav.flist. Line 51 overwrites utt.list with the filtered transcript keys. The second write changes the semantics of the same filename. Use distinct names (utt.list.wav, utt.list.txt) so a rerun, a partial failure, or a reader six months from now isn't guessing. Small fix, real readability win.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "41-51",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "realpath called on unquoted $1/$2 \u2014 breaks on paths with spaces",
+        "detail": "Line 23: `extract_dir=$(realpath $1)` and line 24: `zip_dir=$(realpath ${2:-$extract_dir})`. Unquoted. Combined with `set -u`, any path with whitespace explodes confusingly. Quote them: `\"$1\"`, `\"${2:-$extract_dir}\"`. This is the kind of nit I'd normally let slide, except the script is already brittle and the fix is one keystroke per line.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "23-24",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": ".complete sentinel file is touched INSIDE the extracted directory \u2014 if extraction creates that dir, fine; if not, touch fails",
+        "detail": "`touch \"$extract_dir/aisolution_data/.complete\"` assumes TAL_ASR-1.zip extracts to exactly `aisolution_data/`. If the upstream archive layout ever changes (and 100tal.com is a third party that could re-zip), the touch fails under `set -e` and you've wasted the extraction. Either verify the dir exists post-unzip with a clear error, or put the sentinel in $extract_dir directly (e.g., `.aisolution_data.complete`).",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "32, 43, 54",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical zip-handling blocks \u2014 should be a function or loop",
+        "detail": "Lines 28-58 are three copy-pasted blocks differing only in archive number and subdir name. This is the textbook 'BAD-TASTE \u2014 special case that should be general'. One function `extract_if_needed <zip-name> <expected-subdir>` called three times reads better and is harder to get inconsistent (which it already is \u2014 different error messages, easy to miss when adding a TAL_ASR-4). Refactor.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "28-58",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Typos and stray characters in config files",
+        "detail": "train_lm_transformer.yaml: `# 15epoch is enougth` (enough). cmd.sh: trailing `=========================================================~` with a tilde. README.md links to `./conf/train/train_asr_branchformer_e24_amp.yaml` \u2014 the `train/` subdir doesn't exist. Fix the README link (this one matters), the comments are cosmetic.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_lm_transformer.yaml",
+        "lines": "15, 29",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symlink files committed without trailing newline \u2014 git warns 'No newline at end of file' on six symlinks",
+        "detail": "asr.sh, db.sh, path.sh, pyscripts, scripts, steps, utils all show `\\ No newline at end of file`. These are symlinks so it's harmless in practice, but every other egs2 recipe's symlinks have the same issue or not \u2014 match the existing convention. Low priority, but if you're cleaning anyway, clean.",
+        "file": "egs2/tal_zh_adult_teach/asr1/",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "decoder_conf has `self_attention_dropout_rate: 0.` and `src_attention_dropout_rate: 0.` \u2014 bare `0.` is legal YAML but ugly",
+        "detail": "Write `0.0`. Same with `time_mask_width_ratio_range: [0., 0.05]`. The codebase uses 0.0 elsewhere; match it. Trivial.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "32-33, 80",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "A standard egs2 recipe-addition patch. The shape is right \u2014 one new recipe directory, one line added to TEMPLATE/db.sh, the usual symlink farm. What lands is fine; what's submitted has half-finished error handling in download_and_untar.sh (unzip-missing check that doesn't exit, usage block that doesn't exit, unquoted realpath), a punctuation-normalization sed-pipeline in data.sh that is hand-picked and almost certainly incomplete, three copy-pasted extraction blocks that beg to be a function, and a README that links to a config path that doesn't exist. Verdict: NEEDS-WORK. Fix the broken README link, make the error paths actually exit, dedupe the three zip blocks, and quote the realpath arguments. Then it lands."
+  },
+  "raw": ""
+}

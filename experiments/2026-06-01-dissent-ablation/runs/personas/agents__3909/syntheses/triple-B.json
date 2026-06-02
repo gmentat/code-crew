@@ -1,0 +1,75 @@
+{
+  "task_id": "agents__3909",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Sample rate is cast to STTAudioFormat via f-string with no validation, bypassing the declared ADT.",
+        "detail": "STTAudioFormat enumerates six pcm_* literals, but the constructor does typing.cast(f\"pcm_{sample_rate}\"), so sample_rate=11025 yields an invalid \"pcm_11025\" sent to the server. Validate sample_rate against the Literal at construction or accept audio_format directly. The type cast lies; only server rejection catches the error.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "82-128",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Server error messages raise APIConnectionError inside recv_task, where the broad except swallows them instead of terminating.",
+        "detail": "On auth_error or quota_exceeded, _process_stream_event raises from within recv_task's try/except Exception, which logs and continues the while-True loop. Fatal errors are both raised and silently swallowed. Separate the data path from the control path: return a typed failure event or set a flag so _run can reconnect or shut down cleanly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-217, 395-412",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format on STTOptions duplicates sample_rate, creating two sources of truth that can desync.",
+        "detail": "STTOptions stores both sample_rate and audio_format, but audio_format is derived from sample_rate at construction. A caller mutating one leaves the other stale. Drop audio_format from the dataclass and format it once at the single use site in _connect_ws, or make it a computed property.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "42-62, 115-117, 264",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speaking-state invariant relies on an empty committed_transcript terminator with no documented contract or fallback.",
+        "detail": "_speaking is mutated across handlers with no stated invariant. FINAL_TRANSCRIPT keeps _speaking=True; only an empty commit ends the segment. If the server drops the terminator (network drop, reconnect mid-segment), END_OF_SPEECH never fires. State the protocol contract or add a timeout-based fallback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-394",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented VAD parameter ranges are not enforced as preconditions; out-of-range values are silently forwarded.",
+        "detail": "The docstring asserts vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], and min_*_duration_ms in [50, 2000], but none are validated. A spec the code does not enforce is worse than no spec. Validate at the boundary with a clear error, or remove the range claim from the contract.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "92-107",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTv2 duplicates ~95% of STT and exposes a sibling class rather than a versioned subtype, encouraging drift.",
+        "detail": "The v1/v2 split follows the Deepgram pattern but reproduces auth, session, base URL, and capability declaration in two places. Callers branch on class identity instead of selecting a backend via parameter. Extract shared base or helper so v1 and v2 differ only in the wire protocol; otherwise the pair will calcify and drift.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "53-167",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a streaming Scribe v2 client that works but has weak contracts and tangled error paths. The most serious issue is the STTAudioFormat ADT being bypassed by an unchecked typing.cast from raw sample_rate. Server-side fatal errors raise inside a broad except that swallows them, and the speaking-state machine depends on a fragile empty-commit terminator with no fallback. Data-shape problems (duplicate audio_format field, v1/v2 duplication) and unenforced documented ranges round out the cleanup. Nothing here is unmergeable, but contracts and the protocol state machine should be tightened before the v1/v2 pair drifts."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "vitest__9152",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Synchronous readFileSync inside stack-trace path runs on every error frame without caching.",
+        "detail": "getSourceMap is called per frame during error serialization. For a failing module it will readFileSync the same file (and its referenced map file) every time. No cache, no memoization. On a noisy test run this turns every error into N disk reads. Cache by file path, or at minimum by the moduleGraph entry.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes semantics of resolvedSources for all callers.",
+        "detail": "The old code resolved each source against the map URL itself; the new code resolves against the map's parent directory. That is the correct sourcemap spec behavior, but DecodedMap is shared utility code. No test in packages/utils covers this, and the only evidence it works is a snapshot in test/cli. Add a direct unit test for resolvedSources so the next person touching this doesn't regress it back.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Returning '{}' as a fake source map string to swallow bad filenames is bad taste.",
+        "detail": "createConvertSourceMapReadMap returns the literal string '{}' when the referenced file is missing, so convert-source-map parses an empty object and pretends success. This hides real problems (broken sourceMappingURL, missing .map file) behind a silent no-op. Return undefined/null and let the caller decide, or log once at debug level. Don't lie to the parser.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "readFileSync without a try/catch on a hot error path can itself throw.",
+        "detail": "existsSync + readFileSync is racy and readFileSync can still throw (EACCES, EISDIR, symlink loop). If it throws inside parseErrorStacktrace's getSourceMap callback, the original error reporting dies and the user sees a sourcemap error instead of their test failure. Wrap in try/catch and fall through to no source map.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "180-186",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two patches in one: dependency + license addition is fine, but the source-map.ts resolve fix is logically independent.",
+        "detail": "The resolvedSources fix in packages/utils and the external-module sourcemap extraction in vitest/node are two bugs with two different blast radii. Squashed together they make bisecting a future regression harder. Not a blocker, but next time, two commits.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixing 'pathe' and 'node:path' in the same file with no reason.",
+        "detail": "The file already imports resolve from 'pathe' at the top. The new code imports node:path and uses path.resolve/path.dirname. Pick one. The codebase's voice is pathe; match it unless there's a concrete reason (there isn't here).",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "21, 326-340",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "Real bug, real fix, mostly the right shape. The one-line change in DecodedMap is correct per the sourcemap spec and the snapshot diff proves it. The external-module path in test-run.ts is the load-bearing addition and it works, but it has the smell of code written under deadline: sync I/O on a hot error path with no cache, no try/catch, and a fake '{}' return that lies to convert-source-map about missing files. None of these are architectural \u2014 they're tighten-the-screws fixes before this lands. NEEDS-WORK: cache the read, handle throws, stop returning '{}', and add a unit test for resolvedSources so the utility fix doesn't get reverted by someone who doesn't know why it changed."
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests synthesize a zero-amount/zero-puzhash Addition to bypass the non-empty additions invariant, signaling a data-model mismatch.",
+        "detail": "Tests changed `additions=[]` to `[Addition(amount=0, puzzle_hash=bytes32.zeros)]` purely to satisfy `CreateSignedTransaction.__post_init__`'s `len(additions) < 1` check. The cat_spend caller path branches on `additions is None` but the forwarded payload still requires non-empty additions. Either relax the precondition when cat_discrepancy is present or stop papering over the LSP gap with sentinel coins.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "send_transaction silently drops the `puzzle_decorator[0]`-only slicing and forwards the entire list.",
+        "detail": "The original code passed exactly `[request.puzzle_decorator[0].to_json_dict()]`. The new path forwards the whole list to `CreateSignedTransaction.puzzle_decorator`, which `_generate_signed_transaction` then iterates. Meanwhile cat_spend drops puzzle_decorator entirely. Two endpoints, two different silent semantic changes, neither documented.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1507-1534, 2009-2044",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_spend no longer enforces per-addition MAX_COIN_AMOUNT and forwards without stated equivalence.",
+        "detail": "The removed branch raised `ValueError(f\"Coin amount cannot exceed {MAX_COIN_AMOUNT}\")` per addition. The new path assumes `create_signed_transaction` enforces the same postcondition. No justification or citation is provided. Either prove the check is redundant or restore it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_wallet is called purely for its raising side effect, documented only by a comment.",
+        "detail": "The pattern `# opportunity to raise` followed by a discarded call is a smuggled assertion that couples modules via an unwritten side-effect contract. create_signed_transaction will redo the same lookup. Replace with a named guard like `_assert_wallet_exists(...)` so the precondition is explicit.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1510-1513, 2012-2014",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation extracted as a free function rather than captured as an ADT, preserving leaky invariant.",
+        "detail": "The triple `extra_delta`/`tail_reveal`/`tail_solution` is an invariant duplicated across CATSpend and CreateSignedTransaction via a free function. The fields can still drift apart. Additionally the helper retains the `None in {set}` membership trick and three `# type: ignore[arg-type]` suppressions instead of using explicit narrowing. Introduce a small ADT and clean up the typing.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Address-prefix validation semantics changed from network-config prefix check to AddressType.XCH enum membership.",
+        "detail": "Old `send_transaction` rejected addresses whose bech32 prefix didn't match the network config's `address_prefix`. The new code uses `ensure_valid_address(..., allowed_types={AddressType.XCH})`, an enum membership check. On testnet/simulator builds where the configured prefix isn't `xch`, this is a behavior change and possibly a regression. Document equivalence or restore the original check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1518-1525",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK: the deduplication direction \u2014 making send_transaction and cat_spend thin wrappers over create_signed_transaction \u2014 is correct, but execution leaks contracts at the module boundary. The loudest signal is the test diff inventing a zero-amount/zero-puzhash Addition to satisfy `len(additions) >= 1`, an LSP violation papered over with sentinel data rather than fixed in the model. Two silent behavioral changes slipped in: puzzle_decorator slicing semantics diverge between the two endpoints, and address-prefix validation switched from network-config compare to AddressType.XCH enum membership. The extracted cat_discrepancy_validation helper moved its bad taste (None-in-set narrowing, type: ignore comments) verbatim instead of being cleaned up, and get_wallet is now called purely for its raising side effect. Author should split the patch, state the equivalence claims explicitly, and capture the cat-discrepancy triple as a proper ADT."
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "task_id": "protocompile__645",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "summary": "This PR adds a reflection-based zero test for the `ir` package and makes accessors safe to call on zero values. The mechanical pattern (`var slice T; if !zero { slice = ... }; return seq.NewFixedSlice(slice, ...)`) is applied consistently and is straightforward to verify. The main correctness concern is `(*File).AllMembers()` on a nil receiver: it returns an `iter.Seq` that wraps a nil inner `iter.Seq[*rawMember]` via `iterx.Map` \u2014 the test does not actually iterate function-typed returns, so a panic on consumption could slip through. Secondary concerns are minor: a few defensive patterns are awkward (`var imp imports; imp.Directs()` heap-escapes a synthetic value when a `var i *imports` + the already-nil-safe `Directs` would do), the `IsAny` short-circuit duplicates checks that other methods now centralize via `IsZero`, and the test has a shadowed loop variable. None of the new nil-guard patterns introduce regressions for the non-zero path; behavior is preserved.",
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "(*File).AllMembers on nil receiver returns an iter.Seq wrapping a nil inner Seq; iteration will likely panic",
+        "detail": "When f == nil, raw is left as the zero-value iter.Seq[*rawMember] (a nil function). It is then passed to iterx.Map, which returns a new Seq that, when consumed, will invoke the nil source Seq and panic with a nil-function-call. The new TestZero never actually iterates function-typed returns (it explicitly `continue`s on reflect.Func), so this regression is not caught by the new test. Either short-circuit with an empty iter.Seq (`func(yield func(Member) bool) {}`) when f == nil, or have iterx.Map tolerate a nil input Seq, and add a test that actually consumes the iterator on a zero receiver.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "296-313",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TestZero skips function-typed returns, so iter.Seq accessors on zero values are not exercised",
+        "detail": "In testZeroAny, the inner loop does `if r.Type().Kind() == reflect.Func { continue }` for each return value. AllMembers (and any future iter.Seq accessor) returns a function; the test asserts nothing about it. Combined with the AllMembers nil-Seq issue above, this means the test's claim of \"accessors do not panic\" is only true for non-iterating callers. Either call the returned Seq with a yield that returns false immediately, or special-case iter.Seq the way Indexer is special-cased via Len().",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "120-128",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Imports() and TransitiveImports() construct a synthetic local `imports` value just to call a method that already handles nil",
+        "detail": "`imports.Directs` and `imports.Transitive` were both updated to handle a nil *imports. The caller in *File could simply be `var i *imports; if f != nil { i = &f.imports }; return i.Directs()`. The current form (`var imp imports; ...; return imp.Directs()`) forces the local to escape to the heap because Directs closes over the receiver, and it muddles intent \u2014 the reader has to verify that a zero `imports` value also produces empty results, in addition to the already-verified nil-receiver path.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "179-200",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Type.IsAny short-circuits with !t.IsZero() but most peers route through their own zero-safe accessors",
+        "detail": "Other Type methods in this diff use `if !t.IsZero() { ... }` only to set a local slice/value, then fall through to a uniform return. IsAny instead inlines the check: `return !t.IsZero() && t.InternedFullName() == t.Context().session.builtins.AnyPath`. This is correct but stylistically inconsistent with the rest of the file's pattern, and if `t.Context()` is ever extended to return a non-nil sentinel for zero, the precedence here is harder to audit. Consider matching the local-variable pattern or pushing the zero check into Context/session access.",
+        "file": "experimental/ir/ir_type.go",
+        "lines": "196-199",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Loop variable `i` is shadowed inside testZeroAny",
+        "detail": "`for i := range ty.NumMethod()` declares `i`, and the inner `for i, r := range returns` shadows it. Harmless today because the outer `i` is unused after the inner loop, but it is a readability nit that linters will flag (govet/shadow). Rename to `idx` or `ri`.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "120-128",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Repeated `var slice T; if f != nil { slice = ... }; seq.NewFixedSlice(slice, ...)` pattern duplicated ~9 times in ir_file.go",
+        "detail": "Every top-level accessor (Types, AllTypes, Extensions, AllExtensions, Extends, AllExtends, Services, Symbols, Imports, TransitiveImports) repeats the same five-line incantation. A small generic helper such as `func nilSafeSlice[T any](f *File, get func(*File) []T) []T` would collapse each accessor to a single line and make the nil-safety guarantee uniform. Not blocking, but the duplication is the kind of thing that makes future changes drift.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "210-368",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "FeatureSet on nil File uses an explicit empty-struct early return while peers use id.Wrap with a zero id",
+        "detail": "`if f == nil { return FeatureSet{} }` is correct but inconsistent with neighbors like Options() which build a zero id and call `id.Wrap(f, options).AsMessage()`. If `id.Wrap(nil, zeroID)` produces a zero FeatureSet (very likely given the test passes), this branch is unnecessary. If it does not, then the inconsistency is itself worth a comment so readers know why FeatureSet needs the early return.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "337-341",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ImportFor is not visibly nil-guarded in the diff",
+        "detail": "The diff guards every other top-level *File accessor against a nil receiver but does not touch ImportFor (line ~199). If ImportFor dereferences f (e.g., f.imports), it will panic on the zero pointer \u2014 but the new TestZero claims to exercise all 1-arg accessors. The test's `m.Func.Type().NumIn() != 1` filter excludes ImportFor because it takes an argument, so the gap is invisible to the new test. Confirm ImportFor is already nil-safe or add a guard for consistency.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "199-208",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether AllMembers needs an actual fix or just a test",
+        "positions": [
+          {
+            "persona": "Correctness-first",
+            "position": "The fact that a consumer of `(*File)(nil).AllMembers()` would panic is a real regression; the production path must be safe, and the test must consume the iterator to prove it."
+          },
+          {
+            "persona": "Pragmatic-shippability",
+            "position": "If no caller invokes AllMembers on a nil *File today, this is a latent issue that can be filed and fixed in a follow-up. The PR's stated goal is parity with the ast zero test, not exhaustive iter-safety."
+          }
+        ]
+      },
+      {
+        "topic": "Nil-receiver pattern vs zero-value-struct pattern",
+        "positions": [
+          {
+            "persona": "Abstraction-discipline",
+            "position": "Push nil-safety into the leaf method (`imports.Directs` already handles nil); callers should just pass `nil` through. The current double-guard in *File methods is redundant."
+          },
+          {
+            "persona": "Defensive-locality",
+            "position": "Each *File method should be self-evidently safe without requiring the reader to verify the callee's nil semantics. The duplication is cheap insurance and survives refactors that move the leaf method."
+          }
+        ]
+      },
+      {
+        "topic": "Reflection-driven zero test vs explicit per-type tests",
+        "positions": [
+          {
+            "persona": "DRY/coverage",
+            "position": "Reflection covers every accessor on every type at minimal cost and will keep covering new accessors as they are added \u2014 exactly what a zero-invariant test should do."
+          },
+          {
+            "persona": "Formal-correctness",
+            "position": "Reflection-based tests obscure which accessor failed, mishandle generics like `Ref[T]`, and silently skip whole categories (variadic, methods-with-args, functions returned from accessors). Explicit per-method tests, even if verbose, catch more and document the contract."
+          }
+        ]
+      }
+    ]
+  },
+  "raw": ""
+}

@@ -1,0 +1,77 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "dijkstra+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared RateLimit pointer's Stats/FullKey on every request, causing a data race and corrupted lookups",
+        "detail": "The handler reassigns rateLimit.Stats and rateLimit.FullKey on a *RateLimit pulled from the shared config tree. Concurrent requests with different runtime values stomp each other's state; sequential tests never witness this. Resolve the enhanced key/Stats into a local per call instead of writing back into config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NewRateLimit is invoked with a stale FullKey then immediately overwritten, allocating and registering throwaway Stats on every hot-path call",
+        "detail": "When the enhanced key differs from FullKey, the code calls NewRateLimit (which calls NewStats) with the pre-enhancement key and then discards it to allocate again for enhancedKey. GetLimit runs per request, so this leaks/inflates the stats store continuously. Build the right key once during the walk and allocate Stats once.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-429",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The three value_to_metric branches (wildcard, matched-by-value, default) collapse to a single rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default arm all do the same thing: if valueToMetric or matched-with-value, append key+'_'+value (when value non-empty); else append key. Thirty lines becomes four. The duplication indicates the postcondition was never stated. Replace with one predicate driving one append.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel key-builders run through the descriptor walk instead of one builder with a per-level inclusion decision",
+        "detail": "detailedMetricFullKey and valueToMetricFullKey are both appended on every iteration with overlapping rules, then reconciled post-hoc by comparing enhancedKey to FullKey and reconstructing the RateLimit. Replace with a single builder driven by (detailedMetric || descriptor.valueToMetric || matchedUsingValue || matchedViaWildcard) and one NewStats call at the end.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature largely duplicates detailed_metric with hand-waved precedence rather than generalizing it",
+        "detail": "detailed_metric already puts runtime values into the metric key. This adds a parallel mechanism, parallel state, and an unstated rule that detailed_metric wins. Either extend detailed_metric with per-level scope or state precisely why a second axis is needed; the README does not justify it. Two flags doing nearly the same job is config-surface rot.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead/unreachable trailing append when nextDescriptor is nil, and missing test for unmatched-descriptor walk",
+        "detail": "When nextDescriptor is nil the loop terminates and the trailing append to valueToMetricFullKey is never observed (or trails garbage onto a higher limit's key). Match detailedMetricFullKey's behavior by stopping the append, and add a test where a mid-level lookup misses to pin the contract.",
+        "file": "src/config/config_impl.go",
+        "lines": "383-388",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK with two P0 correctness bugs. GetLimit mutates a shared *RateLimit pulled from the config tree, producing a data race under concurrency and corrupted lookups. It also calls NewStats twice per request on the enhanced path, discarding the first allocation and inflating the stats store on the hot path. Structurally, the patch runs two parallel key-builders with three near-identical branches that collapse to one rule, and it duplicates detailed_metric rather than generalizing it. Fix: resolve key once during the walk, allocate Stats once into a local, and collapse the special cases."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "liskov",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "The function's contract under failure modes is unstated and now silently inconsistent",
+        "detail": "The ADT here is 'read all bytes a subprocess wrote to this FIFO, then return.' The postcondition under writer-crash-mid-write is undefined. Old code raised CalledProcessError when content was empty; new code may return a partial buffer because the blocking read loop has no check for abnormal writer exit. State the contract explicitly.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Mode-switch leaks implementation state across a boundary the caller does not see",
+        "detail": "The function mutates fifo_fd flags via fcntl mid-call and never restores them. If fifo_fd is owned by the caller (it is passed in), this violates the frame: the file descriptor's blocking state is part of the caller's observable state. Either own the fd fully or restore flags on exit.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-137",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout and subprocess-failure invariants are weakened by the unconditional blocking read",
+        "detail": "The original non-blocking loop preserved invariants: bounded wait via poll timeout, and early detection of subprocess hang/failure. Once the inner while-True blocking loop begins, neither holds; a writer that opens, writes one byte, then hangs forever will hang the parent indefinitely. The contract regressed.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-144",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError handler is now dead code under the new control flow",
+        "detail": "After the first successful data read switches to blocking mode and breaks out, BlockingIOError can only fire on the initial pre-data reads. The 'pass' is fine, but the comment 'File not ready yet, continue waiting' duplicates the poll-timeout branch and obscures the actual invariant. Consolidate or document why both paths exist.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "check_process_exited helper is retained but its role in the contract has shifted",
+        "detail": "Previously it was the EOF oracle on macOS; now it only gates the terminal CalledProcessError. The module boundary around 'how do we know the writer is done' has been redrawn implicitly. Document that blocking-read EOF is now the primary signal and check_process_exited is a fallback for the zero-bytes-ever case.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "161-162",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies a real POSIX-level race and substitutes a stronger EOF oracle (blocking read) for a weaker one (poll + process-exit check). However, the function's contract was never written down, and the change silently weakens two invariants the old implementation upheld: bounded wait on a hung writer, and the frame property that the caller's fd flags are unchanged on return. State the contract \u2014 preconditions on fifo_fd ownership, postconditions under writer-crash and writer-hang, and the frame on fd state \u2014 then either restore O_NONBLOCK on exit or reassert ownership. The core insight is sound; the abstraction needs to keep its promise on all paths, not just the happy one."
+  }
+}

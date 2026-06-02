@@ -1,0 +1,64 @@
+{
+  "persona": "torvalds",
+  "task_id": "stylelint__8953",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Fix only normalizes ClassName nodes \u2014 IDs, attributes, type selectors with escapes still slip through",
+        "detail": "The bug is about CSS escape equivalence. CSS escaping applies to identifiers everywhere \u2014 ids (`#u-m\\+` vs `#u-m\\00002b`), attribute values (`[data-x=u-m\\+]`), pseudo-class arguments, custom property-ish idents, type/tag idents. The patch only handles `parser.isClassName(node)`. The same false negative exists for every other identifier the selector parser exposes a value getter/setter on. You fixed one column of a multi-column bug. Either widen the normalization (isClassName || isIdentifier || isAttribute || isTag \u2014 whatever the parser exposes setters on) or document explicitly why classes are the only case and file the rest. As shipped, this earns three more bug reports next month.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "97-105",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Tests cover only the class case the patch handles \u2014 no coverage for ids, attributes, or non-duplicates that must stay non-duplicates",
+        "detail": "Reject cases are all `.u-m\\xx` class duplicates. There is no test that `#u-m\\+` and `#u-m\\00002b` are (or aren't) duplicates, no attribute selector test, no negative test proving that `.u-m\\+` and `.u-mx` don't false-positive after normalization, no test that escape-bearing selectors still report correct columns when surrounded by other selectors. The test set proves the happy path of the one branch that was implemented. Add a few negatives and a few non-class identifiers \u2014 either they pass (great, document) or they fail and the scope of the fix expands.",
+        "file": "lib/rules/no-duplicate-selectors/__tests__/index.mjs",
+        "lines": "22-29, 90-116",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`node.value = node.value` self-assign relies on undocumented side-effect of a third-party setter",
+        "detail": "The trick works because postcss-selector-parser's ClassName setter re-encodes through its escape routine. That is a library internal. If postcss-selector-parser ever changes that getter/setter to be a plain field (perf cleanup, refactor), this normalization silently becomes a no-op and the bug returns with zero test failure noise \u2014 because the parser will then return the already-equal raw values for trivial cases but not for the escape-mismatch case. Either wrap with a small helper that asserts the setter actually normalized (e.g. compare raws after), or pin a behavior test against postcss-selector-parser so a future upgrade trips a test, not a user.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "100-104",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`@ts-expect-error` masks a real type gap; eslint-disable line buries the intent",
+        "detail": "Two suppressions in five lines. The `raws.value` check is a perf shortcut piggybacking on an untyped field \u2014 fine, but the comment claims `raws` exists; if so, augment the type locally or use a typed accessor rather than perpetually carrying `@ts-expect-error`. The self-assign disable is the right call but combined with the ts-expect-error in the same tiny function it reads like 'we got it working, move on.' For a util that runs on every selector in every lint, the right thing is a 4-line helper with one suppression and a real test that locks in the assumption.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "100-104",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Perf: normalizeNodeEscaping now runs for every node in every selector tree on every lint run",
+        "detail": "`normalizeSelector` is hot \u2014 it gets called per rule, per pass. Adding a `parser.isClassName` typecheck plus a `node.raws?.value` access for every walked node is cheap, but it is unmeasured. For a project that lints multi-thousand-rule stylesheets, the early-return on `!node.raws?.value` is doing real work; good. But a one-line benchmark note in the PR (or in the commit message) showing this isn't a regression on a big real stylesheet would be the cost of a coffee. As written: probably fine, but unverified.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "13-19, 97-105",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "NEEDS-WORK. The patch is small, scoped, and the trick \u2014 exploiting postcss-selector-parser's getter/setter to renormalize escapes \u2014 is genuinely clever and arguably good taste: it eliminates the special-case escape comparison by piggybacking on the parser's own canonical form rather than rolling a bespoke unescape. The diff is readable and matches the surrounding code's voice. What's wrong: the fix is gated on `isClassName`, but the bug class (CSS escape equivalence) lives on every identifier the selector grammar accepts \u2014 ids, attributes, idents \u2014 and there are no tests proving those cases either pass (free win, document it) or fail (so the scope of the fix is honest). The self-assign normalization relies on undocumented library internals with no behavior test pinning it; one upstream refactor and the bug silently returns. Tighten the surface (more node kinds or an explicit scope justification), add a couple of negative tests, and add one test that locks in the parser-setter behavior. Then it lands."
+  },
+  "raw": ""
+}

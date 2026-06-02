@@ -1,0 +1,157 @@
+{
+  "task_id": "ratelimit__996",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared *RateLimit pointer from the config tree, racing across concurrent requests",
+        "detail": "rateLimit is obtained from nextDescriptor.limit, the shared config-tree node returned to every caller. The new code writes rateLimit.Stats and rateLimit.FullKey on every call with a per-request enhanced key derived from runtime values. Under concurrent GetLimit calls with different runtime values, goroutines will race on Stats/FullKey of the same shared struct, and one request's metric increment will land on another's counter. The override must return a per-call copy (or compute the key alongside the limit) rather than mutating shared state.",
+        "file": "src/config/config_impl.go",
+        "lines": "414-431",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unbounded stats cardinality from raw runtime values written into metric keys with no sanitization or bound",
+        "detail": "valueToMetricFullKey writes entry.Value verbatim into the metric key and statsManager.NewStats(enhancedKey) is invoked per request, allocating a new stats handle for every distinct runtime value seen. There is no length cap, charset sanitization, memoization, or cardinality guard. detailed_metric carries an explicit cardinality warning in the README; value_to_metric inherits the same hazard but is sold as the safer alternative without the warning. Add memoization on NewStats per key, sanitize values, and mirror (or strengthen) the detailed_metric cardinality warning in docs.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-431",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Dead NewRateLimit/NewStats call inside the override branch leaks a stats handle under the old key on every request",
+        "detail": "The post-loop block calls NewRateLimit(... NewStats(rateLimit.FullKey) ...) and then immediately overwrites rateLimit.Stats with NewStats(enhancedKey) and rateLimit.FullKey with enhancedKey. The first NewStats registers a ghost counter under the non-enhanced key with no caller and is discarded on the next line, leaking stats handles per request and polluting the registry. Build the enhanced key first and call NewStats exactly once.",
+        "file": "src/config/config_impl.go",
+        "lines": "419-430",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-entry three-way branch collapses to a single rule with one stated invariant",
+        "detail": "The matchedViaWildcard / matchedUsingValue / default-key arms at ~lines 346-389 reduce to a single rule: append entry.Key, then append _value iff (nextDescriptor.valueToMetric || matchedUsingValue) && value != \"\". The current copy-pasted branches make the reader simulate three near-identical paths to confirm the postcondition. Collapse to one expression (e.g. includeValue := nextDescriptor.valueToMetric || matchedUsingValue), state the loop invariant in a comment, and replace the mutable matchedUsingValue flag with a small switch over match kind.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-389",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel key builders (detailedMetricFullKey and valueToMetricFullKey) duplicate traversal logic",
+        "detail": "GetLimit now maintains both builders side by side with overlapping rules, plus matched-* flags and a post-loop reconciliation. The data is one sequence of (key, optional value) segments produced by the traversal; the right shape is a single policy-parameterized builder (or a []segment list rendered once at the end) so future descriptor-matching changes have one place to edit. As written, the two paths will drift.",
+        "file": "src/config/config_impl.go",
+        "lines": "313-389",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature overlaps detailed_metric without a clear conceptual model; should likely be one unified knob",
+        "detail": "value_to_metric and detailed_metric both answer the same question ('include the runtime value in this segment of the metric key') with subtly different scoping, and the README has to spell out a precedence rule because they overlap. A single per-descriptor flag (or an enum like none|key_only|key_and_value) would express the intent without two near-identical knobs. The precedence rules between the two flags across leaf vs. intermediate descriptors are also under-specified \u2014 write down the contract per (match kind) x (flag combination) before the API freezes.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-71, 414-429",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override branch guarded by string comparison rather than the value_to_metric flag, and FullKey semantics silently changed",
+        "detail": "The post-loop override fires when enhancedKey != rateLimit.FullKey rather than when any matched descriptor actually has valueToMetric set. If FullKey was not reliably populated at construction time (or is changed upstream later), the override path will fire on requests that never opted in, regenerating Stats. Additionally, the detailed_metric branch now writes rateLimit.FullKey = detailedKey, silently changing FullKey semantics for existing readers (logs, debug). Gate on the real predicate and either state FullKey == Stats.Key as a deliberate invariant or revert that write.",
+        "file": "src/config/config_impl.go",
+        "lines": "414-431",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "nextDescriptor == nil branch still appends entry.Key to the enhanced builder for an unmatched path",
+        "detail": "When no descriptor matches, the else branch appends entry.Key to valueToMetricFullKey with a 'still append something deterministic' comment. Either rateLimit stays nil and the builder is discarded (the append is dead), or the segment ends up in a metric key for a descriptor that didn't actually match. Prove the write is load-bearing with a test or delete it; document the invariant for partial matches either way.",
+        "file": "src/config/config_impl.go",
+        "lines": "381-389",
+        "flagged_by": [
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literals for rateLimitDescriptor at four fields and growing",
+        "detail": "&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric} and the matching domain initializer use positional initialization. Adding the fourth field already required touching both call sites in the correct order; the next field addition will silently mis-assign. Switch to named-field initialization at both sites \u2014 cheap fix, removes a whole class of future bug.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests do not exercise concurrent GetLimit, cardinality, sanitization, or cross-feature precedence",
+        "detail": "All new tests are sequential single-threaded happy paths with assertions on Stats.Key. They will pass even though the shared-pointer mutation races under concurrent load. Add: (a) a test issuing concurrent GetLimit calls with distinct entry values against the same leaf and asserting each returned rl carries its own key; (b) tests with values containing '.', whitespace, non-ASCII, and extreme lengths to pin sanitization; (c) intermediate detailed_metric + leaf value_to_metric and other precedence boundaries; (d) a property-based assertion of the metric-key invariant rather than only worked examples.",
+        "file": "test/config/config_test.go",
+        "lines": "952-1595",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Documentation under-states cardinality risk and misframes value_to_metric as lower-cardinality than detailed_metric",
+        "detail": "The README for value_to_metric omits the cardinality warning detailed_metric carries explicitly, and frames the feature as a lower-cardinality alternative. Cardinality is a property of the value space at the enabled level, not of which descriptors opt in; enabling value_to_metric at top descriptors can equal or exceed detailed_metric cardinality. Mirror the cardinality warning, note that values are not sanitized (so '.' or whitespace in values affects downstream metric backends), and remove the misleading framing.",
+        "file": "README.md",
+        "lines": "339-349",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a clear verdict: the feature is reasonable and well-motivated, but the GetLimit implementation has serious correctness and concurrency problems and the new path duplicates an existing concept (detailed_metric) rather than unifying with it. The headline P0s are (1) per-request mutation of the shared *RateLimit pointer stored in the config tree, which races under concurrent traffic with different runtime values; (2) unbounded stats cardinality from raw runtime values written into metric keys with no sanitization, memoization, or documented warning; and (3) a dead NewStats call inside the override block that leaks a ghost counter under the old key on every request. At P1, the per-entry three-way branch collapses to a single rule, the two parallel key builders should be one policy-parameterized builder, and the override should be gated on the actual valueToMetric flag rather than a string-equality fallback. Recommended action: return a per-call copy (or compute the key alongside the limit), unify the two metric-key concepts, sanitize/bound runtime values in keys, restate FullKey/Stats invariants, and add concurrent + property-based tests before landing."
+  },
+  "raw": ""
+}

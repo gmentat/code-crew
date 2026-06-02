@@ -1,0 +1,88 @@
+{
+  "task_id": "espnet__6278",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring promises max_steps/val_interval but code reads max_step and ignores val_interval",
+        "detail": "The constructor docstring lists max_steps, log_interval, val_interval, save_interval, but the code reads trainer_args['max_step'] (singular) and never consults val_interval. Validation runs every save_interval instead. Callers writing configs to the documented contract will KeyError or get silently wrong validation cadence. Pick one spelling, honor it, and assert required keys at __init__.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-77",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery parses 'step_' substring fragilely and has no atomicity guard against half-written dirs",
+        "detail": "_load_checkpoint accepts any directory containing 'step_' and parses int(name.split('step_')[-1]), crashing on names like 'step_3_backup' or 'foo_step_10'. There is also no marker for completed saves, so a crashed mid-write directory becomes the resume target. Use a strict regex full-match and write a 'latest' marker on successful save.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "run() loop lacks a progress invariant; can overshoot max_step or spin forever on empty iterator",
+        "detail": "The outer while loop depends on train() advancing global_step by save_interval, but checks termination only between epochs. If save_interval doesn't divide max_step the loop overshoots; if the data iterator yields zero batches global_step never advances and run() spins forever re-saving the same checkpoint. State and enforce the loop invariant and termination function inside train().",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-176",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats assumes identical key sets and call order across ranks without asserting it",
+        "detail": "The function iterates stats keys and issues one all_reduce per key, computing mean as SUM/world_size. NCCL correctness requires every rank to issue identical collectives in identical order; if a rank skips a key (empty batch, missing metric) the job hangs or silently corrupts the mean. State the precondition and assert key-set consistency across ranks, or all_reduce a presence mask.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-152",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer hides a global wandb dependency in its interface with no precondition check",
+        "detail": "__init__ mutates wandb.config and run() calls wandb.log unconditionally, yet there is no assert wandb.run is not None and no injected logger. The docstring states the precondition but the code does not enforce it, making the global a leaky part of the contract. Inject an explicit logger sink (no-op on non-zero ranks) so value flow is visible and testable.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "18-25, 88-90, 175-207",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stringly-typed specifier 'task:name:data_json[:factor]' is whitespace-split and re-parsed at every consumer",
+        "detail": "train.py splits valid_*_specifier on whitespace, but the documented format embeds colon-delimited paths that may contain spaces; one space in a path produces two bogus specs. The grammar lives only in --help and is re-parsed downstream. Parse once at the CLI boundary into a small dataclass {task, name, path, factor} and pass the value, not the encoding.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-89, 187-217",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. Two blocking correctness bugs dominate: the trainer_args contract is internally inconsistent (max_steps vs max_step, val_interval advertised but unused), and checkpoint discovery parses directory substrings fragilely with no atomicity guard. The run() loop has no stated invariant or termination function, risking overshoot or infinite spin on an empty iterator. Beneath the bugs, the panel sees the same structural problem: untyped dicts and stringly-typed specifiers carry contracts that should be small typed records, and a hidden global wandb dependency leaks through the trainer's interface. Distributed collective discipline in _all_reduce_stats is also assumed rather than asserted, the classic 3am hang."
+  }
+}

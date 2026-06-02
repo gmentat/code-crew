@@ -1,0 +1,78 @@
+{
+  "task_id": "protocompile__645",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Same nil/IsZero guard copy-pasted into ~20 accessors instead of one helper",
+        "detail": "The fix sprays `if f != nil` / `if !x.IsZero()` boilerplate across roughly twenty accessors in ir_file.go, ir_type.go, ir_imports.go, and ir_member.go. One helper (or making seq.NewFixedSlice tolerate a nil/zero source) would replace the entire pattern. The panic class was eliminated by adding a special case everywhere instead of removing the special case.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "182-365",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value semantics never stated: is a zero *File a legal value or a caller bug?",
+        "detail": "The PR patches symptoms without deciding whether a zero/nil receiver is a legitimate domain value or a programming error. Either model absence once (empty singleton, IsZero on a value type) or reject nil at the boundary. The current shape forces every reader to remember which they hold and leaves the invariant unwritten, one refactor away from regressing.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "imports.Directs/Transitive closures still dereference i.publicEnd on a nil receiver path",
+        "detail": "The guard sets slice to empty when i==nil, so the captured closure happens not to run today. But the closure still reads i.publicEnd / i.importEnd, so any future refactor that drops the length-based short-circuit re-introduces the panic. Bail out earlier returning an empty Indexer, or state the invariant explicitly.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-245",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex returns in-band sentinel -1, inventing a new postcondition and complecting value with absence",
+        "detail": "The signature is unchanged but the method now returns -1 for the zero element. Callers doing e.Value().MessageKeys().At(e.ValueNodeIndex()) will index by -1 and panic \u2014 the failure has just been relocated. Return (int, bool) or an Optional so presence and value stay separate, and update the spec.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven zero test verifies non-panic, not a stated contract, and silently skips methods",
+        "detail": "testZeroAny filters to NumIn()==1, so accessors taking arguments (e.g. ImportFor) are never exercised, and any Len()==0 counts as success. Context/IsZero/ValueNodeIndex are special-cased ad hoc. The actual invariant \u2014 \"zero values are safely traversable empties\" \u2014 is nowhere written. Add an explicit allowlist of skipped methods and document the contract.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "85-137",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symbol.RawData zero-guard lives in export_test.go, divorced from production code",
+        "detail": "The IsZero guard for Symbol.RawData is added in the test-export shim rather than in the real accessor. If production callers reach Raw().data directly they remain exposed; if they do not, the test verifies a method the package does not ship. The invariant is in the wrong file.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "38-41",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR fixes real panics but in the wrong shape. The same nil/IsZero guard is copy-pasted across roughly twenty accessors instead of being lifted into one helper or resolved by a domain decision about whether a zero receiver is even legal. Two specific bugs survive: imports.Directs/Transitive still capture a nil receiver in closures, and ValueNodeIndex relocates the panic into an in-band -1 sentinel callers will index with. The reflective zero test is cheap and useful but proves \"no panic\" rather than a written contract, and silently skips any accessor with parameters. Land the test first, then refactor the guards into one place before merging the behavioral changes."
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit allocates and discards a Stats counter on every request, registering counters in the stats store per call",
+        "detail": "When the enhanced key differs from FullKey, NewRateLimit is called with the old FullKey and the resulting Stats is immediately discarded, then NewStats is called again for enhancedKey. This runs on the hot path per request, allocating and registering counters every call. Build the right key once and allocate once at load time, or guard the override behind a flag.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared RateLimit's Stats and FullKey fields under concurrent requests, causing a data race",
+        "detail": "rateLimit is a pointer into the loaded config tree shared across concurrent requests. Reassigning rateLimit.Stats and rateLimit.FullKey inside GetLimit without a lock is a textbook race; two requests with different runtime values will stomp each other. Stats must be resolved per-call into a local, not written back into shared config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical branches in the value_to_metric key-building switch collapse to one rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and default-key arms all reduce to: append key, and if valueToMetric-or-matched-with-value and value is non-empty, append '_'+value. The current thirty-line shape special-cases what is a single general rule, hurting readability and obscuring the invariant.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel metric-key builders duplicate the descriptor walk; collapse to one builder with a per-level decision",
+        "detail": "detailedMetricFullKey and valueToMetricFullKey are appended to on every iteration with overlapping rules, then reconciled post-hoc by comparing to FullKey and reconstructing the RateLimit. The right shape is one builder driven by (detailedMetric || descriptor.valueToMetric || matchedUsingValue || matchedViaWildcard), with one NewStats call at the end. The current data flow is fighting the algorithm.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "pike",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature duplicates detailed_metric with awkward precedence instead of generalizing it",
+        "detail": "detailed_metric already implements 'put runtime value into the metric key.' Adding a parallel valueToMetric axis with its own state, builder, and a rule that detailed_metric wins creates two flags doing nearly the same job. Either extend detailed_metric with per-level scope or justify precisely why a second axis is required; the README hand-waves it.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile; use named fields",
+        "detail": "Both construction sites build rateLimitDescriptor positionally as {map{}, rateLimit, nil, descriptorConfig.ValueToMetric}. Adding any future field silently shifts arguments and may not produce a compile error if types align. Switch to named fields at both sites to make future additions safe.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this feature is useful but the implementation needs work before landing. Two hot-path defects dominate: GetLimit allocates and registers a throwaway Stats counter on every request, and it mutates shared RateLimit state without locking, creating a data race under concurrent traffic. The key-building logic is also bad-taste: three branches compute the same rule, and two parallel builders duplicate the descriptor walk that should be one builder with a single NewStats call at the end. The feature additionally overlaps detailed_metric and should likely generalize it rather than parallel it. Tests cover happy paths but miss unmatched-descriptor edges and concurrent-access cost."
+  }
+}

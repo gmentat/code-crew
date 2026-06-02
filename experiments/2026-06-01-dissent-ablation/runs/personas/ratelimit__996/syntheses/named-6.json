@@ -1,0 +1,87 @@
+{
+  "task_id": "ratelimit__996",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared RateLimit object's Stats and FullKey per request, creating a data race",
+        "detail": "The override block reassigns rateLimit.Stats and rateLimit.FullKey on a *RateLimit pulled from the shared descriptor tree. Concurrent requests stomp each other's state, and sequential tests cannot witness the race. Compute Stats per-request into a local or return a fresh copy rather than mutating shared config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Per-request NewStats allocation with a throwaway counter registered in the stats store",
+        "detail": "NewRateLimit is invoked with the stale FullKey just to be overwritten by a second NewStats call for enhancedKey. NewStats registers a counter in the store; doing this on the hot path per request both wastes the first allocation and inflates the stats store unboundedly. Compute the final key once at load and allocate stats once.",
+        "file": "src/config/config_impl.go",
+        "lines": "421-430",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical key-building branches collapse to one predicate",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default arms all reduce to: append entry.Key, and append '_'+value when (valueToMetric || matchedUsingValue) and value is non-empty. The thirty-line switch is one rule. Collapse it; the current shape is special-cases hiding a single decision.",
+        "file": "src/config/config_impl.go",
+        "lines": "352-388",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override guard compares enhancedKey against a FullKey that may never have been assigned",
+        "detail": "FullKey is only set in the detailed_metric branch. On non-detailed paths it is the zero value (or, given the mutation bug, residue from a prior request), so `enhancedKey != rateLimit.FullKey` is not a meaningful correctness predicate. Establish the FullKey invariant at construction or compute the key decision from data, not from a possibly-unset field.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-428",
+        "flagged_by": [
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric-key construction is complected with descriptor traversal and duplicated alongside detailed_metric",
+        "detail": "GetLimit interleaves descriptor walking, wildcard matching, and two parallel key builders (detailedMetricFullKey, valueToMetricFullKey) with overlapping rules. Extract a per-descriptor segment renderer (e.g. metricSegment(entry, mode)) computed once at load, and drive one builder from it. This also raises the question of whether value_to_metric should generalize detailed_metric rather than parallel it.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile against future field additions",
+        "detail": "Both construction sites use positional initialization: `&rateLimitDescriptor{map{}, rateLimit, nil, descriptorConfig.ValueToMetric}`. Any added field silently shifts meanings at both call sites without a compile error if types align. Use named-field initialization to make the struct contract explicit.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel reaches strong consensus that the feature is reasonable but the implementation has two serious bugs and several structural issues. GetLimit mutates a shared *RateLimit from the descriptor tree per request, which is a data race the sequential tests cannot witness, and it allocates a throwaway NewStats counter every call, inflating the stats store on the hot path. The override guard `enhancedKey != rateLimit.FullKey` compares against a field that is unset on the common path. Structurally, three near-identical branches collapse to one predicate, and the new key-building logic duplicates detailed_metric inside the lookup loop. Fix by computing the metric key per-request without mutating shared state, allocating stats once, and extracting a per-descriptor segment renderer."
+  }
+}

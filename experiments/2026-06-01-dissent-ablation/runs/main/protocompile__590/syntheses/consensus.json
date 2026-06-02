@@ -1,0 +1,154 @@
+{
+  "task_id": "protocompile__590",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() violates its postcondition and pushes nil-deref to every caller",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the new code returns a bare nil *result. Every other return site of run() yields a non-nil *result, and callers dereference fields like output.done, output.Fatal, output.Value without nil-checks. The fix relocates the nil-deref one frame up rather than eliminating it. The correct fix is to synthesize a result with Fatal set (e.g., ErrLeaderPanicked) and done already closed, so no caller ever observes nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code (typo for 'did not see')",
+        "detail": "The branch is taken precisely when output (the Load result) is nil \u2014 i.e., we did NOT see a result. The comment as written is the opposite of the truth. For a load-bearing concurrency edge case where the comment is the only specification of the new nil-return branch, this typo is dangerous and signals the author has not held the state machine clearly in their head. Fix the wording and expand it to describe who clears t.result, when, and what waiters are entitled to assume.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race window is narrowed but not closed; same nil-deref pattern exists on the symmetric early branch",
+        "detail": "The top of run() reads `output := t.result.Load()` and then does `closed(output.done)` and passes output around. If a previous leader panicked and set t.result back to nil, this very first Load can return nil and the existing code will panic with exactly the nil-deref this patch claims to fix. The patch only hardened the CompareAndSwap-failure path; the symmetric path needs the same guard. Additionally, no invariant is documented stating when t.result may transition non-nil to nil, so the fix is incomplete at the contract level.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Termination of waitUntilDone in the leader-panic case is not proved",
+        "detail": "The fix protects against t.result.Load() returning nil at deref time, but the precondition for the select on output.done to ever fire is that someone closes output.done. If the leader panics and only nils t.result without closing output.done, every waiter that captured output before the nil-out blocks until caller.ctx.Done(). The correct discipline is to fix the producer: the leader's panic recovery must close output.done (with Fatal set to the panic) before mutating t.result, preserving the invariant that any published *result is always closeable-to-completion.",
+        "file": "experimental/incremental/task.go",
+        "lines": "547-552",
+        "flagged_by": [
+          "knuth",
+          "dijkstra",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test accompanies the concurrency fix",
+        "detail": "A nil-pointer-deref race fix without a deterministic reproduction is a fix that will regress. The PR body describes a precise sequence (leader panics, sets t.result to nil, waiters Load it, deref) which is exactly the shape of a test: synchronize a task to panic mid-leadership, fire N waiters at it, assert no panic and a sensible typed error. Without that test, the next refactor reintroduces the bug and the race window cannot be demonstrated closed.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection is now asymmetric across waiter paths",
+        "detail": "In the new code, cycle detection runs only on the top `output != nil` branch. The CAS-loser branch also ends up waiting on a pending result owned by another goroutine but bypasses checkCycle entirely. Two callers in semantically identical waiting states now have different contracts: one may return ErrCycle, the other cannot. The PR description acknowledges this as a known narrowing and defers it to a follow-up; this is a behavior change that needs at minimum a test pinning the new behavior or the follow-up landed together.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "liskov",
+          "torvalds",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Data structure overloads nil to mean both 'not started' and 'aborted'",
+        "detail": "t.result simultaneously encodes 'no leader yet' (nil), 'leader running' (non-nil pending), and 'leader gave up' (nil again). Reusing nil for two different states is exactly what produces races like this \u2014 readers cannot distinguish 'not started' from 'aborted'. A sentinel aborted-result (done already closed, Fatal set) or a dedicated state enum would let the algorithm stay self-evident and remove the scattered nil checks. The task ADT also has no written specification for the leader-panic case; document the invariants on t.result through the leader lifecycle and the postcondition waiters can rely on.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "pike",
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowing the named return `output` inside the CAS-failure branch is a footgun",
+        "detail": "The enclosing function has `output *result` as a named return. Inside the CAS-failure branch the patch declares `output := t.result.Load()` with `:=`, shadowing it. The shadowing is intentional (we want the loaded result, not the freshly allocated one), but the named-return + shadow combo is exactly the pattern that gets miscompiled in someone's head during the next edit. Use a different local name (`leader`, `leaderResult`, `loaded`) or assign with `=`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle's doc comment and signature need refinement",
+        "detail": "The extracted helper inherits an inline comment ('only possible if output is pending') that referenced a variable no longer in scope, and the precondition that the caller must only invoke it in the pending branch is an implicit contract. Rewrite the doc to describe inputs, the cycle-ordering convention, and the assumption that caller.path is stable during the walk. Also note: the receiver `t` on `func (t *task) checkCycle` is unused \u2014 either move it to a method on *Task or make it a package-level function.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle walks caller.path twice; a single pass would suffice",
+        "detail": "checkCycle does a linear scan to find the match, then a second linear scan from the head to rematerialize the cycle. For depth d, that is up to 2d comparisons. A single walk that records prefix queries into a scratch slice and truncates at the match point would be one pass with no Reverse. Minor \u2014 the extraction into a named method makes the cost more visible and easier to optimize once the contract is stated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is a clean win \u2014 keep it",
+        "detail": "Pulling cycle detection out of run() into checkCycle(caller, q) is exactly the right move: run() becomes shorter, cycle detection is now a stateless transform over caller.path that returns an error or nil, and it can be tested in isolation. This is the part of the patch that is obviously right and should survive any rewrite of the rest.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel reaches strong consensus: NEEDS-WORK. The checkCycle extraction is a clean, semantics-preserving refactor that all reviewers praise and want kept. The race fix itself is incomplete and wrong-shaped. Returning a bare nil from run() violates the function's postcondition and relocates the nil-deref one frame up to every caller; the correct fix is at the producer side \u2014 the leader's panic recovery must synthesize a result with Fatal set and close output.done before mutating t.result, preserving the invariant that any published *result is always closeable-to-completion. The symmetric early branch in run() still reads t.result.Load() and dereferences output.done with the same racy pattern, the load-bearing comment contradicts the code (typo for 'did not see'), waiter termination is not proved if the leader panics without closing done, and no regression test accompanies the concurrency fix. The underlying data structure smell \u2014 t.result using nil to mean both 'not started' and 'aborted' \u2014 should be addressed before more patches accumulate on this shape."
+  },
+  "raw": ""
+}

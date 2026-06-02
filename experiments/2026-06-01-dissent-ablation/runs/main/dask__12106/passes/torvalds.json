@@ -1,0 +1,104 @@
+{
+  "persona": "torvalds",
+  "task_id": "dask__12106",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning then a dead break \u2014 this is just wrong",
+        "detail": "The code does `raise PerformanceWarning(msg)` followed by `break`. The break is unreachable dead code. Worse: PerformanceWarning is a Warning subclass \u2014 `raise` turns it into a hard error, but the name and the PR description (\"performance warning\") say the intent is to warn. Pick one. If you mean to warn, use `warnings.warn(msg, PerformanceWarning)` and then actually decide whether to continue or rechunk anyway. If you mean to error, raise something that isn't named *Warning* and delete the dead `break`. As written, this both lies about its intent and contains code the compiler will never reach. NEEDS-WORK.",
+        "file": "dask/array/core.py",
+        "lines": "~3905-3925",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "safe_chunk_size math is wrong \u2014 np.prod(shape) is elements, not bytes, and itemsize is multiplied incorrectly",
+        "detail": "`safe_chunk_size = np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` \u2014 `zarr_write_chunks` is the per-axis tuple from `_get_zarr_write_chunks(z)`, so np.prod of it is the number of elements in one shard. Multiplied by itemsize gives bytes, fine \u2014 but `max(1, z.dtype.itemsize)` is nonsense. itemsize is never zero for a real dtype; the max(1, ...) is cargo-culted defense against an impossible case. Worse, the message tells the user to set `array.chunk-size` to this number \u2014 but `array.chunk-size` is parsed as a byte string with units (\"128MiB\") in dask config, not a raw integer count. The suggested fix is the wrong shape. Either compute and format bytes correctly (with units) or stop pretending to give the user a copy-pasteable fix.",
+        "file": "dask/array/core.py",
+        "lines": "~3909-3920",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test asserts the warning is raised as an exception \u2014 confirming the API confusion",
+        "detail": "`test_zarr_risky_shards_warns` uses `pytest.raises(PerformanceWarning, ...)`. So the test agrees with the implementation that this is an exception, not a warning. The test name says \"warns\". The class name says \"Warning\". The PR description calls it a \"performance warning.\" This is three different stories and the test pins down the wrong one. Decide whether this is an error condition (then rename, document, and update the PR text) or a warning (then use `pytest.warns` and `warnings.warn`).",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~5210-5215",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop variable `nominal_dask_chunk_size = dw[0]` ignores non-uniform chunks",
+        "detail": "auto-normalized chunks along an axis are usually uniform except for a possibly-smaller tail. Checking only `dw[0] % zw` happens to work for the common case, but if `previous_chunks` interacts oddly with `auto_chunks` (or someone hands in a pre-rechunked array), the first chunk can be the aligned one and a later chunk be the offender. Either assert all interior chunks are divisible (excluding the final remainder), or document why dw[0] is sufficient. Right now it's a silent assumption.",
+        "file": "dask/array/core.py",
+        "lines": "~3899-3908",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch does two things \u2014 refactor the region/no-region branches AND add the misalignment check",
+        "detail": "The diff hoists `dask_write_chunks` out of both branches (a real cleanup \u2014 the duplicated `_get_zarr_write_chunks` + `normalize_chunks` was ugly) AND introduces a new error path. These are two patches. The hoist should land independently because it's an unambiguous win; the error/warning behavior is the part that needs the design argument the PR description itself is asking about. THREE-PATCHES \u2014 or at least TWO. Splitting would let the cleanup land while the warning-vs-error question gets sorted.",
+        "file": "dask/array/core.py",
+        "lines": "3889-3933",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Open question in the PR description is the real review \u2014 and it's not answered",
+        "detail": "The author asks: \"What should we do when there's competition between the global config and shard shape of the zarr array? Would an exception be appropriate here, prompting the user to change the config?\" That is the patch. The code as written silently picks \"exception\" by raising a class named Warning. Until that question is answered deliberately (with a doc note and a chosen name), the patch isn't ready. Decide the shape, then write the code to match.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message gives bytes value but tells user to pass it to a units-parsed config key",
+        "detail": "`dask.config.set({\"array.chunk-size\": {safe_chunk_size}})` in the message will set the value to a raw int. dask's config typically expects strings like \"128MiB\" for array.chunk-size and parses them with parse_bytes. The suggested snippet may technically work (parse_bytes accepts ints as bytes in some paths) but it's not how anyone configures it and it'll confuse readers. Either show the human-readable form (e.g. format_bytes(safe_chunk_size)) or just say \"set array.chunk-size to at least N bytes\" without the copy-paste line.",
+        "file": "dask/array/core.py",
+        "lines": "~3915-3920",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Style nit \u2014 `not nominal_dask_chunk_size % zw == 0` reads backwards",
+        "detail": "Use `nominal_dask_chunk_size % zw != 0`. The `not X == 0` form is the kind of thing that makes the next maintainer squint. Same precedence, same result, but obviously what it means.",
+        "file": "dask/array/core.py",
+        "lines": "~3902",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`len(dw) >= 1` is always true for a normalized chunks tuple",
+        "detail": "normalize_chunks never returns an empty tuple for an axis with shape > 0. The guard is dead. Drop it or replace it with the real precondition you meant to check.",
+        "file": "dask/array/core.py",
+        "lines": "~3900",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "REFUSE as submitted; NEEDS-WORK to land. The diff has a real bug: `raise PerformanceWarning(msg)` followed by an unreachable `break`, with PerformanceWarning being a Warning subclass that's being thrown as a hard exception while the test uses pytest.raises and the PR text calls it a \"warning.\" Pick one \u2014 warn or error \u2014 and name the class accordingly. The safe_chunk_size computation and the suggested `dask.config.set({\\\"array.chunk-size\\\": N})` snippet in the error message are also wrong-shape: array.chunk-size is a units-parsed string, not a raw byte count, and `max(1, dtype.itemsize)` is cargo-cult defense. The refactor that hoists `dask_write_chunks` out of both branches is a clean win and should land as its own patch; the alignment-check behavior is what's actually under debate (the author's own PR description asks the question and the code doesn't answer it). Split the patch, decide warn-vs-error deliberately, fix the message, and resubmit."
+  },
+  "raw": ""
+}

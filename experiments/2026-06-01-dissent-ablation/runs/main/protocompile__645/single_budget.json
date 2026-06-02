@@ -1,0 +1,174 @@
+{
+  "task_id": "protocompile__645",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "DescriptorProto() can still panic on nil receiver via slicesx.Last when i.files is non-nil but empty; nil guard added but earlier code path unchanged",
+        "detail": "In ir_imports.go DescriptorProto(), the new `if i == nil` guard returns nil safely, but for the test surface this method is invoked on a non-nil receiver. More importantly, the zero-value behavior elsewhere in `imports.Transitive()` computes `i.files[:max(0, len(i.files)-1)]` only when i != nil, which is fine, but `slicesx.Last(i.files)` returns an empty `imported{}` whose `.file` is nil, which then propagates. This is correct, but worth double-checking that callers do not assume DescriptorProto returns a real file. No actual panic, but the zero-test does not appear to exercise *ir.Imports.DescriptorProto on a non-nil-but-empty receiver.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-200",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Inconsistent zero-handling style: some methods nil-check the pointer receiver, others use IsZero(), creating two parallel idioms",
+        "detail": "Across ir_file.go the pattern is `if f != nil { ... }` on pointer receiver, while ir_type.go, ir_member.go, ir_value.go use `if !t.IsZero()` on value receivers. This is correct given the receiver kinds, but the early-return style differs (some return zero values directly, others build a nil slice and fall through to seq.NewFixedSlice). A consistent style \u2014 preferably always early-return for zero \u2014 would make the contract easier to audit and reduce the chance of a future getter being added without the guard.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "various",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllMembers() on nil File returns an iterator that still increments `i` and calls id.WrapRaw, but iter.Seq is nil so the Map adapter must tolerate a nil input seq",
+        "detail": "The change sets `var raw iter.Seq[*rawMember]` (nil) when f is nil, then passes it to iterx.Map. Whether iterx.Map tolerates a nil input Seq is an implementation detail of iterx \u2014 if Map iterates by calling raw(yield), calling a nil func value will panic. The test only iterates via reflection's Len() check or zero-comparison, and a func return is explicitly skipped (`if r.Type().Kind() == reflect.Func { continue }`), so this code path is NOT actually exercised by the new zero test. A latent panic remains if any caller range-iterates over AllMembers() on a nil *File.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "296-312",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflective zero test skips functions returned by accessors, masking latent panics on iter.Seq returns",
+        "detail": "In zero_test.go testZeroAny, `if r.Type().Kind() == reflect.Func { continue }` skips iter.Seq results (which are func types). This means AllMembers() \u2014 the only method changed to return iter.Seq with a conditional \u2014 is never actually exercised for non-panic behavior. The PR's stated goal of 'getters do not panic on zero values' is therefore not fully verified for iter.Seq getters. Recommend invoking the seq with a no-op yield (e.g., `for range r { break }` via reflection or a typed helper) to verify it does not panic.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "125-128",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test reflection loop skips methods with multiple inputs, missing accessors that take e.g. a *File argument",
+        "detail": "The filter `if m.Func.Type().NumIn() != 1 || m.Func.Type().NumOut() == 0 { continue }` excludes any method with arguments. This means `File.ImportFor(that *File)` is never tested for zero-value safety, despite that being a plausible zero-panic source (the method dereferences f and that). Either explicitly test such methods with their own zero arg, or document why they are excluded.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "108-110",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Symbol.RawData test hook returns arena.Nil() only when IsZero \u2014 but other Symbol accessors are not similarly guarded in this diff",
+        "detail": "export_test.go now branches on s.IsZero() to return arena.Nil(). This is a test-only helper, but it reveals that the production Symbol type has accessors not all of which were audited in this PR. The test passes by virtue of returning Symbol via reflection \u2014 but if Symbol has methods like `.FullName()`, `.Kind()`, etc., those would be invoked by testZeroAny and need to be panic-free. Confirm none of Symbol's exported zero-arg accessors panic; this PR's diff does not show such guards.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "36-43",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FeatureSet zero return constructs a typed zero value but the underlying id.Wrap branch on nil *File is untested",
+        "detail": "`File.FeatureSet()` short-circuits to `FeatureSet{}` when f == nil. This avoids calling id.Wrap(nil, f.features) which would dereference f. Good. But several other File accessors call `id.Wrap(f, ...)` with f possibly nil where the nil-guard only zeros the slice/value, not f itself (e.g., `File.Options()` calls `id.Wrap(f, options).AsMessage()` with f possibly nil). Whether id.Wrap tolerates a nil context is implementation-dependent and not verified by this PR.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "326-340",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex's sentinel return value of -1 is a contract change worth documenting in a CHANGELOG or migration note",
+        "detail": "Returning -1 for a zero Element changes the API surface: callers previously could rely on a (possibly panicking) success path. New behavior silently returns -1. The doc comment is updated which is good, but downstream consumers that index a slice with this result will panic on -1 rather than panic at the source. Consider whether a panic is actually preferable here vs. a sentinel.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Repeated `var slice []T; if !t.IsZero() { slice = ... }` pattern could be extracted to a helper",
+        "detail": "The same five-line pattern repeats ~10 times across ir_type.go and ir_file.go. A small helper like `zeroSlice[T any](isZero bool, get func() []T) []T` would compress this. Pragmatic counter-argument: Go's verbosity here is idiomatic and the helper would obscure the call site. Reasonable to leave as-is; flagging for awareness.",
+        "file": "experimental/ir/ir_type.go",
+        "lines": "various",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "testZero uses generics but does not constrain T to be a value type, allowing subtle mistakes with pointer types",
+        "detail": "testZeroAny[T any] is invoked with both pointer types (*ir.File) and value types (ir.Member). The zero of a pointer is nil \u2014 calling reflect methods on nil pointer values works but the dispatch goes to value receivers vs pointer receivers, which may produce different method sets. The current callsites appear correct, but a future maintainer adding `testZeroAny[ir.Type]` vs `testZeroAny[*ir.Type]` could get different coverage silently. Worth a comment explaining the choice.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "85-95",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`assert.Zero(t, z)` at the start of testZeroAny is redundant \u2014 z is declared as `var z T` so it is the zero value by definition",
+        "detail": "Line `var z T; assert.Zero(t, z)` always passes. The only failure mode is if T has a non-standard Zero comparison, but reflect.DeepEqual is used by testify which handles this correctly. Harmless, but adds noise.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "101-102",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typo preserved: 'Directs imports' should be 'direct imports'",
+        "detail": "In ir_imports.go line ~206: `// Directs returns an indexer over the Directs imports.` \u2014 'Directs' is a method name being used as an adjective. Pre-existing, not introduced by this PR, but the line is touched.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "201-206",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Nil-pointer guards vs zero-value method receivers as the canonical defense",
+        "positions": [
+          {
+            "persona": "pragmatic_shippability",
+            "position": "Per-method nil/IsZero checks are fine; they are local, cheap, and the test enforces the contract. Ship it."
+          },
+          {
+            "persona": "abstraction_discipline",
+            "position": "Scattering guards across 20+ methods is a code smell. A single chokepoint (e.g., a `safeFile(f *File) *File` returning a sentinel, or making the zero *File a valid object via lazy init) would centralize the invariant and reduce drift. The current approach guarantees a future getter will be added without a guard."
+          }
+        ]
+      },
+      {
+        "topic": "Whether ValueNodeIndex should return -1 sentinel or panic",
+        "positions": [
+          {
+            "persona": "formal_correctness",
+            "position": "Returning -1 silently is a bug-magnet; -1 used as a slice index will panic far from the root cause. A method on a zero value asking for an index has no meaningful answer \u2014 panic is the honest signal."
+          },
+          {
+            "persona": "pragmatic_shippability",
+            "position": "The PR explicitly documents the -1 return and only intends this for diagnostics. Consistent with the broader 'no panics from zero values' goal of the test. Acceptable trade-off."
+          }
+        ]
+      },
+      {
+        "topic": "Reflective test that skips func returns and multi-arg methods",
+        "positions": [
+          {
+            "persona": "algorithmic_correctness",
+            "position": "The test claims to verify all accessors are panic-safe but excludes iter.Seq and multi-arg methods. This is a false sense of security; the most likely panic source (range-iterating a nil seq) is precisely what is skipped."
+          },
+          {
+            "persona": "pragmatic_shippability",
+            "position": "Iterating funcs from reflection is awkward and the test still covers the bulk of the surface. Better-than-nothing; the iter.Seq paths can be hand-tested in a follow-up."
+          }
+        ]
+      }
+    ],
+    "summary": "This PR is a useful defensive hardening pass: it adds nil-receiver and IsZero guards across many getters in the ir package and introduces a reflection-driven zero test. The implementation is mostly correct, but the test is weaker than the PR claims \u2014 it skips func-returning accessors (iter.Seq, the very paths likely to panic on iteration) and methods with arguments, so the new AllMembers() nil-handling and File.ImportFor are not actually verified to be panic-safe. There is also stylistic inconsistency between `if f != nil` early returns and `var slice []T; if !t.IsZero() { slice = ... }` shape construction. The ValueNodeIndex -1 sentinel is a real API contract change worth flagging. Recommend tightening the test to invoke seqs and multi-arg accessors, and unifying the zero-guard style before merge."
+  },
+  "raw": ""
+}

@@ -1,0 +1,131 @@
+{
+  "task_id": "dask__12106",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Should shard/chunk misalignment raise or warn?",
+        "positions": [
+          {
+            "persona": "Pragmatic shipper",
+            "position": "warnings.warn is sufficient and is the conventional use of PerformanceWarning across dask; raising breaks existing callers who set array.chunk-size low intentionally and risks regressing pipelines on upgrade."
+          },
+          {
+            "persona": "Formal correctness",
+            "position": "Silent data loss is worse than a hard failure. Raising forces the user to acknowledge the config conflict before any data is written. The PR author explicitly asked this question; a raise is the right default for a correctness hazard."
+          }
+        ]
+      },
+      {
+        "topic": "Only checking dw[0] vs all chunk sizes",
+        "positions": [
+          {
+            "persona": "Pragmatic",
+            "position": "auto chunking with previous_chunks=shard_shape concatenates shards; the first chunk represents the nominal size, and the final remainder chunk is handled safely by zarr's partial-write semantics. Checking dw[0] is sufficient."
+          },
+          {
+            "persona": "Defensive",
+            "position": "If auto chooses non-uniform chunks under tight memory limits, an interior chunk could be misaligned without dw[0] being misaligned. The check should validate every chunk, or at minimum assert regularity."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "`raise PerformanceWarning(msg)` followed by unreachable `break`; raising a Warning subclass as an exception is unidiomatic",
+        "detail": "Line ~3905 raises `PerformanceWarning`, which is a `Warning` subclass defined as 'A warning given when bad chunking may cause poor performance'. Raising a Warning works but conflates two different semantics (warning vs error), and the trailing `break` is dead code that can never execute. If a hard failure is intended, introduce a dedicated exception (e.g., `ZarrChunkAlignmentError(ValueError)`) or keep `warnings.warn(...)`. The PR description itself flags this as an open question \u2014 it should be resolved before merge.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3907 (approx, in diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Misalignment check uses pre-region chunks, but region branch rechunks to region-adjusted chunks",
+        "detail": "The new for-loop validates `dask_write_chunks` (the full-array auto-normalized chunks) before the `if region is None` split. In the `else` branch the code then rebuilds `chunks` via `new_blockdim(s, c, r)` and rechunks to those. The check therefore can pass on the full-array chunks while the region-adjusted chunks actually used by `arr.rechunk(chunks)` are misaligned with shards, or vice versa (false positive raise). The check should run on the chunks that will actually be used.",
+        "file": "dask/array/core.py",
+        "lines": "3889-3932 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Only the first chunk per axis is validated; uneven auto chunks can slip through",
+        "detail": "`nominal_dask_chunk_size = dw[0]` checks only the nominal chunk size. `normalize_chunks(chunks='auto', previous_chunks=zarr_write_chunks, ...)` typically produces shard-aligned multiples, but under tight `array.chunk-size` it can yield uneven chunkings where interior chunks are smaller than dw[0]. Either iterate every chunk (`all(c % zw == 0 for c in dw[:-1])`) or assert chunk regularity before short-circuiting on dw[0].",
+        "file": "dask/array/core.py",
+        "lines": "3892-3894 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Error/warning loop break-on-first-axis hides other misaligned axes",
+        "detail": "Once an axis fails, the loop raises (or breaks). For multi-axis arrays a user may have multiple misaligned axes; reporting only the first leads to whack-a-mole tuning of `array.chunk-size`. Either collect all offending axes into a single message, or recompute the recommended `safe_chunk_size` to satisfy all axes simultaneously (the current `np.prod(zarr_write_chunks) * itemsize` already does this, but the message names only `axis {ax}` and chunk size `{zw}`, which is misleading when multiple axes are bad).",
+        "file": "dask/array/core.py",
+        "lines": "3895-3908 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Awkward boolean: `if not nominal_dask_chunk_size % zw == 0`",
+        "detail": "Python parses this as `not (x % zw == 0)`, which is correct but unidiomatic and easy to misread as `(not x) % zw == 0`. Prefer `if nominal_dask_chunk_size % zw != 0:`.",
+        "file": "dask/array/core.py",
+        "lines": "3894 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`np.prod(zarr_write_chunks)` returns a numpy scalar in the user-facing message",
+        "detail": "`safe_chunk_size = np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` yields a numpy int (e.g., `np.int64(12)`), which formats as `np.int64(12)` in the repr-printed dask.config.set example and looks unprofessional. Wrap with `int(...)` before interpolation, or use `math.prod`.",
+        "file": "dask/array/core.py",
+        "lines": "3896, 3912 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test only verifies `pytest.raises` for the warning path; no remaining coverage for `warnings.warn` semantics",
+        "detail": "`test_zarr_risky_shards_warns` uses `pytest.raises(PerformanceWarning, ...)`, locking in the raise-on-misalignment behavior. If the team decides to keep this as a warning (per the PR's open question), the test name (`*_warns`) and shape will mislead future readers. The test name and assertion should match the chosen semantics.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5196-5219 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Parametrized region test does not assert the misalignment path is exercised for region='all' and region='half'",
+        "detail": "`test_zarr_to_zarr_shards` asserts `c % s == 0` for the resulting chunks across all three region modes, which is good. But it does not assert that the new region-branch code path uses region-adjusted dask_write_chunks correctly when those chunks would have been misaligned at the global level. Add a region test under a constrained `array.chunk-size` to lock in behavior.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5127-5193 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message recommends a chunk-size in bytes but mixes singular ('a single on-disk chunk') with shard semantics",
+        "detail": "The message says 'set array.chunk-size to at least the size in bytes of a single on-disk chunk (or shard)'. For sharded zarr arrays, `_get_zarr_write_chunks` returns the shard shape, so `safe_chunk_size` is the size of one shard \u2014 not the inner chunk. Tighten wording to 'shard' specifically when sharding is active to avoid confusing users into thinking the inner chunk size suffices.",
+        "file": "dask/array/core.py",
+        "lines": "3899-3911 (diff)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The PR correctly improves rechunking by using shard shape as `previous_chunks` so `normalize_chunks(chunks='auto', ...)` typically produces shard-aligned multiples \u2014 a real win over #12105. However, the misalignment-detection block has three concrete problems: (1) it `raise`s a Warning subclass and leaves a dead `break`, conflating warning and error semantics on a question the PR description itself flags as unresolved; (2) the check runs on full-array `dask_write_chunks` while the region branch later rechunks to region-adjusted chunks, so the validation and the actual rechunk can diverge; (3) only `dw[0]` is inspected, which is fragile under uneven auto chunkings. The error-message wording and a few stylistic issues (`not x % y == 0`, `np.prod` repr leakage, single-axis report) should be cleaned up. Tests are improved overall but lock in the raise semantics under a `_warns` name, which should be reconciled with whatever decision the team makes on the warn-vs-raise question."
+  },
+  "raw": ""
+}

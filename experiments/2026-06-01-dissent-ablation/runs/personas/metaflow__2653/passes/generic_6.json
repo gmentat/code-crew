@@ -1,0 +1,70 @@
+{
+  "name": "generic_6",
+  "task_id": "metaflow__2653",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Switch to blocking mode can hang forever if subprocess crashes after partial write",
+        "detail": "Once any data arrives, the code disables O_NONBLOCK and loops on blocking os.read() with no timeout and no process-exit check. If the subprocess writes some bytes then is killed or hangs without closing the FIFO cleanly (e.g. another fd held by a grandchild), the parent will block indefinitely. The old code at least polled and re-checked check_process_exited.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-146",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "FIFO with multiple/forked writers will never EOF in blocking mode",
+        "detail": "POSIX EOF on a FIFO only fires once ALL writers close. If the deployer subprocess forks helpers that inherit the FIFO write end (common in Metaflow deployers), the blocking read will never return 0 even after the main subprocess exits. The previous code handled this via check_process_exited; the new code removes that safety net entirely.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-146",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Outer timeout no longer applies once blocking read begins",
+        "detail": "read_from_fifo_when_ready accepts a timeout used by select.poll(), but after the first chunk arrives control transfers to an unbounded blocking read loop. Callers relying on the timeout to bound total wait time will see the contract silently broken. Either preserve non-blocking with poll-based draining or document the new behavior.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-146",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BlockingIOError branch is now unreachable and misleading",
+        "detail": "After switching to blocking mode, os.read no longer raises BlockingIOError, and the only path that stays non-blocking is the initial empty-read case which is already handled by select.poll. The `except BlockingIOError: pass` is dead code that obscures intent and should be removed or justified with a comment.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "check_process_exited fallback for empty-poll case removed without replacement",
+        "detail": "The prior code documented that on macOS an empty poll with no EOF signal could still mean the writer closed; it broke out when the process had exited. That branch is now `pass`, so on macOS the loop may spin on poll timeouts forever if no data ever arrived but the subprocess died. The bottom-of-function check only fires after the loop exits.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "147-154",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl flag flip is not restored; fifo_fd state leaks if reused",
+        "detail": "F_SETFL permanently clears O_NONBLOCK on fifo_fd. If any caller reuses the fd after read_from_fifo_when_ready returns (or wraps it), the mode change is an undocumented side effect. A try/finally restoring the original flags would make the helper safer to compose.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "136-137",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The fix correctly identifies a real race between non-blocking reads and kernel pipe buffering, and the blocking-mode drain is a reasonable POSIX-backed remedy. However, the patch removes several safety nets \u2014 the check_process_exited fallback, the outer poll timeout, and the macOS empty-poll handling \u2014 without replacing them, trading an intermittent truncation bug for potential indefinite hangs when the subprocess crashes, forks writers, or never produces output. Recommend bounding the blocking-drain loop with periodic process-exit checks or a poll on the now-blocking fd, and removing the dead BlockingIOError branch."
+  }
+}

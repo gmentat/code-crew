@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close message type 'Close' may not match Deepgram's documented 'CloseStream' control message",
+        "detail": "The PR description and Deepgram docs reference {\"type\": \"CloseStream\"}, but _CLOSE_MSG is set to {\"type\": \"Close\"}. If Deepgram's TTS WebSocket actually expects 'CloseStream' (as STT does), the server will ignore this and the fix won't work. Verify against Deepgram's Speak v1 socket API before merging.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Only awaits a single receive() \u2014 may not capture remaining audio frames",
+        "detail": "asyncio.wait_for(ws.receive(), timeout=1.0) reads exactly one message, then closes. If Deepgram still has buffered audio chunks to flush after Flush+Close, those frames are dropped, which contradicts the PR's stated goal of preventing audio truncation. Should loop until a CloseStream/Closed ack or timeout.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "133-138",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_str on a possibly-closed/closing socket can raise ConnectionResetError",
+        "detail": "_close_ws may be called during shutdown/error paths where the WebSocket is already closing. send_str will raise, the broad except logs a warning, then ws.close() runs \u2014 but the Flush is silently lost. Consider checking ws.closed before sending, so partial flushes happen when possible rather than being swallowed entirely.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-142",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "1-second hard wait adds latency to every stream teardown",
+        "detail": "Every TTS stream close now blocks up to 1s waiting for a server message. In high-throughput or rapid-turn agent scenarios this compounds. Consider a shorter timeout (e.g. 250ms) or making it configurable, since the close path is on the hot path for conversational agents.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "136",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare except Exception hides programming errors",
+        "detail": "The except Exception clause around send/receive will swallow CancelledError-adjacent issues and any AttributeError from a malformed ws. Narrow to (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) so genuine bugs surface in logs instead of being downgraded to a warning.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-140",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage for the new close sequence",
+        "detail": "This bug fix touches connection teardown \u2014 a notoriously fragile area \u2014 but ships with no test demonstrating the Flush+Close+ack ordering or the timeout fallback. Even a mock-WebSocket unit test asserting the two send_str calls and the receive() with timeout would lock in the contract.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "summary": "The fix moves Deepgram TTS toward graceful shutdown, but the control-message name ('Close' vs the PR-described 'CloseStream') needs verification against Deepgram's Speak v1 protocol \u2014 if wrong, the patch is a no-op. The single-receive() pattern may also drop trailing audio frames, partially defeating the stated purpose. Error handling is overly broad and the 1s blocking wait runs on every stream teardown. No tests accompany a teardown-path change."
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "persona": "pike",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes path semantics for absolute sources",
+        "detail": "The data here is a list of source paths from a source map, plus a 'from' URL. The old code called resolve(s, from) (wrong arg order for pathe.resolve). The new code calls resolve(from, '..', s). That works when s is relative, but pathe/Node resolve will short-circuit and ignore from/.. if s is absolute or a file:// URL \u2014 which is common in source maps emitted by bundlers. Worth a one-line comment documenting which shape of s this is built for, plus a test that exercises an absolute sources entry. Better still: a tiny helper resolveSource(from, s) whose name says what the data means, instead of a three-arg resolve that the reader has to decode.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getSourceMap reads and parses files on every stack frame with no cache",
+        "detail": "parseErrorStacktrace will call getSourceMap once per frame. For a deep stack into the same external module, this re-reads the file from disk and re-runs convertSourceMap.fromSource (which scans the whole source for the //# sourceMappingURL comment) every time. n is usually small here, so this is not a P0, but the data structure that's missing is obvious: a Map<file, SourceMap|undefined> keyed by absolute path, scoped to this error (or this run). One Map, four lines, removes the worry.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "extractSourcemapFromFile and createConvertSourceMapReadMap could be one small filter",
+        "detail": "These two helpers are a stateless transform: (filePath) -> SourceMap | undefined. The inner createConvertSourceMapReadMap exists only to close over originalFileName for the fromMapFileSource path. That is fine, but the shape is clearer as a single function that takes filePath, reads the code, and inlines the readMap closure. Fewer names, one filter, same behavior. The current split reads like premature factoring for a helper that has exactly one caller.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "319-343",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "'{}' fallback for missing map file is a magic string masquerading as JSON",
+        "detail": "createConvertSourceMapReadMap returns the literal string '{}' when the referenced map file does not exist, to satisfy convert-source-map's readMap contract. That is a clever way to avoid an error path, but it is exactly the kind of cleverness Rule 4 warns about: a future reader will wonder whether '{}' is a valid empty source map or a sentinel. A short comment is already there; consider returning a constant EMPTY_SOURCEMAP_JSON or letting the error propagate and catching it at the caller. Small, but worth it.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-342",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Adding convert-source-map when @jridgewell/trace-mapping is already a dep",
+        "detail": "The package already depends on @jridgewell/trace-mapping (visible in package.json catalog). convert-source-map and its @types are a new runtime+types dependency added to pull in two helpers: fromSource and fromMapFileSource. Those are ~50 lines of regex-and-base64 logic. Worth checking whether the existing trace-mapping/sourcemap-codec stack, or a 30-line local helper copied from the linked Vite source, would remove the new dependency entirely. Composition over framework: use the smaller tool you already have.",
+        "file": "packages/vitest/package.json",
+        "lines": "198-217",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "moduleGraph.getModuleById(file) \u2014 file is a stack-frame path, not necessarily a Vite module id",
+        "detail": "The data flowing in from parseErrorStacktrace is a filesystem path from a stack frame. Vite's moduleGraph keys modules by id, which is usually but not always the same string. On Windows, with query strings, or with virtual modules, this lookup can miss and fall through to the readFileSync branch even for inlined modules \u2014 re-parsing a source map that was already applied. Not catastrophic (the result is just redundant work), but the comment claims this branch only runs for external modules, and the data doesn't quite guarantee that.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "SMALL-AND-COMPOSABLE in spirit \u2014 the fix is a stateless transform (file path in, source map out) hooked into the existing parseErrorStacktrace pipeline, which is the right shape. The data structure choice is fine; the algorithm follows. Two things bother me. First, the one-liner change to resolve(from, '..', s) silently changes path semantics for absolute sources entries and deserves a comment plus a test. Second, the getSourceMap callback re-reads and re-parses on every frame with no cache \u2014 the missing data structure here is a one-line Map keyed by file path. The new convert-source-map dependency is also worth questioning when @jridgewell/trace-mapping is already in the tree; a 30-line local helper would remove a dep and a types package. Otherwise the code is appropriately small and the snapshot diff is the right kind of test evidence."
+  },
+  "raw": ""
+}

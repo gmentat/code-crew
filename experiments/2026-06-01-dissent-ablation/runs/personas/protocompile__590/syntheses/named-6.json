@@ -1,0 +1,87 @@
+{
+  "task_id": "protocompile__590",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() relocates the nil-deref upstream instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil, violating the previously universal postcondition that run() yields a non-nil *result. Every caller dereferencing output.done, output.Fatal, etc. will now nil-panic one frame up. The leader-panic path should produce a sentinel *result with Fatal set and a closed done channel, not nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TOCTOU race between CompareAndSwap and Load is patched, not reasoned about",
+        "detail": "The lifecycle invariant of t.result (nil -> output -> nil-on-panic -> possibly re-CAS) is never stated. The new branch handles one snapshot of the window but the underlying state machine is undocumented, and the pending-output branch above trusts t.result.Load() inconsistently with the new guard. State the invariant or restructure to a single atomic snapshot path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code path",
+        "detail": "The branch fires exactly when output is nil \u2014 i.e., we did NOT see a result. The comment is inverted and will mislead future maintainers about when this path triggers and whether returning nil is intended. Fix to 'Leader panicked and cleared t.result before we could observe it'.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Overloading nil on t.result is the root cause; use an explicit failure-result value",
+        "detail": "t.result is being used as identity, presence-signal, and now leader-panic tombstone \u2014 three time-distinct facts in one place. Storing a failed *result (Fatal set, done pre-closed) on leader panic closes the race by construction, lets waitUntilDone always operate on a value, and deletes the new nil-check branch entirely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test reproduces the leader-panic-while-waiting race",
+        "detail": "A concurrency fix without a deterministic reproducer (inject a panic in the leader with N waiters, assert sensible error rather than nil/panic) will regress silently. The fix rests on code inspection of unstated invariants. Add a test that locks in the contract under go test -race.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowed `output` variable in the CAS-failure branch hurts readability",
+        "detail": "Inside run(), the new branch writes `output := t.result.Load()`, shadowing the named return `output` from the function signature. Two `output`s with different roles (this goroutine's vs. the leader's) in one function force readers to disambiguate. Rename the inner one (e.g., `leader` or `winner`).",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix addresses a real race but only relocates the nil-dereference one frame upward by returning bare nil from run(), violating its previously universal non-nil postcondition. The root cause \u2014 overloading t.result's nil state to mean pending, done, and leader-panicked \u2014 should be resolved by storing a sentinel failure-result with Fatal set and a closed done channel on panic, which would close the race by construction. An inverted comment on the new branch actively misleads, and no test reproduces the leader-panic interleaving. The checkCycle extraction and passing *result explicitly into waitUntilDone are clean wins worth keeping."
+  }
+}

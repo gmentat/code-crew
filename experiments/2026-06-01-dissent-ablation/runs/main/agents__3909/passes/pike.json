@@ -1,0 +1,84 @@
+{
+  "persona": "pike",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Audio format derived from sample_rate without validation against STTAudioFormat literal",
+        "detail": "The code does `audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")` with no check that the resulting string is actually one of the six allowed values. Pass sample_rate=11025 and you get pcm_11025, which silently bypasses the type system and likely produces an API rejection at runtime. The data shape is small and enumerated \u2014 a dict mapping or explicit set check would make the invalid case obvious where it happens. The docstring claims 8kHz-48kHz support but the type only allows six specific values.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "118-119",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTOptions dataclass duplicates constructor signature; the NotGivenOr-to-Optional dance is doing nothing useful",
+        "detail": "Every optional field in the constructor is converted via `x if is_given(x) else None` before being stored in STTOptions, which already has `= None` defaults. The data \u2014 what flows through to _connect_ws \u2014 is just `Optional[float|int]`. The NotGivenOr layer adds nine lines of boilerplate and one extra concept (sentinel vs None) for a struct that only needs Optional. Pick one representation for absent values and let the data speak.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "121-138",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query string built by hand-appending to a list when urlencode exists",
+        "detail": "_connect_ws builds an HTTP query string with conditional `params.append(f\"k={v}\")` calls and `\"&\".join(params)`. This is a well-known Unix-style filter shape: dict of present params -> urlencoded string. `urllib.parse.urlencode({k: v for k, v in opts.items() if v is not None})` is one line, handles escaping correctly, and makes the data structure (dict of parameters) the obvious primary thing. The current code also doesn't URL-encode the language_code, which is user-controllable.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "263-283",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Message handler is a long if/elif chain over a string tag \u2014 a dispatch table would make the data obvious",
+        "detail": "_process_stream_event branches on message_type through eight elif clauses, with the error-types check using a tuple membership. The data is a tag-keyed message; the natural shape is a dict mapping tag -> handler. Even keeping the current structure, separating partial vs committed text handling into two small functions makes the duplicated `if not self._speaking: send START_OF_SPEECH` block disappear. Right now that block is written twice verbatim.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "302-373",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Keepalive task swallows all exceptions silently",
+        "detail": "`keepalive_task` catches bare `Exception` and returns without logging. If pings start failing for a real reason (network half-open, server bug), the symptom will be a stalled stream with no diagnostic. Log at debug or warning. Small change, but the cleverness here \u2014 silent return \u2014 isn't load-bearing.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-180",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTv2 vs STT split creates two parallel hierarchies where one composable class might do",
+        "detail": "The PR rationale is \"backward compatibility, following Deepgram pattern.\" That's a real reason, but worth naming: the v1 and v2 classes share provider, api-key handling, session management, and most of STTOptions. If a v3 ships, this becomes three near-duplicate files. Consider whether `STT(model=...)` dispatching internally would compose better than parallel class hierarchies. Not blocking \u2014 the precedent is established \u2014 but flag it before it ossifies.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`commit` field hardcoded to False in every audio chunk message",
+        "detail": "Every outgoing audio chunk includes `\"commit\": False`. If the API truly only supports VAD commit strategy in this codepath, the field is noise on the wire and noise in the source. If it does something, the comment is wrong. Either way, the data being sent should reflect what matters. Strip the field or document why it must be present.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "204-212",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "TOO-MUCH-FRAMEWORK in places, but mostly small fit-and-finish. The PR follows an established pattern (Deepgram STTv2) and that pattern is fine; my concern is that the parallel-class approach is now two-deep and worth examining before it becomes three-deep. The clearer wins are local: the audio_format cast silently accepts any sample rate (data structure fighting the typed literal), the NotGivenOr-to-Optional conversion is bookkeeping with no payoff, the query-string assembly should use urlencode, and the message dispatch is a tag-keyed table written as an if/elif ladder with duplicated START_OF_SPEECH emission. Strip those and the code gets noticeably smaller without losing anything. WRONG-DATA-STRUCTURE on the audio_format cast; the rest is SMALL-AND-COMPOSABLE with rough edges."
+  },
+  "raw": ""
+}

@@ -1,0 +1,73 @@
+{
+  "task_id": "chia-blockchain__20317",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "sign_message and verify_signature still duplicate the mode-to-bytes dispatch logic.",
+        "detail": "The exact same SigningMode-to-bytes mapping lives in both sign_message() and verify_signature() in the new util module. The whole point of the extraction was to centralize this. Extract a single _message_to_bytes(mode, message) helper so the next CHIP mode added cannot silently disagree across the two paths.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "67-85",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum logic is duplicated and relies on an implicit fall-through default.",
+        "detail": "The helper is reachable via a module-level function and two property wrappers on SignMessageByAddress and SignMessageByID resolving to the same code. It also derives the mode from (is_hex, safe_mode) with three explicit branches and an implicit CHIP_0002 default. Collapse to one home and make the truth table explicit.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "verify_signature docstring still references a removed `request` parameter.",
+        "detail": "The new signature takes signing_mode, public_key, message, signature, address as keyword args, but the docstring carried over from the RPC method still says ':param request:'. For a freshly extracted library function the contract should be restated; fix the docstring or delete it.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "19-28",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "util/signing.py leaks the RPC response type VerifySignatureResponse into the utility layer.",
+        "detail": "The signing utility imports and returns VerifySignatureResponse from wallet_request_types. The util contract should be (mode, key, message, signature[, address]) -> bool plus a reason, not an RPC-shaped DTO. This couples the util module to the RPC schema and prevents reuse without dragging request types along.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "13-65",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "convert_secret_key_to_synthetic is misplaced on the base Wallet and uses no instance state.",
+        "detail": "It only calls calculate_synthetic_secret_key with a module-level constant, yet callers reach through main_wallet to derive keys for unrelated DID/NFT wallets. The transformation has nothing to do with main_wallet identity. Move it to chia/wallet/util/signing.py as a free function, or at minimum a staticmethod.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "112-115",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "current_p2_puzzle_hash replaces a shared sign_message contract with inconsistent per-subclass signatures.",
+        "detail": "Wallet.sign_message previously acted as an implicit cross-wallet protocol with a uniform signature. The replacement current_p2_puzzle_hash() has different signatures across Wallet, DIDWallet, and NFTWallet (NFTWallet takes an NFTCoinInfo arg) with no declared protocol. Substitutability is now informal; declare a shared protocol or document the contract.",
+        "file": "chia/wallet/nft_wallet/nft_wallet.py",
+        "lines": "497",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this is a well-shaped extraction of message signing into chia/wallet/util/signing.py, moving in the right direction but stopping one step short of the cleanup that motivated it. The mode-to-bytes dispatch is still duplicated between sign and verify, the signing_mode_enum helper exists in multiple places with an implicit fall-through default, and a stale docstring references a removed `request` parameter. Boundary issues remain: the util module leaks the RPC type VerifySignatureResponse, and convert_secret_key_to_synthetic was placed on the base Wallet despite using no instance state and being called via main_wallet for unrelated DID/NFT keys. Verdict: needs-work \u2014 small, fixable changes, then land."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "knuth",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Invariant 'req.prepared / needs_more_preparation are set after resolve' is silently broken.",
+        "detail": "The resolver previously established the post-condition that every requirement is fully prepared with prepared=True and needs_more_preparation=False. The new code deletes that block without stating who now owns the invariant. Each command must remember to call prepare_linked_requirements_more, and any future command path will be wrong by default. State the invariant explicitly in a comment or restore enforcement.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-190",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist priority order is undocumented and may shadow a fully-prepared distribution.",
+        "detail": "get_dist now returns self._distribution first, before metadata_directory or local_file_path. If set_dist caches a metadata-only BaseDistribution and the requirement is later fully prepared (metadata_directory populated), callers receive the stale metadata-only dist. The invariant 'cached dist is upgraded or invalidated on full prepare' is neither stated nor enforced.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info fallback is set unconditionally with no comment justifying correctness for non-PEP-658 paths.",
+        "detail": "When metadata_dist is non-None, download_info is overwritten with direct_url_from_link(req.link, req.source_dir) if None. For a metadata-only fetch, req.source_dir may not yet exist or may not contain a hash; direct_url_from_link's contract here deserves a literate comment explaining what download_info means in the dry-run case and why a hash-less URL is acceptable for `pip lock`.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-545",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three command sites duplicate the same prepare_linked_requirements_more call with no shared helper.",
+        "detail": "download.py, install.py, and wheel.py now each call preparer.prepare_linked_requirements_more(requirement_set.requirements.values()) at the top of their post-resolve block. This is the exact code the resolver used to own. The right data structure here is a single 'finalize_resolution' step; otherwise the next command added will forget the call. Not a correctness bug today, but a maintainability time bomb.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test cited proving --dry-run actually avoids the wheel download.",
+        "detail": "The news fragment claims dry-run no longer downloads full wheels, but the diff shows no test asserting that the network/cache is not hit for a PEP-658 metadata path. 'I have only proved it correct, not tried it' applies: add a test that fails on the old behavior and passes on the new one, otherwise the regression will return silently.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist has no termination/idempotency contract.",
+        "detail": "set_dist unconditionally overwrites self._distribution. If the same requirement is prepared twice (e.g., via a retry or a graph cycle in extras), a later metadata-only dist could replace a richer one. Either assert self._distribution is None on set, or document that last-writer-wins is intentional. A one-line invariant comment would suffice.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The change moves the 'more preparation' step out of the resolver and into the install/download/wheel commands, with a new cached-distribution slot on InstallRequirement. The algorithmic intent is sound and the asymptotic win is real for dry-run and lock. However, the diff silently retires a post-condition that the resolver used to enforce (prepared=True, needs_more_preparation=False) and replaces it with an implicit contract scattered across three command files. The new set_dist/get_dist pair lacks a stated invariant about priority and freshness, which is exactly the kind of thing that will rot. Code is plausibly correct; the literate explanation and a regression test are missing. UNDER-AUDITED, NEEDS-LITERATE-COMMENT."
+  }
+}

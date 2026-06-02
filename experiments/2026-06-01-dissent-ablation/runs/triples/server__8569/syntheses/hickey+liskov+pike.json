@@ -1,0 +1,78 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Mutating shared TritonLoraConfig.is_registered from the request path is racy and leaves stale cache state on failure.",
+        "detail": "is_registered is flipped on a shared dataclass inside _create_trtllm_generate_request with no lock and no per-engine scoping. Concurrent first-requests can both see False and double-register, or one can fail mid-register and leave the flag True with no weights cached. Registration state belongs in a separate registry keyed by (model, task_id), not mutated on config metadata.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "227-244",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Positional lora_task_id assignment collides across model repos and reloads, risking wrong-weight cache hits in TRT-LLM.",
+        "detail": "task_id is a monotonic counter scoped to a single _parse_lora_configs call. Two model repositories produce overlapping IDs, and re-parses reassign IDs by file iteration order. TRT-LLM keys its LoRA cache by task_id, so a stale client task_id can serve a different adapter. Derive task_id from a stable hash of (model, lora_name) instead of list position.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "624, 627-710",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig collapses two distinct ADTs (vLLM vs TRT-LLM) into one all-Optional dataclass, violating LSP.",
+        "detail": "vLLM consumers only need name; TRT-LLM consumers index task_id and path without precondition checks. Callers cannot rely on the contract and the type system cannot catch misuse. Split into a sealed hierarchy (VllmLoraConfig, TrtllmLoraConfig) or tagged union so required fields are non-Optional and substitution is total.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs branches two backends in one 70-line blob and should be split per backend.",
+        "detail": "One function handles vLLM and TRT-LLM via stringly-typed backend dispatch covering enable_lora detection, config schema, weight files, and task_id assignment. The backends share almost nothing except reading multi_lora.json. Decompose into _parse_vllm_lora_configs and _parse_trtllm_lora_configs over a shared repo-walking helper, dispatched via a LoraCatalogProvider protocol.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs return type annotation lies: declared List[tuple[str,str]] but returns List[TritonLoraConfig].",
+        "detail": "The signature is part of the contract and a wrong annotation breaks type checkers and reader reasoning. Update to Optional[List[TritonLoraConfig]] or return a typed LoraCatalog value object that also carries backend kind so downstream code stops re-deriving it.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print and traceback.format_exc calls left in production paths bypass the logger.",
+        "detail": "print(f\"backend: {backend}\") inside the parse loop and traceback.format_exc() prints in three FastAPI routers and the parser are debugging scaffolding. They leak internals to stdout regardless of deployment and produce noisy logs on every ServerError. Route through the existing logger at appropriate levels or remove.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "688, 712",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel converges on three blocking issues in this TRT-LLM multi-LoRA PR: a racy is_registered mutation on a shared TritonLoraConfig inside the async request builder, positional task_id assignment that can collide across model repos and serve wrong weights from the engine's LoRA cache, and an LSP violation where one all-Optional dataclass conflates two distinct backend ADTs. Beneath these, _parse_lora_configs has grown into a 70-line backend-dispatching blob with a wrong return-type annotation and debug print/traceback calls left in production paths. Fix by extracting registration state into a per-engine registry updated on confirmed caching, deriving task_id from a stable hash of (model, lora_name), splitting the config type and parser per backend, and routing diagnostics through the logger."
+  }
+}

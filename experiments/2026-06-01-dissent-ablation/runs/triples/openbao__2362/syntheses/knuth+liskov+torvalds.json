@@ -1,0 +1,78 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub unconditionally returns false while callers depend on real seal semantics",
+        "detail": "(*Core).NamespaceSealed is a TODO that always returns false, but ListAllNamespaces, root-token paths, and ErrNamespaceSealed handling are already wired to it. This is a silent lie at a security boundary. Ship the SealManager in this patch, or make the method return an error/panic until implemented so callers cannot trust a hollow guarantee.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently broadened from boolean to ancestor-namespace check without spec or invariant",
+        "detail": "root changed from bool to *namespace.Namespace, and AllowOperation now grants root via ns.HasParent(a.root). The new contract \u2014 root policy in namespace N grants root in N and all descendants \u2014 is never stated in a doc comment, and HasParent's exact semantics (self-inclusive? full ancestry?) are not pinned down. For a security-critical fast-path, write the invariant next to the code.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 339-360",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently denies on namespace.FromContext error instead of failing loud",
+        "detail": "On FromContext error the function returns an empty ACLResults (deny) with no log or signal. Previously the root fast-path did not require ns. Now any root operation called without a namespace in context silently denies \u2014 a postcondition weakening that callers (background jobs, tests) may hit. Log distinctly, or document the precondition that ctx must carry a namespace.",
+        "file": "vault/acl.go",
+        "lines": "339-346",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL ancestry permission matrix is undertested \u2014 only happy-path child case covered",
+        "detail": "testACLRoot checks self-ns allow and root-context deny but omits sibling denial, cousin denial, deeply nested descendant allow, and root-of-root behavior. The child-namespace literal also lacks an ID, weakening identity checks. This is the ACL table \u2014 cover the matrix exhaustively or a latent privilege escalation will land with the wrong namespace tree shape.",
+        "file": "vault/acl_test.go",
+        "lines": "156-189",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces -> ListNamespaces swap at multiple call sites without stated contract",
+        "detail": "loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, and countActiveTokens were moved from namespaceStore.ListAllNamespaces(ctx, true) to c.ListNamespaces(ctx). The postconditions (includes sealed? recursive?) of each method are not documented. Risk: MFA enforcement, locked-user updates, and token counts silently skip sealed namespaces. State each method's contract in a doc comment before merge.",
+        "file": "vault/core.go",
+        "lines": "3284-3395",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Seal/NamespaceSealed errors detected via errwrap.Contains substring match instead of errors.Is on sentinels",
+        "detail": "response_util maps both ErrSealed and ErrNamespaceSealed to 503 via errwrap.Contains(err, ...Error()). Any error message containing the substring 'namespace is sealed' \u2014 from handlers, plugins, audit logs \u2014 gets coerced to 503. Whole-vault-sealed and single-namespace-sealed are also indistinguishable to clients. Use errors.Is on the sentinels and consider a distinct status signal for the two seal classes.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. Two P0 problems anchor the verdict: a NamespaceSealed stub that unconditionally returns false while real callers depend on it, and an ACL root semantic change (boolean to ancestor-namespace via HasParent) that ships without a stated invariant or spec. Test coverage of the new ancestry permission matrix is thin, the FromContext error path silently denies instead of failing loud, and several call sites were moved between ListAllNamespaces and ListNamespaces without documenting which postcondition each requires. The seal error detection continues to rely on substring matching rather than errors.Is on sentinels. Recommend splitting the ACL change into its own patch, landing SealManager or making NamespaceSealed loud, and writing the new contracts down before merge."
+  }
+}

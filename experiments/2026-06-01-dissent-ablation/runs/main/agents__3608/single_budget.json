@@ -1,0 +1,134 @@
+{
+  "task_id": "agents__3608",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Close message type mismatch with Deepgram TTS Speak v1 API",
+        "detail": "The PR description and Deepgram's Speak v1 docs indicate the graceful-close control message is {\"type\": \"CloseStream\"}, but the code sends {\"type\": \"Close\"} (_CLOSE_MSG = json.dumps({\"type\": \"Close\"})). If Deepgram's Speak endpoint expects \"CloseStream\" (matching the STT control message referenced in the PR), this message will be ignored or rejected and the fix will not achieve its stated goal of preventing audio truncation / lingering sessions. Verify against the actual Speak v1 socket client; the inconsistency between the PR description (\"CloseStream\") and the code (\"Close\") needs resolution before merge.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout is insufficient to drain final audio frames",
+        "detail": "After Flush+Close, Deepgram typically streams remaining audio chunks plus a Flushed/closed acknowledgment. The code awaits a single receive() with a 1s timeout, then immediately closes. This will likely discard tail audio frames that arrive after the first receive returns, defeating the stated purpose of preventing truncation. A short drain loop (read until close frame or short idle timeout) would more reliably collect remaining audio, and the drained frames should be forwarded to the emitter rather than discarded.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "133-138",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws may be called on an already-closing or closed websocket",
+        "detail": "_close_ws is typically invoked from cleanup paths, possibly after errors or cancellations where the ws may already be closed or in a closing state. Calling send_str on a closed ws raises ConnectionResetError / WebSocketError, which the broad except will log as a warning on every shutdown. Guard with `if ws.closed: return` (and/or check ws.close_code) before attempting to send, to keep shutdown logs clean and avoid noisy warnings on the happy path.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-143",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hardcoded 1.0s timeout swallows tail latency variability",
+        "detail": "The 1.0s timeout is a magic number with no rationale, no constant, and no configurability. Deepgram's flush + drain latency can exceed 1s under load or for long unflushed buffers, and 1s is also long enough to noticeably delay agent teardown when nothing is pending. Extract as a named constant (e.g., _CLOSE_DRAIN_TIMEOUT) and consider tuning down (or making it overridable) once the drain loop is added.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-138",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare `except Exception` is overly broad",
+        "detail": "Catching Exception around send_str/receive will mask programming errors (e.g., AttributeError, TypeError from a refactor) as runtime warnings. Narrow to aiohttp/connection errors (ConnectionResetError, aiohttp.ClientError, WebSocketError) so genuine bugs surface during development.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-140",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "f-string in logger call instead of lazy formatting",
+        "detail": "`logger.warning(f\"...{e}\")` evaluates the f-string even when warning is filtered. Prefer `logger.warning(\"Error during WebSocket close sequence: %s\", e)` for consistency with stdlib logging idioms and to enable structured log processors.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_FLUSH_MSG / _CLOSE_MSG defined on SynthesizeStream but used in TTS class method",
+        "detail": "The constants are class attributes of SynthesizeStream, but _close_ws (which uses them via `SynthesizeStream._FLUSH_MSG`) appears to live on the TTS class. Reaching across class boundaries by name works but is a small layering smell. If _close_ws actually belongs to SynthesizeStream, prefer `self._FLUSH_MSG`. Otherwise, move the constants to module scope or to the class that owns _close_ws.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127, 238-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage for the new close sequence",
+        "detail": "The PR introduces ordering-sensitive cleanup behavior (Flush -> Close -> drain -> close) with no accompanying unit/integration test or mock-ws fixture. A simple test using an aiohttp test server or a mock ws that asserts the two control messages are sent in order before close() would prevent regression and document intent.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether the message type should be \"Close\" or \"CloseStream\"",
+        "positions": [
+          {
+            "persona": "PR description / STT-parity framing",
+            "position": "Deepgram's documented graceful-close control message is {\"type\": \"CloseStream\"}; the constant must match that or the server will not drain. The PR description itself says CloseStream."
+          },
+          {
+            "persona": "Speak-v1 specific framing",
+            "position": "The Deepgram Speak (TTS) v1 socket may use {\"type\": \"Close\"} (distinct from Listen v1's CloseStream). If so, the code is correct and the PR description is sloppy. Either way, the discrepancy needs to be reconciled with the actual Speak socket client referenced in the PR."
+          }
+        ]
+      },
+      {
+        "topic": "How aggressively to drain before closing",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "A single receive() with 1s timeout is good enough \u2014 it gives the server a chance to flush, costs little, and is a clear improvement over the prior unconditional close()."
+          },
+          {
+            "persona": "Correctness / data-flow discipline",
+            "position": "If the point of the change is to prevent truncation, you must loop reading frames (forwarding audio to the emitter) until you see the close ack or idle out. A single receive() typically returns the first chunk and discards the rest, partially defeating the fix."
+          }
+        ]
+      },
+      {
+        "topic": "Broad exception handling",
+        "positions": [
+          {
+            "persona": "Defensive cleanup",
+            "position": "Shutdown paths must never raise. `except Exception` + finally close() is correct hygiene; narrower exceptions risk leaving the ws unclosed on an unexpected error class."
+          },
+          {
+            "persona": "Abstraction discipline",
+            "position": "Catch the specific aiohttp/connection errors you expect. Broad `except Exception` hides bugs and creates noisy warnings during routine shutdowns when ws is already closed."
+          }
+        ]
+      }
+    ],
+    "summary": "The change moves in the right direction \u2014 sending control messages before closing the Deepgram TTS websocket aligns with the documented Deepgram protocol and matches the STT implementation. The most important concern is a likely message-type mismatch: the PR description says `CloseStream` but the code sends `{\"type\": \"Close\"}`; this must be reconciled against Deepgram's Speak v1 socket client before merge or the fix may be a no-op. Secondary issues: a single 1-second `receive()` is unlikely to drain all remaining audio (so truncation may persist), the close path should guard against an already-closed ws to avoid noisy warnings, and the broad `except Exception` plus magic-number timeout should be tightened. Adding a small test that asserts Flush then Close are sent in order before `ws.close()` would lock in the intended behavior. Overall: small, well-scoped fix; address the protocol-string question and the drain loop before landing."
+  },
+  "raw": ""
+}

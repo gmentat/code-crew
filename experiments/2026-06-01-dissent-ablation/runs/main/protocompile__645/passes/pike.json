@@ -1,0 +1,64 @@
+{
+  "persona": "pike",
+  "task_id": "protocompile__645",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil-check boilerplate repeated across ~15 accessors instead of fixing the data shape",
+        "detail": "Every getter on *File and *imports now has the same pattern: declare a zero local, conditionally populate from the receiver, pass to seq.NewFixedSlice. The data is fighting the algorithm. If seq.NewFixedSlice tolerated a nil slice (it almost certainly does \u2014 len(nil)==0, ranging is fine), all of these prologues collapse to nothing. Alternatively, a tiny helper like `func (f *File) safeTypes() []id.ID[Type] { if f == nil { return nil }; return f.types }` localizes the nil check. Right now the same six-line incantation is copy-pasted across the file.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "182-330",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflection-driven test harness is clever where a table would be obvious",
+        "detail": "testZeroAny walks methods via reflect, special-cases IsZero/ValueNodeIndex/Context by name string, and then heuristically calls .Len() on returns to decide what \"zero\" means. This is the cleverness-vs-clarity tradeoff Pike's rule 4 warns about: fancy is buggier than simple. A junior maintainer adding a new accessor with a special zero (like ValueNodeIndex's -1) has to discover this switch and add a new name-string case. A plain table of (type, accessor-name, expected) would be longer but obvious, and would actually exercise specific accessors rather than \"whatever NumIn==1 returns.\"",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "92-137",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixed nil-receiver style: some methods guard early, others build empty slices",
+        "detail": "IsDescriptorProto, FeatureSet, DescriptorProto guard with `if x == nil { return zero }`. The slice accessors take the longer var-then-conditional-assign path. Both styles work, but inconsistency in a single file is noise. Pick one. The early-return style is shorter and reads as 'nil receiver is a special case' rather than 'we are carefully threading a possibly-empty slice through.'",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "151-330",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Zero-value tolerance belongs in the data type, not at every call site",
+        "detail": "The root cause is that Symbol, Member, Type, Oneof, etc. panic when their Raw() is dereferenced on a zero value. Rather than teaching each accessor to check IsZero first, consider whether Raw() itself could return a sentinel zero *rawX (or whether the wrapper types could embed a non-nil placeholder). Then `m.Raw().options` on a zero Member just yields the zero options ID, and `id.Wrap(nil, 0).AsMessage()` yields zero MessageValue \u2014 no accessor needs to know. This is the 'data dominates' move: fix the shape once.",
+        "file": "experimental/ir/ir_member.go",
+        "lines": "336-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "testZero/testZeroNode/testZeroAny three-layer cake could be one function",
+        "detail": "testZeroNode calls testZero which calls testZeroAny twice (once for T, once for ir.Ref[T]). The layering exists to enforce the zeroable and node interfaces at compile time via generics, which is fine, but the three names invite the reader to look for three different behaviors when there is really one. A comment explaining 'these three exist only to constrain the type parameter' would help; better, fold the constraint checks into testZeroAny call sites with explicit generic bounds where used.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "67-90",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The PR does the right thing functionally: zero values no longer panic, and there's a test guarding the property. But it solves the problem at every leaf instead of at the root. Fifteen accessors now carry the same six-line nil-guard prologue, which is a sign the data structure (or the seq.NewFixedSlice contract, or a small helper) wants to absorb that work. The reflection-based test harness is clever where a table would be obvious \u2014 it will be harder to extend than the production code it covers. Decision: TOO-CLEVER on the test, WRONG-DATA-STRUCTURE on the accessors. Ship-blocking? No. Worth a follow-up to consolidate? Yes."
+  },
+  "raw": ""
+}

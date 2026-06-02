@@ -1,0 +1,81 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub unconditionally returns false while security-sensitive callers already depend on it",
+        "detail": "(*Core).NamespaceSealed has a TODO and always returns false, but ListAllNamespaces, MFA config loading, token counts, metrics, and the new ErrNamespaceSealed path are wired through it. Shipping a function that lies about seal state is a security regression. Make it error/panic until SealManager lands, or land SealManager in the same patch.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently broadened from boolean to namespace-ancestry without spec or invariant",
+        "detail": "The root field changed from bool to *namespace.Namespace and AllowOperation now grants root when ns.HasParent(a.root) holds, so a root token in namespace A grants root across all descendants of A. The new precondition for NewACL with a root policy and the reflexivity of HasParent are nowhere stated. This is a security-critical semantic shift landing without a documented contract.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 100-110, 339-360",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently returns empty deny when namespace.FromContext fails",
+        "detail": "The reordered fast-path does ns, err := namespace.FromContext(ctx); if err != nil { return ret }, returning an empty ACLResults with no log and no diagnostic. Previously root ACLs did not require a namespace on ctx. The change is indistinguishable from a normal deny and will bite at 3am. Log it or distinguish missing-namespace from denied.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ErrNamespaceSealed dispatched via substring matching instead of errors.Is on the sentinel",
+        "detail": "AdjustErrorStatusCode uses errwrap.Contains(err, ErrNamespaceSealed.Error()), so any wrapped error whose message contains 'namespace is sealed' is coerced to 503. The same flaw exists for ErrSealed and is being propagated. While refactoring this function into a switch, dispatch on the sentinel with errors.Is.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Root-ancestry ACL semantics need an exhaustive permission-matrix test, not just happy-path child-ns",
+        "detail": "testACLRoot only covers self-ns allow and root-context deny. The new semantic \u2014 root in ns A grants root across descendants \u2014 needs sibling denial, cousin denial, deep-descendant allow, and root-of-root behavior. This is the ACL table; latent privilege escalation lives in the cases not covered.",
+        "file": "vault/acl_test.go",
+        "lines": "156-189",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength uses obscure string-byte indexing instead of a named separator constant",
+        "detail": "Encoding the separator length as \".\"[1] is gratuitously clever. Name the separator (const NSTokenSeparator = \".\") and use len() or a numeric constant. Future delimiter changes otherwise touch every call site doing literal arithmetic.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The central concern is a security-critical ACL semantic shift \u2014 root policies now bind to whichever namespace is on the ctx at construction and grant root across all descendants via HasParent \u2014 landed without a stated contract or exhaustive matrix tests. Compounding this, NamespaceSealed is a stub that unconditionally returns false while live security-sensitive paths (listing, MFA, token counts, metrics, error mapping) already depend on it. The new ErrNamespaceSealed dispatch reuses substring matching instead of errors.Is, and AllowOperation now silently denies on missing-namespace context. Split the diff, document the new ACL invariant, replace the lying stub with a loud failure until SealManager exists, and fix the sentinel dispatch before merge."
+  }
+}

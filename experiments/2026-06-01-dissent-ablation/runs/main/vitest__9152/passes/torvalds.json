@@ -1,0 +1,74 @@
+{
+  "persona": "torvalds",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes path semantics for the common no-sources-array case",
+        "detail": "The one-line fix in DecodedMap changes resolve(s, from) to resolve(from, '..', s). When `from` is a file path (the common case), the old code resolved sources relative to `from` treated as a base; the new code explicitly resolves relative to dirname(from). That is the correct intent for a source map file, but `from` is not guaranteed to be a file path everywhere DecodedMap is constructed \u2014 it can be a URL or a virtual id in Vite's module graph. There is no test exercising DecodedMap directly with a non-file `from`, and a wrong-shape `from` (e.g. ending in '/') will now resolve one directory too high. Add a unit test for DecodedMap.resolvedSources covering: file path with sources, URL-like from, from without an extension, and an absolute sources entry (which must short-circuit).",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getSourceMap callback does sync readFileSync on every external frame with no cache",
+        "detail": "Inside the stack-trace mapping hot path, getSourceMap is called per file and unconditionally readFileSync's the entire source from disk, then runs convertSourceMap.fromSource which scans the whole file for a trailing base64 sourcemap comment. For a stack with N frames hitting node_modules, that's N full reads of potentially megabyte-sized bundles, every error. Cache by absolute file path (WeakMap keyed by module id, or a simple Map cleared on project teardown). Also: existsSync followed by readFileSync is a classic TOCTOU + double-stat; just try/catch the read.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three patches submitted as one",
+        "detail": "This diff does three independent things: (1) fix resolvedSources path math in DecodedMap, (2) add convert-source-map dependency and wire getSourceMap for external modules, (3) license file update. Each one is reviewable on its own; bundled they obscure which change fixed the snapshot. The snapshot delta only proves (2) works end-to-end \u2014 it does not prove (1) was needed or correct in isolation. Split: one patch for the DecodedMap resolve fix with a direct unit test, one patch for the external-module source map wiring, one chore for the license entry.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns '{}' as a fallback 'source map'",
+        "detail": "When the referenced .map file doesn't exist, the helper returns the literal string '{}' to make convert-source-map happy. That's a workaround for a library API that doesn't accept a not-found signal \u2014 fine, but the comment should say 'returning an empty JSON object string because convert-source-map throws otherwise' rather than the vague 'fallback to empty source map to avoid errors'. Future maintainer will stare at '{}' and wonder if it's a bug.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Type import from 'rollup' for SourceMap is gratuitous",
+        "detail": "Importing SourceMap purely as a return type from rollup pulls a heavy type dependency into test-run.ts for what is effectively `{ version, sources, mappings, ... }`. convert-source-map already exports its own types via @types/convert-source-map \u2014 use convertSourceMap.SourceMappedData or define a local minimal interface. Less surface area, fewer cross-package coupling surprises.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "10",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Commit/PR message explains what, not why",
+        "detail": "The PR says 'apply source maps for external module stack trace'. Fine as a headline. The diff message should also say: external modules go through Vite's fetch module but skip the inline transform pipeline, so their stack frames previously pointed at compiled .js instead of source .ts; this patch reads the trailing sourcemap comment (or sibling .map file) directly off disk for those frames. That paragraph belongs in the commit body so the maintainer-six-years-from-now understands why we're reading files in a stack handler.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The functional change is the right shape: external-module frames weren't being source-mapped because they bypass Vite's transform pipeline, so reading the trailing sourcemap comment off disk is a reasonable fix and the snapshot delta proves it works end-to-end. But this is THREE-PATCHES submitted as one \u2014 the DecodedMap resolve() argument reshuffle is a separate bug fix with no dedicated test, bundled with the external-module wiring and a license update. The DecodedMap change has correct intent (resolve sources relative to dirname(from)) but silently assumes `from` is always a file path, which isn't guaranteed across all call sites. The getSourceMap callback does uncached synchronous full-file reads on every stack frame, which will bite anyone with deep stacks into bundled node_modules. NEEDS-WORK: split the patch, add a direct unit test for DecodedMap.resolvedSources, cache the per-file extracted map, and drop the rollup SourceMap type import."
+  },
+  "raw": ""
+}

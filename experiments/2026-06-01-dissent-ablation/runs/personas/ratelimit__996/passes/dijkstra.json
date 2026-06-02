@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared rateLimit pointer, corrupting subsequent lookups",
+        "detail": "The handler reassigns rateLimit.Stats and rateLimit.FullKey on the shared *RateLimit returned from the descriptor tree. Each request rewrites global state with the latest runtime values, so concurrent and subsequent calls observe whichever key was written last. No precondition forbids aliasing; no invariant preserves leaf immutability. TESTED-NOT-PROVED: the tests run sequentially and never witness the race.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-429",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NewRateLimit is invoked with a stale FullKey then immediately overwritten, a dead and misleading allocation",
+        "detail": "The branch constructs a fresh RateLimit using rateLimit.FullKey (the pre-enhancement key), then mutates Stats and FullKey on the new object. The intermediate construction has no postcondition any caller relies on; it allocates stats under the wrong key as a side effect. SMUGGLED-GOTO via mutation; the author cannot state why the reconstruction exists at all.",
+        "file": "src/config/config_impl.go",
+        "lines": "421-427",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The key-building block has three branches that compute identical results, betraying unreasoned control flow",
+        "detail": "matchedViaWildcard, matchedUsingValue, and default-key arms each independently check valueToMetric and append key plus optional underscore+value. The author cannot have stated an invariant; the three cases collapse to one. Replace with a single predicate: append value iff valueToMetric and entry.Value != \"\". The duplication is evidence the postcondition was never written down.",
+        "file": "src/config/config_impl.go",
+        "lines": "358-387",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override condition compares against a FullKey that may never have been assigned",
+        "detail": "The guard `enhancedKey != rateLimit.FullKey` decides whether to swap stats. But FullKey is only set when DetailedMetric fires; in the default path it is the empty string or whatever a prior request left there (see mutation bug). The comparison is therefore meaningless as a correctness predicate. UNREASONED.",
+        "file": "src/config/config_impl.go",
+        "lines": "423-428",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valueToMetric flag is read from nextDescriptor at the wrong altitude in the tree",
+        "detail": "The intent (per docs) is that the parent's value_to_metric controls how the matched child's key is emitted. The code reads nextDescriptor.valueToMetric, i.e., the child's own flag, then uses it to format that same child's segment. This conflates two distinct properties; whichever the author meant, the spec was not stated and tests happen to pass because flags are set at every level uniformly.",
+        "file": "src/config/config_impl.go",
+        "lines": "360-385",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Cardinality footgun documented but not bounded",
+        "detail": "The feature exists precisely to inject unbounded runtime strings into metric names. README warns informally; the code applies no length cap, no character sanitization, and no rate of stats-object creation guard. Operators enabling this on a high-cardinality key (subject_id, request_id) will allocate stats objects indefinitely. Defensive note, not refusal.",
+        "file": "src/config/config_impl.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "REFUSED as written. The patch mutates a shared *RateLimit returned from a tree node, rewriting Stats and FullKey per request \u2014 a classic aliasing bug invisible to the sequential tests (TESTED-NOT-PROVED). The key-construction block contains three branches that collapse to one predicate, evidence no postcondition was ever stated. The override guard compares against a FullKey that is unset on the common path, and the valueToMetric flag is consulted at the wrong level of the descriptor tree. The feature also adds unbounded-cardinality stats creation with no guard. Fix the aliasing (return a fresh RateLimit or precompute keys at load), then collapse the formatting to one rule."
+  }
+}

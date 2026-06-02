@@ -1,0 +1,144 @@
+{
+  "task_id": "protocompile__590",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panics will likely cause downstream nil deref",
+        "detail": "In the non-leader branch, after CompareAndSwap fails, the code now does `output := t.result.Load(); if output == nil { return nil }`. The function signature is `(output *result)` and many callers of run() are expected to receive a non-nil *result (e.g., the deferred logic in run, and callers up the stack that read fields like output.Fatal, output.done, etc.). Silently returning nil propagates the original problem one frame up rather than fixing it. The fix should synthesize a sentinel failure result (e.g., a result with Fatal set to a leader-panicked error) so callers can handle it uniformly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race still present: t.result can be cleared between CompareAndSwap and Load",
+        "detail": "The new guard `output := t.result.Load(); if output == nil { return nil }` runs after CompareAndSwap fails. But the leader can panic and set t.result back to nil at any time after this Load too \u2014 including before the select on output.done in waitUntilDone returns. The fix relocates the nil-check but does not actually eliminate the race; it merely shrinks the window. Capturing the snapshot into a local `output` and passing it to waitUntilDone is necessary, but the function still needs a guarantee that `output.done` is closed (or signals failure) when the leader panics. Verify the leader's panic-recovery path actually closes output.done before nilling t.result; otherwise waiters block until caller.ctx is canceled.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459, 547-550",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Typo and misleading comment: 'Leader panicked but we did see a result.'",
+        "detail": "The comment on the new nil-return branch reads 'Leader panicked but we did see a result.' This appears to be a typo for 'did not see a result' (the branch is taken precisely when output == nil). Beyond the typo, the comment understates the condition \u2014 it could also be any future code path that clears t.result. Tighten the comment and explain the contract callers must honor when nil is returned.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection no longer runs against the latest in-flight output",
+        "detail": "Previously the cycle check ran inside the deferred-load branch with the pending output already in scope, and any cycle was attached as output.Fatal before returning that same output. The refactor keeps this behavior in the first branch (caller already a pending child), but the CompareAndSwap-fail branch (second branch) does not run checkCycle at all. If a goroutine reaches the CAS-fail branch with a cyclic call path, the cycle will not be detected at this site and will rely on caller.ctx eventual cancellation. The PR notes a follow-up for dependency cycles, but verify this matches the prior behavior \u2014 otherwise this is a behavior regression bundled into a 'race fix'.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Variable shadowing of `output` in the CAS-fail branch hurts readability",
+        "detail": "The enclosing run() has a named return `output *result`, and the new branch declares `output := t.result.Load()` which shadows it. Combined with the early `return nil`, this makes it easy to misread which `output` is in scope. Rename the local (e.g., `loaded`) or assign to the named return directly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test added for the described race",
+        "detail": "The PR fixes a panic but the diff includes no test exercising the leader-panics-then-waiter-loads scenario. A deterministic test (e.g., a query that panics under a controlled goroutine schedule, or a stress test with -race) would prevent regression and document the invariant. Given the difficulty of reproducing concurrent nil derefs, a stress test with GOMAXPROCS>1 and many iterations is the minimum bar.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle does two passes of caller.path.Walk()",
+        "detail": "The extracted checkCycle preserves the original two-pass scan: one to find the match, one to materialize the cycle. This is fine for typical path depths but could be a single pass by appending as we walk and truncating when the matching node is found. Pure cleanup, not blocking.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle doc comment is copied verbatim and reads oddly out of context",
+        "detail": "The new function's comment 'This is only possible if output is pending; if it isn't, it can't be in our history path.' references `output`, which is no longer in this function's scope. Reword to reference the caller's contract (e.g., 'callers must only invoke this when t.result is non-nil/pending').",
+        "file": "experimental/incremental/task.go",
+        "lines": "405-406",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "waitUntilDone signature change is good but the parameter ordering is awkward",
+        "detail": "Passing `output` as the second positional arg before `async bool` is fine, but consider naming the param `result` or `pending` to avoid confusion with the named return value `output` in run(). Minor readability nit.",
+        "file": "experimental/incremental/task.go",
+        "lines": "535, 550",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether returning nil from run() is acceptable",
+        "positions": [
+          {
+            "persona": "pragmatic_ship",
+            "position": "Returning nil is acceptable as a narrow 'leader died, give up this attempt' signal; the caller will propagate the failure via context cancellation upstream and the panic recovery path will handle cleanup."
+          },
+          {
+            "persona": "formal_correctness",
+            "position": "Returning nil violates the implicit contract that run() produces a *result describing success or failure. Every caller now must add a nil-check, and any miss reintroduces the exact nil-deref this PR claims to fix \u2014 just one frame higher."
+          }
+        ]
+      },
+      {
+        "topic": "Scope of the fix vs. follow-up",
+        "positions": [
+          {
+            "persona": "incremental_fix",
+            "position": "Bundling cycle detection refactor + race fix is fine; the refactor is small and motivated by needing `output` available before waitUntilDone."
+          },
+          {
+            "persona": "abstraction_discipline",
+            "position": "Two concerns are interleaved in one PR. The race fix is two lines; the cycle-detection extraction is unrelated mechanical refactor. Splitting would make the race fix trivially reviewable and bisectable."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the race is fully closed",
+        "positions": [
+          {
+            "persona": "narrow_fix",
+            "position": "Capturing output locally and passing it to waitUntilDone eliminates the observed nil deref on `t.result.Load().done` \u2014 that is sufficient for this PR's stated bug."
+          },
+          {
+            "persona": "root_cause",
+            "position": "The deeper invariant \u2014 that the leader must close output.done before clearing t.result on panic \u2014 is not asserted or tested here. The PR treats the symptom; without verifying the leader's panic path closes done, waiters can still hang until ctx cancellation."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR correctly identifies a real race: waiters dereferenced `t.result.Load().done` after the leader cleared `t.result` on panic. Capturing the result locally and passing it to `waitUntilDone` is the right shape of fix. However, the CAS-fail branch's `return nil` is concerning \u2014 it pushes a nil `*result` up to callers that previously could rely on a non-nil return, and the inline comment ('did see a result') appears to be a typo for 'did not'. The cycle-detection extraction is a clean refactor but is bundled into a race fix and arguably belongs in its own PR. No regression test accompanies the fix, which is the standard bar for concurrent nil-deref bugs. Recommend: synthesize a sentinel failed-result instead of returning nil, fix the comment, confirm the leader's panic path closes `output.done` before nilling `t.result`, and add a stress test under `-race`."
+  },
+  "raw": ""
+}

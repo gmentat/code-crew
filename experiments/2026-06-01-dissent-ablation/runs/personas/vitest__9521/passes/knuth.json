@@ -1,0 +1,70 @@
+{
+  "name": "knuth",
+  "task_id": "vitest__9521",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "isIncluded uses O(n) Array.includes on changedFiles inside a per-file hot path",
+        "detail": "For each candidate file, the include check now runs `this.changedFiles.includes(filename)` \u2014 linear in the number of changed files, and called once per source file in the project. On a large repo with many changed files this is O(F x C). A Set would make it O(1) and is the textbook data-structure choice here. Cache hits help, but cold runs and getUntestedFiles also re-walk.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "165-178, 197-201",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Invariant of changedFiles membership (path shape) is not stated or enforced",
+        "detail": "isIncluded compares `slash(cleanUrl(_filename))` against entries in `changedFiles`. VitestGit.findChangedFiles and `config.related` are not documented here as returning slashed, clean, absolute paths. If either returns Windows-style separators, query strings, or relative paths, the `includes` test silently filters everything out. State the path-normalization invariant and normalize on entry to changedFiles.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-178, 332-347",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache is cleared in onTestRunStart but populated before it runs in some flows",
+        "detail": "isIncluded caches the include verdict keyed only by filename, with no dependency on changedFiles. onTestRunStart clears the cache when changedFiles is set, but any isIncluded call that happened earlier in the lifecycle (e.g., during config resolution or plugin setup before onTestRunStart fires) would poison the cache with a non-filtered verdict. The invariant 'cache is empty before changedFiles is consulted' should be made explicit or the cache key should incorporate changedFiles identity.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "165-178, 332-347",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three identical `await this.coverageProvider?.onTestRunStart?.()` call sites invite drift",
+        "detail": "core.ts now invokes onTestRunStart in three places with no shared helper. Future code paths that start a run will silently skip coverage filtering. A small private method `_notifyCoverageRunStart()` next to `_testRun.start` would make the invariant 'every run-start notifies coverage' enforceable by reading one function.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-611, 749-755, 880-887",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform for `changed` lacks a stated grammar and silently accepts ambiguous values",
+        "detail": "The transform coerces the strings 'true'/'yes'/'false'/'no' to booleans and passes everything else through as a git ref. This conflicts with legitimate git refs literally named `true`, `false`, `yes`, or `no` (rare but legal). A one-line comment stating the precedence (boolean literal first, otherwise treat as ref) and a note that those four ref names are unreachable would make the choice auditable.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Literate comment missing: why `cleanUrl` was added to isIncluded",
+        "detail": "The addition of `cleanUrl(_filename)` before `slash` silently changes the cache key and the match domain for every caller, not just the changed-files path. A reader has to reconstruct from the query-param test that this is about `?query` and `#hash` suffixes leaking through Vite transforms. One sentence in a comment would save the next maintainer a bisect.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-152",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED with one WRONG-DATA-STRUCTURE smell. The feature is small and correct on the happy path, and the tests cover the visible behaviors well. The chief rigor gap is the use of an unsorted array as a membership set inside `isIncluded`, which is called once per source file \u2014 a Set is the obvious choice. Adjacent to that, the invariant about what shape paths take in `changedFiles` is not stated, and a slashed/cleaned filename is being compared against values from two different upstream sources (`VitestGit` and `config.related`) without a normalization step. Smaller items: three identical call sites for `onTestRunStart` in core.ts invite drift, the CLI boolean coercion shadows four rare-but-legal git ref names without comment, and the new `cleanUrl` call in `isIncluded` deserves a literate one-liner explaining what it is defending against."
+  }
+}

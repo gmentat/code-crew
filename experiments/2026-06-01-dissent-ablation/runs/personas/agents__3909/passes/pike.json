@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "agents__3909",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Error message types raise APIConnectionError mid-loop, leaking through recv_task's exception handler instead of terminating cleanly",
+        "detail": "In _process_stream_event, server-side errors (auth_error, quota_exceeded, etc.) raise APIConnectionError, but recv_task wraps the call in a broad try/except that logs and continues. The error gets swallowed by the same except Exception that handles JSON parse failures. Separate the data path (transcripts) from the control path (errors): return a typed event or set a failure flag, and let _run handle reconnect or shutdown.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "207-217, 395-411",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format field on STTOptions duplicates sample_rate and can desync from it",
+        "detail": "audio_format is computed once as f\"pcm_{sample_rate}\" then stored alongside sample_rate. Two fields, one fact. If a caller mutates one, the other lies. Drop audio_format from STTOptions and format it at the single use site in _connect_ws. Data dominates: one source of truth makes the bug impossible.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "53-62, 115-117, 264",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTOptions has eleven Optional fields converted via repeated is_given ternaries; the construction is mostly bookkeeping",
+        "detail": "The __init__ does the same NotGivenOr-to-None dance for five VAD parameters. This is data shape fighting the code. A small helper (def _coalesce(v): return v if is_given(v) else None) or building the dict and passing **kwargs would reduce ten lines to two and make the parameter set obvious. Small composable transform over data.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "118-132",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_connect_ws builds the query string by hand instead of letting aiohttp do it",
+        "detail": "Manual list-of-f-strings joined with '&' reinvents URL encoding. aiohttp.ClientSession.ws_connect accepts a params= dict; building one from {k: v for k, v in candidates.items() if v is not None} is shorter, safer if any value ever contains a special char, and obvious. The language should help you not write code.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "253-283",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The receive-side dispatch is a chain of elif on message_type; a small dict of handlers would make the protocol obvious",
+        "detail": "_process_stream_event is a flat switch with three near-duplicate branches that all do the same speaking-state bookkeeping. Lift the speaking-state transitions into one helper, and let each message_type be a small function. The data (message kind plus text) drives the algorithm; right now the algorithm is fighting it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "335-414",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTv2 duplicates ~95% of STT's surface; the v1/v2 split is a copy rather than a composition",
+        "detail": "Following the Deepgram pattern is fine, but the author notes this is for backward compatibility. The shared parts (auth, session, base URL, capability declaration) should live in one place; v1 and v2 should differ only in the wire protocol. A small base or a shared helper module avoids two files drifting apart over time. Composition over duplication.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "65-167",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The plugin works and follows the established Deepgram/Cartesia shape, but the design carries more code than the problem requires. The STTOptions dataclass duplicates derivable fields and converts NotGivenOr with eleven near-identical ternaries; both are data-shape problems where a smaller structure would make the code self-evident. The receive-side handler is a switch with duplicated speaking-state bookkeeping that wants to be a small table or helper. Two real concerns: error message types raise inside recv_task's broad except and get swallowed, and the v2 file is a near-copy of v1 with no shared base \u2014 fine today, drift tomorrow. Decision: TOO-MUCH-FRAMEWORK and one WRONG-DATA-STRUCTURE; nothing here blocks merge but the data structures should be tightened before the v1/v2 pair calcifies."
+  }
+}

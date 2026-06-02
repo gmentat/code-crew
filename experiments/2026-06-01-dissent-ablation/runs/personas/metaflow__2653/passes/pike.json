@@ -1,0 +1,60 @@
+{
+  "name": "pike",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "fcntl mode switch leaves fd in blocking state on the error/exit path",
+        "detail": "The fd flags are flipped to blocking but never restored. If the surrounding code reuses or inspects this fd later (cleanup, exception path, retry), it's now blocking with no record of the change. A small helper that owns the mode transition, or a try/finally that restores flags, would make the data flow obvious.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-145",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two read loops doing the same job \u2014 the shape is wrong",
+        "detail": "The function now has an outer poll/non-blocking loop and an inner blocking drain loop that both append to content and both decide EOF. The data is a stream of bytes until EOF; the code should be one loop with one termination rule. Split into two small functions: wait_for_first_byte() then drain_blocking(). Algorithm follows the data.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError branch is now a silent pass \u2014 dead shape left behind",
+        "detail": "After the rewrite, BlockingIOError can only fire before any data arrives (we switch to blocking after first read). The except clause reduces to pass and the has_blocking_error variable disappears from logic. Either delete the except entirely (poll already gates readiness) or comment why it's still defensive. Don't leave vestigial control flow.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "select.poll plus blocking read is the right shape \u2014 say so once, in code",
+        "detail": "The PR description explains the POSIX guarantee well; the function itself doesn't. A three-line docstring naming the two phases (poll-until-first-byte, then blocking-drain-to-EOF) would make this self-evident to the next reader and prevent someone from re-introducing the non-blocking drain to be clever.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "120-160",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "8192 chunk size is a magic number repeated twice",
+        "detail": "Small thing, but the buffer size now appears in both the first read and the drain loop. One named constant (PIPE_CHUNK = 8192) removes the duplication and the temptation to tune one and forget the other. Measure before changing it; n is usually small here too.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "131,141",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The fix is sound and the POSIX reasoning is correct \u2014 switching to blocking mode after first byte is the right shape for this problem. But the implementation grew two parallel read loops where one would do, and the fd mode flip is permanent with no owner. Strip the duplication by extracting a small drain helper, make the two phases explicit in a docstring, and either delete or justify the now-vestigial BlockingIOError branch. Data dominates: the data here is a byte stream until EOF, so one loop with one termination rule is the obvious shape."
+  }
+}

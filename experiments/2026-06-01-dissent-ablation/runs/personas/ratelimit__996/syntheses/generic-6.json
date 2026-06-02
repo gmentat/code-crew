@@ -1,0 +1,90 @@
+{
+  "task_id": "ratelimit__996",
+  "arm": "generic-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared rateLimit pointer's Stats/FullKey on every request, causing data races and per-request stats churn",
+        "detail": "rateLimit is the cached pointer stored in the descriptor tree at config load. The new override block reassigns rateLimit.Stats and rateLimit.FullKey on every GetLimit call, racing concurrent goroutines and leaking stats registrations. GetLimit is on the hot path and must treat the cached descriptor as read-only.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_4",
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "enhancedKey != rateLimit.FullKey guard fires for every request because FullKey is unset outside the detailed_metric path",
+        "detail": "rateLimit.FullKey is only populated in the DetailedMetric branch. For all other limits FullKey is the zero value, so the comparison is always true. The override path therefore runs on every request regardless of whether any descriptor enabled value_to_metric, recreating Stats and regressing all existing configs.",
+        "file": "src/config/config_impl.go",
+        "lines": "418-430",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Double NewStats call wastes an allocation and pollutes the stats store under the old FullKey",
+        "detail": "The override branch calls NewRateLimit(..., NewStats(rateLimit.FullKey), ...) and then immediately overwrites Stats with NewStats(enhancedKey). The first stats object is registered under the wrong/empty key and never used. Construct once with enhancedKey or mutate Stats alone.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-429",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unbounded metric cardinality risk is not gated or warned about as strongly as detailed_metric",
+        "detail": "value_to_metric injects raw runtime values (user IDs, routes, header values) into metric keys with no sanitization or cap, and can be set at intermediate descriptors where cardinality compounds. README positions it as safer than detailed_metric but the blowup risk is comparable and the warning is much weaker.",
+        "file": "README.md",
+        "lines": "342-349",
+        "flagged_by": [
+          "generic_4",
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literals for rateLimitDescriptor are fragile to future field additions",
+        "detail": "The constructor sites use positional initialization with four fields now. Any future field added to rateLimitDescriptor will silently shift meaning at these call sites. Switch to named field initialization for safety and readability, especially since this PR is extending the struct.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Wildcard, matchedUsingValue, and default-key branches collapse to identical output and should be unified",
+        "detail": "All three branches produce key or key_value depending on valueToMetric and entry.Value. The duplication invites drift between branches and obscures the precedence rules. Collapse to a single helper that appends the key and conditionally appends _value.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-388",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the value_to_metric feature is conceptually sound and well-tested for the happy path, but the GetLimit override block has serious correctness problems. The shared rateLimit pointer is mutated on every request, racing concurrent goroutines, and the enhancedKey != FullKey guard is broken because FullKey is unset outside the detailed_metric path, so the override fires for every request regardless of configuration. The override also allocates two Stats objects where one suffices. Documentation understates the cardinality blowup risk relative to detailed_metric, and positional struct literals for rateLimitDescriptor are fragile. The branch logic for emitting the value can be collapsed into a single helper."
+  }
+}

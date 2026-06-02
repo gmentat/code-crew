@@ -1,0 +1,78 @@
+{
+  "task_id": "prowler__9718",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check name is inconsistent between PR description/CHANGELOG and the shipped directory/class identifier.",
+        "detail": "PR description references compute_image_publicly_shared while the directory, class, and metadata use compute_image_not_publicly_shared (CHANGELOG also disagrees). The CheckID is the contract callers, dashboards, and docs bind to. Pick one canonical name and propagate it across CHANGELOG, description, paths, and class before merge.",
+        "file": "prowler/CHANGELOG.md",
+        "lines": "16",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getIamPolicy failures silently degrade to publicly_shared=False, turning auth errors into PASS findings.",
+        "detail": "In _get_images, when getIamPolicy raises (e.g., permission denied as test-image-3 simulates), the image is appended with publicly_shared=False and the check reports PASS. A security check that defaults to clean on verification failure is the wrong failure mode. Surface as UNKNOWN/MANUAL, skip the resource, or emit an error finding so PASS honestly means verified-not-public.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "555-565",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-image getIamPolicy is serialized while every sibling collector in this file uses __threading_call__.",
+        "detail": "_get_images iterates project_ids and images sequentially, issuing one getIamPolicy per image. Other collections in compute_service.py thread over projects/regions/zones. Wall-clock scales as N * RTT for projects with many images, and the inconsistency reads as not having read the surrounding file. Reuse the existing threaded helper.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts publicly_shared=False for the IAM-policy exception case, pinning the leaky failure semantics.",
+        "detail": "test-image-3 raises in getIamPolicy and the test asserts publicly_shared is False, conflating verified-not-public with verification-failed. This locks in the current bad-taste behavior and makes correcting the failure path (see the IAM swallow finding) a test-breaking change. Update the test to expect unknown/skip semantics.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "270-277",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image ADT is thin: stores only a derived boolean and omits self_link/location/binding context found on sibling models.",
+        "detail": "The Image model drops which role(s) and members granted public access and lacks a self_link/region carried by Disk and Instance. Findings on shared images become hard to act on across projects, and remediation/audit consumers must re-query. Add public_bindings (or members) plus a resource URI to match module convention.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "images().list scope and filter are undocumented, risking confusion about custom-vs-public catalog coverage.",
+        "detail": "images().list(project=project_id) returns the project's own images, but the description claims custom-only without a stated invariant or filter (e.g., deprecated.state). Add a one-line comment explaining why project-scoped list suffices (Google-managed images live in separate projects) so future readers don't expand the scope or add spurious filters.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "540-542",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this is a small, focused check that needs work before merge. Two P1 issues dominate: the CheckID name is inconsistent between the PR description/CHANGELOG and the shipped directory/class, and getIamPolicy failures silently produce PASS findings, which is the wrong failure mode for a security check. The serialized per-image IAM calls also diverge from the threaded style used by every other collector in compute_service.py. Secondary concerns include a thin Image ADT that discards binding context, a test that pins the leaky exception behavior, and an undocumented image-listing scope. Verdict: NEEDS-WORK \u2014 fix the name, the failure semantics, and the threading before landing."
+  }
+}

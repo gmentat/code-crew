@@ -1,0 +1,60 @@
+{
+  "name": "generic_4",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close message type may not match Deepgram's documented CloseStream control message",
+        "detail": "The PR description and Deepgram docs reference `{\"type\": \"CloseStream\"}`, but the code sends `{\"type\": \"Close\"}`. The STT plugin reportedly already uses the correct form. If the server expects `CloseStream`, this message is silently ignored and the fix accomplishes nothing. Verify against Deepgram Speak v1 socket protocol.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "receive() only waits for a single frame, not for stream drain",
+        "detail": "`await asyncio.wait_for(ws.receive(), timeout=1.0)` returns after the first message, which may be a pending audio chunk rather than the server's close acknowledgment. Final audio frames after the Flush could still be dropped. A loop reading until CLOSE/CLOSED type or timeout would more reliably ensure all audio is drained.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-138",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Drained audio from receive() is discarded, potentially losing final TTS output",
+        "detail": "If the websocket delivers final audio chunks after Flush but before Close acknowledgment, `ws.receive()` here consumes and discards them. The reader task in `_run` will never see those bytes, defeating the purpose of the graceful close. The drained frames should be forwarded to the emitter, or close should coordinate with the reader.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-138",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Broad Exception catch may swallow cancellation-relevant errors",
+        "detail": "The bare `except Exception` around send/receive will hide legitimate connection-state issues during shutdown. Consider narrowing to `ConnectionError`/`aiohttp.ClientError`/`asyncio.TimeoutError` so unexpected failures still surface. At minimum, including `exc_info=True` in the warning would help debug field reports.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-140",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Close sequence adds up to ~1s latency to every stream teardown",
+        "detail": "Every `_close_ws` now blocks up to 1 second waiting on receive(). For short-lived synthesis streams this noticeably increases shutdown time and may delay session cleanup or test runs. Consider a shorter timeout (e.g. 250ms) or only waiting if there is in-flight audio expected.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-138",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "summary": "The fix correctly adds Flush+Close control messages before closing the Deepgram TTS websocket, mirroring the STT implementation. However, the message type sent (`Close`) appears to diverge from Deepgram's documented `CloseStream` per the PR description and SDK reference \u2014 worth verifying against the Speak v1 protocol. Additionally, the single `ws.receive()` both fails to fully drain post-Flush audio and silently discards whatever frame it does receive, partially undermining the stated goal of preventing audio truncation. Minor concerns around the broad exception catch and added shutdown latency."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "generic_3",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking read after switch can deadlock if writer never closes the FIFO",
+        "detail": "Once the code switches the fd to blocking mode and enters the inner while-True loop, it abandons select.poll(), the timeout, and the check_process_exited() guard. If the writer subprocess hangs or crashes without closing the FIFO (e.g., killed by SIGKILL with another process still holding the write end), the parent will block forever in os.read.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-145",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Outer timeout/poll loop no longer enforces wait-for-first-byte limit reliably",
+        "detail": "The BlockingIOError branch is reduced to `pass`, and the empty-poll branch is also `pass`. The function's timeout behavior now depends solely on the outer while condition; with no content yet and a stuck writer, the original early-exit on process exit was removed, so a dead subprocess that never wrote anything may not be detected until the outer timeout expires.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "146-158",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl is POSIX-only; Windows compatibility may regress",
+        "detail": "`import fcntl` at module top will fail on Windows. If metaflow/runner/utils.py is ever imported on Windows (even if FIFO code paths aren't used), the import itself will raise ImportError. Worth confirming this module is already POSIX-gated.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "7",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead variable `has_blocking_error` likely orphaned",
+        "detail": "The previous code set `has_blocking_error = True` inside the except branch. The new code removes the assignment but the variable may still be referenced elsewhere in the function (initialization, return logic). Verify no stale references remain that could mask the new flow.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No restoration of O_NONBLOCK flag on the fd",
+        "detail": "After switching to blocking mode, the fd is left blocking. If the fd is shared, reused, or inspected by surrounding code (e.g., a finally block or caller), the mutated flag persists. Consider restoring flags in a finally to keep side effects local.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "134-135",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies a real race between non-blocking reads and kernel pipe buffering, and switching to blocking mode after first data is a sound POSIX-grounded approach. The main concern is that the inner blocking loop drops all the safety nets (timeout, poll events, process-exit check), so a writer that crashes mid-stream without closing the FIFO can deadlock the parent indefinitely. Smaller concerns: the BlockingIOError/no-events branches are now no-ops that may weaken pre-first-byte timeout behavior, and fcntl import plus persistent O_NONBLOCK clearing deserve a quick sanity check."
+  }
+}

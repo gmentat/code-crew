@@ -1,0 +1,195 @@
+{
+  "task_id": "vitest__9521",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "globCache invariant violated: cache key is filename but result now depends on changedFiles state",
+        "detail": "isIncluded memoizes results in globCache keyed only on filename, but the returned boolean is now a conjunction of (matches glob) AND (filename in changedFiles). The fix relies on onTestRunStart calling globCache.clear() before any isIncluded call \u2014 an unstated precondition enforced by convention. If isIncluded fires before onTestRunStart (early config, plugin transform, watch-mode re-run, custom provider, future call site), the cache will serve stale or wrong-for-this-run answers. Either split into two predicates (pure matchesIncludeGlob + cheap isChanged set lookup), key the cache by a changedFiles generation/identity, or invalidate lazily at read time.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "148-180, 343-345",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles membership uses Array.includes \u2014 should be a Set",
+        "detail": "isIncluded does this.changedFiles.includes(filename) on every candidate file, yielding O(n*m) where m is candidate files and n is changed files. The operation is set membership; the data structure should be Set<string>, built once in onTestRunStart for O(1) lookups. The same applies to the filter pass around line 200. This is not just a perf nit \u2014 it is the wrong data structure for the operation, and isIncluded sits in a hot path the glob cache exists to protect.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "~89, 175-178, ~200, 332-348",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path-normalization invariant between changedFiles and isIncluded is unstated and unenforced",
+        "detail": "isIncluded compares slash(cleanUrl(_filename)) against entries of this.changedFiles, but onTestRunStart stores whatever VitestGit.findChangedFiles or ctx.config.related returns with no normalization. There is no stated invariant that both sides use absolute, slash-separated, query-stripped paths in the same case. On Windows, non-cwd roots, or when the two upstream sources differ in shape (relative vs absolute, backslash vs slash), the includes() check silently returns false and coverage quietly excludes everything. Normalize on ingress to a single canonical form, state the invariant in a comment, and add a test that exercises non-cwd roots.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152, 175-178, 332-339",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart is copy-pasted into three call sites in core.ts and wants to be one wrapper",
+        "detail": "core.ts now calls `await this.coverageProvider?.onTestRunStart?.()` immediately after `_testRun.start(...)` in three separate places. The precondition of generateCoverage and isIncluded silently depends on this hook having been called. A fourth code path (rerun, watch, typecheck-only, project mode) that starts a run without the hook will produce wrong coverage with no error \u2014 a smuggled goto enforced by convention. Either fold the hook into _testRun.start, wrap the pair in a single helper, or have generateCoverage assert the precondition explicitly.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607, 749, 880",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent fallback when git lookup fails or returns null \u2014 user gets full coverage instead of the filter they asked for",
+        "detail": "`this.changedFiles = changedFiles ?? undefined` collapses null (git failure, missing ref, non-git repo) into 'no filter applied \u2014 include everything', the opposite of the user's stated intent. An empty array is also indistinguishable from a misconfigured ref. A user setting `coverage.changed: 'origin/main'` against a bad ref gets a plausibly-passing CI report covering every file. Throw with a clear message or at minimum log a warning when the filter is requested but cannot be applied; document the empty-diff postcondition.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-340",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Watch-mode staleness: changedFiles is not reset between runs",
+        "detail": "onTestRunStart assigns to the long-lived `this.changedFiles` field without first clearing it. If a subsequent run resolves changedFiles to undefined (ref disappears, options.changed toggled off mid-watch, custom provider skips the hook), the previous list persists and the next run filters against stale data. Either reset `this.changedFiles = undefined` at the top of onTestRunStart, treat it as a per-run value rather than provider state, or compute it lazily inside the run.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel mechanisms produce the 'changed files' value with no shared abstraction",
+        "detail": "When `coverage.changed` is set, the provider calls VitestGit.findChangedFiles directly; when only `config.changed` is set, it reuses `ctx.config.related` (a different pipeline). These are conceptually one value \u2014 'files considered changed for this run' \u2014 but use different code paths that can diverge in normalization, path shape, and semantics. Extract a single ChangedFilesResolver (or method on Vitest) behind a stated contract that returns string[] | undefined and is consumed by both `config.changed` and `coverage.changed`. Today, the inheritance default in resolveConfig further muddies which path actually runs.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345, packages/vitest/src/node/config/resolveConfig.ts 419-424",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CoverageProvider LSP violation: onTestRunStart is declared optional but BaseCoverageProvider semantics now require it",
+        "detail": "The CoverageProvider interface declares `onTestRunStart?` as optional and core.ts calls it with optional chaining, but isIncluded and getUntestedFiles in BaseCoverageProvider silently depend on it having populated changedFiles. A custom CoverageProvider that legitimately omits onTestRunStart (per the documented optional contract) but is run with `coverage.changed` set will produce a weaker postcondition than the base \u2014 full coverage instead of filtered. Either tighten the interface contract when changed is set, document onTestRunStart as required-when-changed-is-set, or initialize filtering lazily so the postcondition holds for any conforming subtype.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "30-33",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform conflates boolean and string value spaces with dead/undocumented branches",
+        "detail": "The transform in cli-config.ts checks both string literals ('true'/'yes'/'false'/'no') and raw booleans (true/false), accepting an unusually wide lexicon. CLI parsers hand strings; the boolean branches are dead or under-documented. The 'yes'/'no' aliases are folkloric and inconsistent with the rest of Vitest's CLI. Pick one shape: declare 'optional string', map known literals to boolean, treat anything else as a git ref string, and document the accepted lexicon. Also note: a branch literally named 'yes' or 'no' becomes unreachable as a ref.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl added to isIncluded with no comment explaining the rationale",
+        "detail": "Wrapping `_filename` in cleanUrl strips Vite-injected query params (e.g., ?v=hash, ?vue&type=script) so transformed module IDs match canonical paths in changedFiles. The query-param-transforms test exercises this end-to-end, but the change has no inline comment and no targeted unit test through getCoverageFilesForProvider. Future readers may delete it as redundant and silently regress. Add a one-line comment ('strip Vite query params so transformed module IDs match canonical paths') and a focused test pinning the behavior; also confirm it does not change which files get reported for users who never set coverage.changed.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "12, 151-152",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests cover happy paths but skip the documented failure modes",
+        "detail": "The new tests under test/coverage-test/test/changed.test.ts cover inheritance, override, query-param transforms, and excludeAfterRemap, but do not exercise: (a) `coverage.changed: true` boolean form documented in the docs, (b) a nonexistent or unreachable git ref, (c) a non-git directory, (d) watch-mode where onTestRunStart fires repeatedly and changedFiles must refresh, (e) Windows or non-cwd-root path normalization. These are exactly the conditions the implementation invites and would silently misbehave under.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "70-165",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "File mode flipped from 0644 to 0755 on changed.test.ts",
+        "detail": "test/coverage-test/test/changed.test.ts has its mode bit changed to executable in the diff. Test files are not executables; this is gratuitous noise that survives because nobody inspects mode bits. Drop the chmod.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "mode header",
+        "flagged_by": [
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "getUntestedFiles silently narrows when coverage.changed is set; postcondition undocumented",
+        "detail": "Previously getUntestedFiles filtered by ctx.config.related only when ctx.config.changed was truthy. It now filters by this.changedFiles whenever set, including the new coverage.changed-only path. A user enabling only coverage.changed may be surprised that untested-file reporting also narrows. Add a docstring stating the new postcondition: 'untested' is relative to the changed set when changedFiles is populated.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "197-203",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart interface contract is under-documented",
+        "detail": "The new optional CoverageProvider.onTestRunStart is described only as 'Callback called when test run starts'. The contract that matters \u2014 called exactly once per run, before any onAfterSuiteRun, awaited before tests collect coverage, and required-in-practice when coverage.changed is set \u2014 is unstated. A custom provider author reading only the type cannot infer the invariant. Add a paragraph-level docstring on the interface.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "30-33",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CustomProviderOptions Pick widening tacks 'changed' on as a literal instead of through the named alias",
+        "detail": "`CustomProviderOptions extends Pick<BaseCoverageOptions, FieldsWithDefaultValues | 'changed'>` ad-hoc adds the literal 'changed' alongside the FieldsWithDefaultValues alias. The alias exists precisely so the custom-provider contract surface has one declared name. Either add 'changed' to FieldsWithDefaultValues (and explain why it is a default-valued field) or introduce a new alias to keep the contract documented in one place.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "294-296",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is useful and the user-facing surface (option, hook, inheritance from test.changed) is roughly right, but the implementation has the hallmarks of code that was written without stating its invariants. The panel converges on four structural concerns: (1) the globCache silently mixes pure glob results with changed-set membership and depends on call ordering rather than design to stay correct; (2) Array.includes is the wrong data structure for set membership and changedFiles should be a Set; (3) path normalization between VitestGit/config.related output and the slash(cleanUrl(...)) candidate is unstated and likely to fail on Windows or non-cwd roots, silently producing empty coverage; (4) onTestRunStart is hand-copied at three call sites in core.ts and a silent null-result fallback can flip the filter into 'cover everything' \u2014 the opposite of user intent. Recommend: extract a single ChangedFilesResolver behind a stated contract, store changedFiles as a normalized Set, fold the hook into _testRun.start (or assert its precondition in generateCoverage), and fail loudly when git cannot answer. Also strip the executable mode bit on the test file, comment the cleanUrl addition, and tighten the CLI transform's value space."
+  },
+  "raw": ""
+}

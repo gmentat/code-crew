@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Zero-value contract is implicit; nil receiver behavior should be specified, not discovered by reflection",
+        "detail": "The PR establishes a real ADT contract: every accessor on a zero/nil receiver returns the zero value of its result type (with documented exceptions like ValueNodeIndex returning -1). That contract is enforced only by a reflective test. The supertype-level promise should be stated in package-level doc (e.g. on IsZero or a doc.go) so subtypes and future methods know the precondition is \"none\".",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel zero-checks (f == nil vs t.IsZero()) instead of one canonical guard",
+        "detail": "File uses `if f != nil`; Type/Member/Oneof/ReservedName/Element use `if !x.IsZero()`. These are two different invariants for the same abstract notion of \"the value is absent.\" A single canonical predicate (e.g. IsZero on *File too, or a shared guarded-accessor helper) would make substitution across these IR node types uniform and prevent drift as new accessors are added.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Repeated `var slice = nil-guarded` boilerplate is a leaky abstraction over seq.NewFixedSlice",
+        "detail": "Every getter now has the same 4-line `var s []X; if x != nil { s = ... }; return seq.NewFixedSlice(s, ...)` pattern. The contract \"nil receiver yields an empty Indexer\" belongs inside a helper (e.g. seq.NewFixedSliceOr or an internal nilSafeSlice) so the abstraction is enforced once. Right now every future getter author must remember to reproduce the pattern, and the test only catches violations after the fact.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "imports.DescriptorProto on nil receiver silently changes semantics via slicesx.Last",
+        "detail": "Previously `slicesx.Last(nil)` was the path; now a nil-guard returns nil directly. Behavior is equivalent today, but the contract for `DescriptorProto` under a nil/zero imports should be documented: \"returns nil iff no descriptor.proto is available, including the zero case.\" Otherwise a caller cannot distinguish \"no descriptor\" from \"zero file\".",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-200",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex returns -1 sentinel \u2014 sentinel-in-ADT smell; consider (int, bool) or document precondition",
+        "detail": "Element.ValueNodeIndex now returns -1 for the zero value, a magic sentinel layered on top of an otherwise pure accessor. The doc comment notes it, which is good, but a returned (int, ok) pair or a separate HasValueNode() predicate would keep the contract honest and prevent callers from accidentally indexing with -1. Sentinel values are a classic abstraction leak.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-based test under-specifies the contract for methods with multiple non-indexable returns",
+        "detail": "testZeroAny only checks `assert.Zero` on returns and skips functions. For methods returning multiple values, or returning interfaces whose dynamic zero is nontrivial, this may pass while still violating the intended contract. Naming the contract (e.g. a `ZeroSafe` doc comment per type) and listing the audited methods would make LSP violations visible at review time rather than via reflection.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "95-136",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR is doing exactly the right kind of work: it is making the zero value a first-class member of each IR type's ADT, and adding a substitution test to enforce that every accessor honors the same contract on a zero receiver. That is sound ADT discipline. The weaknesses are that the contract is implicit (only the test states it), the nil-guard idiom is non-uniform (`f == nil` vs `IsZero()`), and the same boilerplate is copy-pasted across every getter rather than being captured in a helper. ValueNodeIndex's -1 sentinel is a small abstraction leak that should either be documented as a precondition or restructured. Overall: ADT-SOUND in intent, SPEC-MISSING in execution."
+  }
+}

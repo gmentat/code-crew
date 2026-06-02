@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "CoverageProvider contract violation: onTestRunStart is optional in the interface but callers now depend on it being called",
+        "detail": "The interface declares `onTestRunStart?` as optional with `void | Promise<void>` and the core call sites use optional chaining (`this.coverageProvider?.onTestRunStart?.()`). However, the BaseCoverageProvider's `isIncluded` and `getUntestedFiles` now silently depend on `changedFiles` being populated by `onTestRunStart`. A custom CoverageProvider implementation that legitimately omits `onTestRunStart` (per the optional contract) but sets `coverage.changed` will get full coverage instead of filtered coverage \u2014 a LSP violation: subtypes that satisfy the documented supertype contract produce a weaker postcondition than the BaseCoverageProvider. The contract should either make `onTestRunStart` required when `changed` is set, or the filtering should be initialized lazily in `isIncluded` so the postcondition holds regardless of subtype.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "31-32",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LEAKY-ABSTRACTION: BaseCoverageProvider reaches into ./git and ctx.config.related to implement changed-file resolution",
+        "detail": "`onTestRunStart` dynamically imports `./git` and constructs a `VitestGit` directly inside the coverage provider, then conditionally falls back to `this.ctx.config.related` \u2014 coupling the coverage abstraction to two distinct internal modules (git resolution and the test-filter pipeline's `related` field). The abstract data type 'set of files to instrument' is being computed inline rather than acquired through a stated interface. A clean boundary would be a `ChangedFilesResolver` (or a method on Vitest like `resolveChangedFiles(ref)`) that returns `string[] | undefined` and is the single source of truth for both `config.changed` and `coverage.changed`. Today the two code paths use different mechanisms (related vs. VitestGit.findChangedFiles) for what callers will reasonably expect to be the same semantics.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-346",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: changedFiles path comparison semantics are unspecified and likely incorrect across providers",
+        "detail": "`isIncluded` now does `this.changedFiles.includes(filename)` where `filename = slash(cleanUrl(_filename))`, but `VitestGit.findChangedFiles` returns absolute paths (per its existing contract used by the related-tests path), while `_filename` in coverage may arrive as absolute or as URL-with-query. The invariant 'changedFiles and filename use the same normalization' is never stated and never enforced. If git returns absolute POSIX paths and `filename` is also absolute-slashed, equality may hold on macOS/Linux but fail on Windows where path casing/drive letters diverge. The contract for both `changedFiles` storage format and `isIncluded`'s input normalization needs to be written down and asserted.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-178, 332-346",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Invariant violation risk: globCache cleared in onTestRunStart but isIncluded may be called before onTestRunStart",
+        "detail": "`globCache.clear()` runs inside `onTestRunStart`, but `isIncluded` is a public method with no precondition stating it must not be called before `onTestRunStart`. If any code path (e.g., setup, watch-mode re-run, custom provider) calls `isIncluded` before `onTestRunStart` populates `changedFiles`, results will be cached without the `changed` filter and stay stale even after `changedFiles` is set. The invariant 'cache entries reflect current changedFiles state' is not preserved. Either cache keys must include a changedFiles generation counter, or the cache must be invalidated lazily at read time.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178, 343-345",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Frame condition unclear: getUntestedFiles silently changes behavior when coverage.changed is set without config.changed",
+        "detail": "Previously `getUntestedFiles` filtered by `ctx.config.related` only when `ctx.config.changed` was truthy. Now it filters by `this.changedFiles` whenever set, which includes the new `coverage.changed`-only path. This is the intended new behavior, but the contract for `getUntestedFiles` does not document that 'untested' is now relative to the changed set rather than the full include glob. A user setting only `coverage.changed` may be surprised that untested-file reporting also narrows. Worth a docstring stating the postcondition.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "197-203",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CustomProviderOptions Pick widening conflates contract and convenience",
+        "detail": "`CustomProviderOptions extends Pick<BaseCoverageOptions, FieldsWithDefaultValues | 'changed'>` ad-hoc adds 'changed' to the pick list. The named alias `FieldsWithDefaultValues` exists precisely so the contract surface for custom providers is one declared name; tacking literals onto it erodes that abstraction. Either add `'changed'` to `FieldsWithDefaultValues` (and explain why it's a default-valued field) or introduce a new alias. The current form invites repeated one-off additions that will accumulate into an undocumented contract.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "294-296",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform accepts boolean inputs that the type contract says it never receives",
+        "detail": "The `transform(value)` in cli-config checks `value === true` and `value === false`, but CLI argument transforms receive strings. Either the type/contract for transform is wider than documented (and this is defensive code worth a comment), or the boolean branches are dead. Pick one: write the precondition ('value is always a string') and remove the boolean branches, or document that transform may receive raw config values and explain why.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-320",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is well-motivated and the user-facing contract is clear, but the internal abstraction is leaky. The coverage provider now silently depends on `onTestRunStart` being called before `isIncluded`, while the CoverageProvider interface declares that hook optional \u2014 a Liskov substitution violation for custom providers. The implementation also reaches into both `VitestGit` and `ctx.config.related` to compute the changed set, with no stated specification for path normalization or for which mechanism wins under what conditions. Recommend: (1) extract a single ChangedFilesResolver behind a stated contract used by both `config.changed` and `coverage.changed`, (2) state and enforce the path-normalization invariant for `changedFiles`, (3) tighten the CoverageProvider contract so subtypes cannot accidentally lose the filter."
+  },
+  "raw": ""
+}

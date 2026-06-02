@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "stylelint__9044",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "HAS_NAMED regex over-matches numeric keywords like 'normal' that appear in other font shorthand positions",
+        "detail": "The font shorthand can contain values like 'normal' (font-style/variant), 'italic', etc., and HAS_NAMED is tested against the full decl.value when prop is 'font'. The regex uses fontWeightNonNumericKeywords which includes 'normal', a keyword that legitimately appears in non-weight positions of the font shorthand. For 'numeric' primary, a declaration like 'font: italic 700 16px/1 sans-serif' would correctly bypass, but 'font: normal 16px sans-serif' (no weight) would now be parsed unnecessarily \u2014 wait, it should be parsed in that case anyway to confirm no weight issues. The concern: the regex conflates 'value contains a named-weight-shaped token' with 'value has a named font-weight'. This complects lexical presence with semantic position. The previous code did the full parse; the new code short-circuits on a substring match that doesn't know about shorthand position semantics. Verify with tests covering the font shorthand where 'normal' or 'bold' appear ambiguously.",
+        "file": "lib/rules/font-weight-notation/index.mjs",
+        "lines": "42-48, 75-77",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HAS_PERCENTAGE regex is case-sensitive but selectors compare may need case-insensitive handling",
+        "detail": "HAS_KEYWORD uses the 'i' flag but HAS_PERCENTAGE does not. PERCENTAGE_SELECTORS presumably contains tokens like '0%' and '100%' which have no letters, so case doesn't matter \u2014 but this asymmetry should be a deliberate, commented choice, not an accident. The two regexes are doing parallel work and their flag asymmetry complects 'what we happen to be matching today' with 'what the filter contract is'. If PERCENTAGE_SELECTORS ever gains a token with letters (e.g., 'from'/'to' added in error), this silently changes behavior. Make the choice explicit.",
+        "file": "lib/rules/keyframe-selector-notation/index.mjs",
+        "lines": "35-37",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The 'fast-path filter' pattern is duplicated across five rules without a shared abstraction",
+        "detail": "Every one of these rules now has the same shape: build a regex that approximates 'might this node need work', then test it before doing the real parse. That's a real, repeated concept \u2014 a pre-filter on PostCSS walks. Right now it's complected with each rule's specific value/keyword sets, and the shape is reinvented inline each time. Not a blocker, but a candidate to pull out as a small helper: `walkDeclsIf(root, propRegex, valueRegex, fn)` or similar. That makes the value (which regex) separate from the identity (which walk) separate from the behavior (the rule). The hammock question: is this an emerging pattern across many *-notation rules? Issue #6869 suggests yes.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HAS_NUMERIC matches digit sequences anywhere in the value, including inside other tokens",
+        "detail": "`\\b(?:100|200|...|900)\\b` will match the '400' inside 'rgb(400, 0, 0)' or a custom-property name like '--weight-400'. For 'named-where-possible', this causes the fast path to fall through to the full parser, which is correctness-preserving but defeats the perf win for any font shorthand containing numbers elsewhere (e.g., 'font: 16px/1.5 Arial' \u2014 actually 16 isn't in the set, so fine; but 'font-size: 400%' on the same decl wouldn't apply since this only walks font/font-weight). Lower risk than it first appears, but worth a comment that this is a *conservative* over-approximation and that's intentional. Make the time semantics of the filter explicit: 'returns true if value *might* contain a numeric weight; false guarantees no numeric weight'.",
+        "file": "lib/rules/font-weight-notation/index.mjs",
+        "lines": "48",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "import-notation /url\\(/i check duplicates logic that the valueParser will discover anyway",
+        "detail": "The fast-path `if (primary === 'string' && !/url\\(/i.test(params)) return;` and `if (primary === 'url' && /url\\(/i.test(params)) return;` short-circuits before parsing. This is fine for performance, but the 'url' branch's early return means a valid violation (primary='url', params is already a url() \u2014 nothing to fix) skips reporting. Confirm that was the intent: when primary is 'url' and the param already contains url(, we want to do nothing, including not emit any warning. If a malformed `url(...)` could still warrant a message, this filter swallows it. The filter complects 'matches the desired form' with 'is well-formed' \u2014 those are different concerns.",
+        "file": "lib/rules/import-notation/index.mjs",
+        "lines": "50-53",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The change is a straightforward, well-shaped perf optimization: short-circuit each *-notation rule with a cheap regex before invoking the expensive parser. The pattern is sound \u2014 the values (the regex), the identity (the walked node), and the time (when to bail out) are mostly kept clean. My concerns are (1) the regexes are *approximations* of the semantic checks, and that approximation is not documented as a deliberate over- or under-approximation, which complects \"fast filter\" with \"correct filter\" in the reader's mind; (2) the same pre-filter pattern now appears in five files, hinting at an essential concept that wants a tiny shared helper; and (3) font-shorthand semantics make HAS_NAMED's correctness worth a closer look since 'normal'/'bold'-shaped tokens can appear in non-weight positions. None of this blocks merge \u2014 the existing tests should catch any false negatives. The hammock question: is there a single `walkIf(root, walker, paramExtractor, regex, fn)` abstraction lurking here that would make the next ten *-notation rules trivial?"
+  },
+  "raw": ""
+}

@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Returning nil from run() complects 'no result' with 'leader panicked' and loses the failure signal",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. The caller now has to distinguish nil-result from real result, which complects value with absence. The leader's panic is a fact about the world; it deserves a value (a *result with Fatal set), not nil. Callers downstream will deref this nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identity vs. value confusion in t.result: an atomic pointer is being used as both presence-signal and value-holder",
+        "detail": "t.result is an identity (atomic reference) that points at a value (*result) but is also being repurposed to mean 'pending', 'done', and 'leader-panicked-cleanup' by mutating to nil. Three time-distinct facts share one place. Encoding leader-state as a sentinel-nil is place-oriented thinking; an explicit state value (Pending/Done/Failed) would decompose this.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The comment 'Leader panicked but we did see a result' appears to be a typo and obscures the actual time semantics",
+        "detail": "The comment likely means 'did NOT see a result' but reads as the opposite. More importantly, the comment hides the real question: under what interleaving does CAS fail yet Load return nil? That sequence (leader CAS'd, ran, panicked, cleared to nil, all before our Load) is the essential complication and deserves to be named, not buried under a confusing one-liner.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Passing output through waitUntilDone snapshots a value but the function still reads t.result implicitly via caller.ctx",
+        "detail": "Good move to pass the snapshotted *result as a value rather than re-Loading inside waitUntilDone \u2014 that separates the value from the identity at exactly the right boundary. The remaining smell: waitUntilDone now takes caller, output, and async, which is three concerns. A small struct or splitting sync-drop from select would make the decomposition clearer.",
+        "file": "experimental/incremental/task.go",
+        "lines": "535-550",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle walks caller.path twice; the cycle itself is a value that can be built in one pass",
+        "detail": "The two-walk pattern is incidental: walk once collecting nodes into a slice, find the match index, slice and reverse. The function is treating the linked list as something to traverse rather than as a value to transform. Minor, but it's the kind of thing that compounds when extracted into a method that will be read many times.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The PR fixes a symptom of leader-panic-cleanup without questioning whether clearing t.result to nil is the right model at all",
+        "detail": "The hammock question: why does a panicking leader clear its result rather than store a failed-result value with Fatal set? Then waiters always see a value, never a nil identity, and the race window closes by construction. The current fix patches the Load site; the simpler design stores a failure value instead of nil. Worth surfacing before declaring this fix complete.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix addresses a real race but treats it as a missing nil-check rather than as a design smell. The root complecting is using t.result (an atomic identity) to encode three distinct facts \u2014 pending, done, and leader-panicked \u2014 by mutating it to nil. Storing a failure-value on panic instead of clearing to nil would close the race by construction and let waitUntilDone always operate on a value. The extracted checkCycle method is a clear improvement; passing *result as a snapshot into waitUntilDone is the right separation of identity from value. The remaining concerns are EASY-NOT-SIMPLE: a familiar nil-check pattern stands in for the SIMPLE alternative of never producing a nil result in the first place."
+  }
+}

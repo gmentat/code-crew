@@ -1,0 +1,84 @@
+{
+  "persona": "pike",
+  "task_id": "chia-blockchain__20317",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Two `signing_mode_enum` symbols in the same module \u2014 one free function, one property on two dataclasses \u2014 invite confusion and shadowing bugs",
+        "detail": "`wallet_request_types.py` defines a module-level function `signing_mode_enum(request)` and then two `@property signing_mode_enum` that call it. Same name, three definitions, different shapes. The data already encodes the answer (`is_hex`, `safe_mode`); pick one form \u2014 preferably a single free function `signing_mode_for(is_hex, safe_mode) -> SigningMode` \u2014 and let callers pass the two booleans. That removes the duplicated property declarations and the name collision in one move.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`signing_mode_enum` is non-exhaustive: the `is_hex=False, safe_mode=True` branch falls through to a bare `return SigningMode.CHIP_0002` with no comment",
+        "detail": "The function has three explicit `if/elif` arms covering three of four boolean combinations, then a trailing `return SigningMode.CHIP_0002` that silently handles the fourth. A two-bit input has four states \u2014 express all four explicitly (a small dict keyed by `(is_hex, safe_mode)` is the obvious data structure here) so the algorithm becomes self-evident and the default case isn't a footgun if a new mode is added.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-406",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`sign_message` still duplicates the four-way mode-to-bytes dispatch that exists in `verify_signature`",
+        "detail": "`signing.py` has the same shape of if/elif chain twice \u2014 once for signing, once for verification \u2014 each mapping a `SigningMode` to a `bytes` payload. That mapping is the actual data; lift it to one small function `message_bytes_for(mode, message) -> bytes` and call it from both sides. Right now a future signing mode means editing two parallel ladders, which is exactly the bug-prone shape this refactor was supposed to remove.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-40, 76-85",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`convert_secret_key_to_synthetic` as a method on `Wallet` is a function pretending to be a method",
+        "detail": "It takes a `PrivateKey`, ignores `self`, returns a `PrivateKey`. That's a pure function \u2014 `calculate_synthetic_secret_key(secret_key, DEFAULT_HIDDEN_PUZZLE_HASH)` \u2014 and callers go through `main_wallet.convert_secret_key_to_synthetic(...)` only to reach it. Either inline the one-liner at the two RPC call sites or move it next to `sign_message` in `chia/wallet/util/signing.py`. Adding methods to bundle stateless transforms with unrelated objects is the OO-hierarchy smell this PR is otherwise reducing.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`verify_signature` returns `VerifySignatureResponse` instead of a plain bool/result, coupling a pure crypto helper to an RPC response type",
+        "detail": "The util now imports `VerifySignatureResponse` from `wallet_request_types` so it can construct one. That's the library reaching up into the RPC shape \u2014 backwards layering. Have `verify_signature` return a small dataclass (or `tuple[bool, str | None]`) and let the RPC adapter build the response. Two lines at the call site, and the util becomes reusable from non-RPC code, which is the stated point of the extraction.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "13-65",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stale `:param request:` docstring carried over to a function that takes no `request`",
+        "detail": "`verify_signature` in `signing.py` keeps the original RPC docstring `:param request:` even though the parameter is gone \u2014 it now takes five keyword args. Tiny but it's a tell that the extraction was mechanical; either drop the docstring or rewrite it to describe the actual signature.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "19-25",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`SignMessageResponse` is a third pubkey/signature dataclass next to `SignMessageByAddressResponse` and `SignMessageByIDResponse`",
+        "detail": "The new dataclass holds exactly `pubkey: G1Element, signature: G2Element`. Both call sites immediately destructure it back into the existing response types. A `tuple[G1Element, G2Element]` (the prior return shape) was already sufficient and matched the old `sign_message` signatures across `Wallet`, `DIDWallet`, `NFTWallet`. Adding a class for a 2-tuple of unrelated bytes is the kind of structure that doesn't earn its keep.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "68-72",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The extraction is the right direction \u2014 pulling `sign_message`/`verify_signature` out of three wallet classes and the RPC into one module is exactly the \"small composable tools\" move, and the new tests for `sign_message_by_id`/`sign_message_by_address` close a real gap. But the data structures are fighting the algorithms in three places: `signing_mode_enum` is defined three times with the same name and a non-exhaustive table, the mode-to-bytes dispatch ladder is duplicated between `sign_message` and `verify_signature` when it's one small lookup, and `verify_signature` is coupled to the RPC response type it should be feeding. Decision: SMALL-AND-COMPOSABLE direction with TOO-MUCH-HIERARCHY residue \u2014 strip the `convert_secret_key_to_synthetic` method, collapse the three `signing_mode_enum` definitions into one keyed lookup, and have `verify_signature` return a plain result the RPC layer wraps. The data already encodes the answer; let it."
+  },
+  "raw": ""
+}

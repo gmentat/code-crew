@@ -1,0 +1,154 @@
+{
+  "task_id": "pip__13482",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "`req.prepared = True` and `req.needs_more_preparation = False` flags are no longer set after `prepare_linked_requirements_more` runs",
+        "detail": "The resolver previously set `req.prepared = True` and `req.needs_more_preparation = False` for every requirement after calling `prepare_linked_requirements_more`. That block was deleted wholesale from `resolver.py`, but the new call sites in `install.py`, `download.py`, and `wheel.py` only call `prepare_linked_requirements_more` \u2014 they never set these flags. Any downstream code that branches on `req.prepared` or `req.needs_more_preparation` (e.g., to decide whether to re-prepare, to skip work, or in dry-run paths that exit before the new call) will now see stale values and either re-do work or assume work is undone. This is a behavior regression that affects every install/wheel/download invocation.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185 (removed)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`pip install --dry-run` still calls `prepare_linked_requirements_more`, defeating the stated purpose of the PR",
+        "detail": "The PR title says 'Avoid pip install --dry-run downloading full wheels', and the news entry claims `pip install --dry-run` no longer downloads. But in `install.py` the new `preparer.prepare_linked_requirements_more(...)` call is placed unconditionally before the install path \u2014 there is no `if options.dry_run` guard skipping it. The dry-run early-return at line ~414 happens before this call only if it sits above the new block; the diff shows the new block added after the dry-run return-SUCCESS path, but the surrounding context must be verified. If the call runs in dry-run mode, the wheels are still downloaded and the headline claim is false. Needs explicit confirmation that the dry-run branch returns SUCCESS strictly before `prepare_linked_requirements_more` is invoked.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-422",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`download_info` is set to a direct-URL object even when the link points to an index, which may corrupt `--report` / `pip lock` output",
+        "detail": "`direct_url_from_link(req.link, req.source_dir)` is used to populate `req.download_info` during metadata-only fetching. `direct_url_from_link` is typically reserved for direct URL references (PEP 610 direct URL installs from a VCS, file://, or explicit URL). For requirements resolved from an index via PEP-658 metadata, the download_info should reflect the resolved artifact URL with hashes, not a 'direct_url' record. This may misrepresent the install source in `pip install --report` output and `pip lock` lockfiles \u2014 exactly the commands the PR claims to support.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist` caches the metadata-only distribution but `get_dist` will now return it forever, even after a full download replaces it",
+        "detail": "Once `set_dist(metadata_dist)` is called during the PEP-658 metadata fetch, `get_dist()` returns `self._distribution` and ignores `self.metadata_directory` and `self.local_file_path`. After `prepare_linked_requirements_more` runs and the full wheel is downloaded + unpacked, the cached metadata distribution is still returned. If the metadata-only distribution lacks file-level information (RECORD, INSTALLER, wheel contents) that the install step expects, the install will break or behave inconsistently. At minimum, `set_dist` should be invalidated or overwritten when full preparation completes.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-620",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Resolver no longer triggers `prepare_linked_requirements_more`, leaving the `check_if_exists` / installer code paths without prepared artifacts in code paths that don't go through install/download/wheel commands",
+        "detail": "The deleted block in `resolver.py` was the canonical place that completed preparation for `req_set.all_requirements`. Now every command that uses the resolver must remember to call `prepare_linked_requirements_more` itself. The PR updates `install.py`, `download.py`, and `wheel.py`, but other consumers of `resolver.resolve(...)` \u2014 e.g., `pip check`, `pip lock` (if it doesn't call this), internal API users, and tests \u2014 may silently regress to using metadata-only distributions where they previously had full ones. This is a load-bearing invariant being moved from one place to N places without a contract or assertion enforcing it.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`download_info is None` guard hides legitimate cases where download_info was already set by upstream code",
+        "detail": "The new code in `prepare.py` only sets `download_info` when it is `None`. This is defensive but obscures intent: if `_fetch_metadata_only` is meant to be the canonical place to populate `download_info` for PEP-658 paths, the conditional should be unnecessary; if it's not canonical, this code may race with another code path that sets it later with the correct hash/URL. Either way, the guard should be explained in a comment or removed.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "536-540",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Property/method asymmetry: `metadata` is a `@property`, `get_dist`/`set_dist` are methods",
+        "detail": "`InstallRequirement.metadata` is exposed as a property, but the related `get_dist`/`set_dist` are methods. Either both should be a property with a setter, or both methods. The new `set_dist`/`get_dist` pair perpetuates Java-style accessors in a Python file that otherwise uses properties. Minor, but worth fixing while the API is new and has no external users.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three near-identical call sites added in install/download/wheel commands invite drift",
+        "detail": "`preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` is now duplicated across `install.py`, `download.py`, and `wheel.py`. Extracting a small helper on the resolver or preparer (e.g., `finalize_preparation(req_set)`) would prevent future commands from forgetting the call and would be a natural place to re-add the `req.prepared = True` flag-setting that was deleted from the resolver.",
+        "file": "src/pip/_internal/commands/",
+        "lines": "install.py:414-422, download.py:130-138, wheel.py:145-153",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test changes accompany a behavior change that touches install, download, wheel, and resolver",
+        "detail": "The diff includes no tests. The PR changes core preparation ordering, adds a new caching mechanism on `InstallRequirement`, and changes when `download_info` is populated \u2014 all behaviors that should be pinned by tests (especially: dry-run does not hit the network for wheels; `--report` output matches old behavior for index installs; `pip lock` produces equivalent lockfiles; `pip wheel` and `pip download` still work end-to-end). Absence of tests for a behavior PR is a process smell.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "News entry mentions `pip lock` but PR description and diff focus on `--dry-run`; verify `pip lock` actually benefits",
+        "detail": "The news file says 'pip lock or pip install --dry-run'. `pip lock` is not modified in this diff. It presumably uses the resolver path and benefits indirectly, but the claim should be verified \u2014 and the news entry should ideally link the issue/PR for traceability.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Should the resolver retain responsibility for finalizing preparation, or should it move to commands?",
+        "positions": [
+          {
+            "persona": "Abstraction discipline",
+            "position": "The resolver should not be in the business of downloading. Moving `prepare_linked_requirements_more` out of `resolver.resolve` is correct: resolution and preparation are separate concerns, and the resolver was doing too much. Commands are the right layer because they know whether they need full artifacts or metadata."
+          },
+          {
+            "persona": "Invariant preservation",
+            "position": "The resolver was the single chokepoint that guaranteed `req.prepared = True` for all requirements post-resolve. Removing it without replacing the invariant with a contract (e.g., an assertion in installer code, or a `finalize()` method) silently shifts the burden to every caller and will cause regressions in code paths the PR author didn't touch."
+          }
+        ]
+      },
+      {
+        "topic": "Is caching the metadata-only distribution on `InstallRequirement` the right shape?",
+        "positions": [
+          {
+            "persona": "Data-structure soundness",
+            "position": "Adding `_distribution` plus `set_dist`/`get_dist` creates a third source of truth alongside `metadata_directory` and `local_file_path`. `get_dist` now has a priority order that silently shadows the others. This is fragile; the cached dist should be invalidated when the canonical source (downloaded file) becomes available."
+          },
+          {
+            "persona": "Pragmatic shippability",
+            "position": "The cache is a small, localized change that solves the immediate problem: PEP-658 metadata distributions were being thrown away and re-fetched. The shadowing is acceptable because metadata-only and full-download distributions both implement `BaseDistribution`; the worst case is that we use the metadata-only version when we could have used a richer one, which is fine for the dry-run/lock use cases this PR targets."
+          }
+        ]
+      },
+      {
+        "topic": "Severity of the deleted `req.prepared = True` block",
+        "positions": [
+          {
+            "persona": "Formal correctness",
+            "position": "This is P0. The flag is part of the InstallRequirement state machine. Removing the only place it transitions to True without replacing the transition is a correctness bug, full stop, regardless of whether current tests catch it."
+          },
+          {
+            "persona": "Empirical pragmatism",
+            "position": "It might be P1. If `req.prepared` is only read in code paths that also re-call `prepare_linked_requirements_more` (which is idempotent), the missing flag transition is dead state. Need to grep the codebase to know \u2014 but in a review, absent evidence, default to P0."
+          }
+        ]
+      }
+    ],
+    "summary": "This PR has the right intent \u2014 stop downloading full wheels for `pip install --dry-run` and `pip lock` when PEP-658 metadata is available \u2014 but the execution leaves load-bearing invariants unenforced. The deletion of the `req.prepared = True` / `needs_more_preparation = False` block in `resolver.py` without replacing it in the new call sites is a likely correctness regression (P0). The new `set_dist`/`get_dist` cache shadows other distribution sources and is not invalidated when a full download later supersedes the metadata-only dist (P1). The use of `direct_url_from_link` to populate `download_info` for index-resolved artifacts is semantically questionable and may corrupt `--report`/`pip lock` output (P1). The PR also ships with no tests for a behavior change that spans four commands and the resolver. Recommend: re-introduce the prepared-flag transition (ideally via a `finalize` helper on the preparer to avoid drift across `install.py`/`download.py`/`wheel.py`), audit `direct_url_from_link` usage for non-direct-URL links, decide on the cache invalidation contract for `_distribution`, and add tests pinning the dry-run no-download behavior end-to-end."
+  },
+  "raw": ""
+}

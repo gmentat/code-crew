@@ -1,0 +1,80 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "dijkstra+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring says max_steps but code reads max_step",
+        "detail": "The docstring documents max_steps, val_interval, and deepspeed_config, but __init__ reads trainer_args['max_step']. This is a guaranteed KeyError on first launch and an untyped-dict contract drift. Pick one name, fix the other, and validate required keys at __init__ time instead of crashing mid-setup.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "55-77",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery parses 'step_N' from directory names with no atomicity or validity guard",
+        "detail": "_load_checkpoint globs 'step_*' dirs and sorts by int(name.split('step_')[-1]). A stray directory or partially-written checkpoint from a crashed save crashes training or silently resumes from corrupt state. Write a 'latest' marker or index.json on successful save, and validate candidates before loading.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "95-128",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "run() loop has no progress invariant and val_interval is advertised but unused",
+        "detail": "The outer while loop in run() depends on train() advancing global_step by save_interval; an empty iterator spins forever re-saving the same checkpoint. val_interval is documented but never consulted \u2014 validation actually fires every save_interval. Boundary cases (global_step==max_step on resume, save_interval not dividing max_step) are also handled incorrectly.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "147-176",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has unclear ownership and unstated cross-rank precondition",
+        "detail": "The function mutates the caller's dict in place while callers also rebuild stats as float dicts \u2014 both pure and destructive at once. It also iterates `for key in stats` and issues a collective per key, which deadlocks if any rank has differing keys or order. Return a new dict, and state/enforce that stats keys are globally identical.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "118-160",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid_*_specifier mini-language is whitespace-split but contains colon-delimited paths",
+        "detail": "The format 'task:name:data_json[:factor]' is split on whitespace, so any space in a path produces bogus specs; train.py is inconsistent in handling it. Replace the stringly-typed mini-language with repeated --flag or comma-separated entries, parsed once at the CLI boundary into a small dataclass.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-87, 192-204",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Non-rank-0 ranks silenced to CRITICAL; get_global_grad_norm() may be None when logged",
+        "detail": "Setting log_level='CRITICAL' on non-zero ranks makes hangs and OOMs on rank N invisible at 2am \u2014 keep at least ERROR/WARNING or gate behind a flag. Separately, DeepSpeed's get_global_grad_norm() returns None on skipped/overflow steps; logging None to wandb errors or pollutes metrics \u2014 guard or default to nan.",
+        "file": "espnet2/speechlm/bin/train.py and trainer",
+        "lines": "143-156, 180-184",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on three P0 issues in the new DeepSpeed trainer: a docstring/code key mismatch (max_steps vs max_step) that will KeyError on first launch, a checkpoint discovery routine that parses directory names with no atomicity guard, and a run() loop whose progress invariant and val_interval semantics are broken. Two P1 issues \u2014 _all_reduce_stats having unclear ownership and unstated cross-rank preconditions, plus a whitespace-split specifier mini-language that breaks on path spaces \u2014 point at the same root cause: untyped dicts and stringly-typed APIs where small dataclasses belong. NEEDS-WORK before merge."
+  }
+}

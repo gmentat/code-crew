@@ -1,0 +1,94 @@
+{
+  "persona": "dijkstra",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "TTS default speaker mismatch between table/docs and code",
+        "detail": "The PR description (and docstrings) advertises 'aditya' as the default v3-beta speaker; the TTS_MODEL_CONFIGS entry for 'bulbul:v3-beta' sets default_speaker='shubh'. This is precisely the kind of unreasoned inconsistency the discipline forbids: the specification (docstring/table) contradicts the implementation. One of them is wrong; the author cannot have reasoned about both. Pick one truth and make the other follow from it.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent pace clamping violates the postcondition the caller asked for",
+        "detail": "When pace is outside the model's range, the code emits a warning and clamps. The caller's specification was 'synthesize at pace=X'; the implementation silently substitutes pace=clamp(X). This is defensive-as-substitute for correctness: the InputParams Field already validates pace against the v2 range (0.3-3.0), so a v3 user passing pace=0.4 will be silently coerced to 0.5 with no signal beyond a log line. Either reject (raise ValueError, as you do elsewhere for unsupported parameters) or accept; do not pretend to do both.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pydantic Field ranges contradict per-model ranges declared in the config table",
+        "detail": "InputParams.pace is declared ge=0.3, le=3.0 at the Pydantic level \u2014 a global precondition \u2014 while TTSModelConfig states pace_range=(0.5, 2.0) for v3-beta. A v3-beta user who attempts pace=2.5 passes Pydantic validation, then gets silently clamped at construction. Two different specifications for the same parameter, neither of which is wrong on its own, together produce an incoherent contract. Choose one layer to enforce the constraint and remove the other.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Ignored-parameter detection uses float equality against defaults",
+        "detail": "The 'parameter is ignored for {model}' warnings fire on `params.pitch != 0.0`, `params.loudness != 1.0`, `params.temperature != 0.6`. Float equality is unreliable in general, and more importantly the test conflates 'caller did not pass this' with 'caller passed exactly the default'. A v3 user who explicitly sets pitch=0.0 gets silence; a v2 user who explicitly sets temperature=0.6 gets silence. The precondition you want is 'user explicitly provided this parameter,' which Pydantic can express via model_fields_set / Optional sentinels. Test intent, not value.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STT model dispatch by string equality, TTS dispatch by substring \u2014 inconsistent discipline",
+        "detail": "STT replaces the prior `'saaras' in model.lower()` substring tests with strict MODEL_CONFIGS lookup, which is the right move. The TTS path keeps the same dict-lookup form for config but the docstring still references 'bulbul:v3' (without -beta) as if it were valid, and the prior code branched on `model in ('bulbul:v3-beta', 'bulbul:v3')`. After this PR only 'bulbul:v3-beta' is in TTS_MODEL_CONFIGS, so any caller passing 'bulbul:v3' now raises. That may be intentional, but it is a silent breaking change versus the previous behaviour and is not called out as such. State it explicitly or preserve the alias.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Removal of input_audio_codec from connect_kwargs is unexplained",
+        "detail": "The previous _connect built `input_audio_codec` into connect_kwargs; the new version drops it without comment. If the SDK requires it, this is a latent bug; if it does not, removing it is fine but warrants a one-line note. An unexplained deletion of a previously-required parameter is exactly the kind of change a reviewer cannot verify without going to the SDK source \u2014 i.e., it has not been reasoned about in the diff itself.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_speakers_for_model silently substitutes v2 speakers for unknown models",
+        "detail": "The helper returns v2 speakers for any unknown model name. This is defensive programming as substitute for a stated postcondition: the function neither raises nor returns an empty list nor documents 'falls back to v2'. A caller asking 'what speakers does bulbul:v9 support' is told 'the v2 ones,' which is a lie. Either raise on unknown model or document the fallback as the contract.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No validation that voice_id is a member of the model's speaker set",
+        "detail": "The PR introduces SarvamTTSSpeakerV2 / V3 enums and a per-model `speakers` tuple, then accepts voice_id: Optional[str] without checking it against config.speakers. The enums encode a precondition that is then not enforced. Either drop the enums (since they are documentation, not invariants) or use them: validate voice_id at construction and fail fast with the list of permitted speakers.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The refactor from substring sniffing (`'saaras' in model.lower()`) to an explicit MODEL_CONFIGS table is the right move and brings the STT path closer to something one can reason about: a model name maps to a frozen specification, and dispatch is by lookup, not pattern-matching against a string. That much is REASONED and worth keeping. The TTS half is less disciplined. The default v3 speaker disagrees with the documented default, Pydantic-level ranges contradict per-model ranges, pace is silently clamped while other unsupported parameters raise, and 'parameter was ignored' is detected by float-equality against defaults \u2014 DEFENSIVE-AS-SUBSTITUTE for the precondition you actually want, which is 'caller set this field.' Verdict: UNREASONED in the TTS validation layer; the contract has been written twice in incompatible terms. Fix the contradictions, choose one enforcement layer per parameter, and either validate voice_id against the enums you introduced or stop introducing them. Otherwise these inconsistencies will surface as quiet behavioural bugs the tests will not catch \u2014 because TESTED-NOT-PROVED."
+  },
+  "raw": ""
+}

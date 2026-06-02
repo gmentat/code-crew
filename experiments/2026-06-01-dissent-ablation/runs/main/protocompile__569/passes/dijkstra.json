@@ -1,0 +1,74 @@
+{
+  "persona": "dijkstra",
+  "task_id": "protocompile__569",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Spec, invariant, and termination function are nowhere stated; reviewer must reverse-engineer them from the diff.",
+        "detail": "Neither the patch nor the surrounding code carries a written precondition for Sort, a postcondition over the yielded sequence, or a loop invariant relating s.stack, s.state, and the unyielded portion of the DAG. The author appears to be reasoning by analogy to a previous version rather than from first principles; this is the very disposition that produces the bugs the patch is meant to fix. Until the invariant 'every key in s.state[walking] is currently on s.stack, in DFS-discovery order; every key in s.state[sorted] has been yielded exactly once; every reachable key not in s.state is unvisited' is written down, no one can tell whether the new code preserves it.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "62-108",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Collapse of the working/walking distinction is asserted, not proved.",
+        "detail": "The previous code used three live states (unsorted, working, walking, sorted). The patch deletes 'working' and reuses 'walking' for both 'children pushed, not yet yielded' and 'cycle target on stack'. The author owes a proof that no caller and no internal branch can distinguish the two former states; in particular, push() now treats any non-sorted on-stack node as a back-edge target, which is fine only if walking is set strictly before children are pushed and never unset until sorted. That ordering is now load-bearing and undocumented.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "27-30, 86, 116",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Termination of the outer loop is no longer obvious after the s.state assignment moved inside the yield-guard.",
+        "detail": "Previously s.state[k] = sorted ran unconditionally on the second visit, which makes the termination function 'number of keys whose state < sorted' strictly decreasing. The new code only marks sorted when state != sorted AND yield returns true. If a node is revisited with state == sorted (which the prior code tolerated by a redundant write), the loop still pops it and proceeds \u2014 fine \u2014 but the author must show that the second-visit branch is reached only when state is walking, not sorted, otherwise the change is a no-op dressed as a fix. State the termination function and discharge it.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "97-104",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "s.stack = s.stack[0:] in the old code was a no-op; replacing it with deferred clear+[:0] is correct, but the cleanup-by-defer pattern is a smuggled goto.",
+        "detail": "The defer now does four things \u2014 clear(state), clear(stack), reslice stack, unset iterating \u2014 and runs on every exit path, including the early 'return' inside yield. This is convenient but it hides control flow: a reader cannot see at the return site that the sorter is being reset. A named cleanup function, called explicitly at each exit, would make the postcondition 'on exit, s is in the same state as a freshly-constructed Sorter modulo capacity' visible. Defer here is the modern dress of goto cleanup:.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "72-77",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment introduced by the patch is itself ungrammatical and misspelled ('visisted', 'if its').",
+        "detail": "A patch whose stated purpose is to clarify state semantics replaces a precise comment with one that says 'this node has been visisted and if its the first or second visit'. The comment is the specification's last line of defense; if the author cannot type it carefully, the reviewer is entitled to doubt that the state machine was thought through carefully either. Rewrite the comment to name the three live states and the transition triggers.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "82-85",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test is shown to exhibit the bug being fixed or to lock the new invariant.",
+        "detail": "The PR description claims three fixes \u2014 state reuse, non-zero stack elements, cleanup on completion \u2014 but the diff carries no test. Testing shows the presence of bugs, not their absence; nevertheless, a regression that motivated the patch should be expressible as a failing test on the old code. Without it, the reviewer has only the author's narrative that the previous Sort left s.stack[0:] (which retained len, not zeroed cap) and that this caused observable misbehavior. State the failing input and add it to the suite, or state the proof that the failure could not occur in the previous code.",
+        "file": "internal/toposort/toposort.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The patch is plausibly correct and is moving the code in the right direction \u2014 fewer states, deterministic cleanup, narrower invariants \u2014 but it arrives UNREASONED. Nowhere are the precondition, postcondition, loop invariant, or termination function written down; the collapse of working into walking is asserted by deletion rather than proved; and the deferred four-step reset is a SMUGGLED-GOTO that hides the cleanup contract from the return sites. The new explanatory comment is itself misspelled, which is not a stylistic complaint but evidence that the state machine was edited faster than it was thought through. No test demonstrates the regression being fixed: TESTED-NOT-PROVED, and in fact not even tested. I would not REFUSE the patch \u2014 it is an improvement \u2014 but I would require the author to add the invariant as a comment block, prove the three-state-to-two-state reduction in one paragraph, and add at least one regression test before merge."
+  },
+  "raw": ""
+}

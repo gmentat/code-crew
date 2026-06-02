@@ -1,0 +1,69 @@
+{
+  "name": "generic_6",
+  "task_id": "protocompile__590",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panicked will crash callers expecting a non-nil *result",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. Upstream callers (e.g. in callee task wiring, .Fatal access, or done-channel reads) generally assume a non-nil *result. This trades one nil deref for another further up the stack rather than properly recovering or retrying.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-458",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race still exists: output captured before leader panics can read closed/cleared done channel state",
+        "detail": "The fix loads t.result once after CAS failure, but the leader can still nil out t.result after this load. Worse, the captured output's done channel may never be closed if the leader panics during cleanup before close(done). Callers will block on caller.ctx.Done() only, masking the panic rather than propagating it.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460, 549",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pending-branch path uses output from t.result.Load() without nil check before passing to waitUntilDone",
+        "detail": "At line 442, output := t.result.Load() may be nil if the leader cleared it between the outer check and this load. The early-return when closed(output.done) and the new checkCycle call both dereference output before waitUntilDone is invoked with the same potentially-stale pointer. Same defensive nil check used at 456 should apply here.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-448",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Typo in comment: 'but we did see a result' should be 'didn't'",
+        "detail": "The comment at line 457 reads 'Leader panicked but we did see a result' which contradicts the nil check it explains. Should be 'didn't see a result'. This is a small but confusing inversion in code commenting a tricky concurrency path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test added for the documented race condition",
+        "detail": "The PR description describes a concrete reproducible scenario (leader panics, waiters nil-deref). A targeted test that panics in a leader query and verifies waiters either receive an error or do not panic would lock in the fix. Without it, this race can silently regress.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle does two full path walks where one walk with index tracking would suffice",
+        "detail": "The extracted method walks caller.path twice when a cycle is found. For deep dependency paths this doubles work on the cycle-detection error path. A single walk recording entries and truncating at the match would be cleaner. Behavior-preserving from prior code, so flagging as nit only.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-431",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The PR addresses a real race condition but the fix is incomplete and introduces new concerns. Returning nil from run() when the leader panics likely shifts the nil deref further up the call stack rather than eliminating it. The captured output pointer can still observe a stale/unclosed done channel if the leader panics mid-cleanup. A comment typo inverts the meaning at the critical nil-check site, and no regression test exercises the documented race. The checkCycle extraction is a clean refactor but unrelated to the bug fix."
+  }
+}

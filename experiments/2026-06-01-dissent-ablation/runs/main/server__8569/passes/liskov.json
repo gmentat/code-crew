@@ -1,0 +1,134 @@
+{
+  "persona": "liskov",
+  "task_id": "server__8569",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig carries mutable registration state shared across concurrent requests, violating the implicit invariant of the LoRA-config ADT",
+        "detail": "TritonLoraConfig.is_registered is mutated inside _create_trtllm_generate_request (lora_config.is_registered = True) after the first request inflates the weights into inputs. The same TritonLoraConfig object is shared (returned by _get_lora_config) across all concurrent requests for that LoRA. Two simultaneous first-time requests can both observe is_registered == False, both load and send weights; conversely, a request can flip the flag to True before a prior in-flight request actually reaches the backend, causing later requests to omit lora_weights/lora_config when the backend has not yet cached them. The ADT exposes no synchronization contract, no idempotency guarantee, and no eviction protocol matching the backend's actual LoRA cache state. This is a classic leaky abstraction with a broken invariant under concurrency.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-66, 230-242",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "_parse_lora_configs return type annotation contradicts its actual return value (SPEC-MISSING / wrong contract)",
+        "detail": "The function signature declares `-> None | List[tuple[str, str]]` but the function returns `List[TritonLoraConfig]` or `None`. The stated postcondition is wrong, which is exactly the failure mode contract discipline is meant to prevent: a caller reading the type cannot trust it, and tooling/type checkers will be misled. Either the annotation must be corrected to `Optional[List[TritonLoraConfig]]`, or the return type changed to match the annotation. The function is also doing two unrelated jobs (vLLM discovery vs TRT-LLM registration with task-id assignment), which is a wrong-boundary smell worth addressing.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "_get_lora_config postcondition violates its declared return type (LSP-violation at the function-contract level)",
+        "detail": "The signature is `-> TritonLoraConfig` but the function returns `None` when `lora_name is None or model_metadata.lora_configs is None`. Callers downstream (the request builders) check `if lora_config is not None`, so the de facto contract is Optional[TritonLoraConfig], but the declared contract is non-Optional. Worse, `self.model_metadata.get(model_name)` can return None, after which `model_metadata.lora_configs` will AttributeError rather than raising a ClientError. The contract must be stated and enforced: either non-None with a precondition that the model exists, or Optional with explicit None-handling. A subtype/implementation of TritonEngine cannot be reasoned about until this is fixed.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1088-1098",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs conflates discovery with side-effectful registration (wrong module boundary)",
+        "detail": "The renamed function now performs three distinct responsibilities: (1) discover LoRA names from multi_lora.json, (2) validate that lora_weights/lora_config files exist on disk, (3) allocate monotonically increasing task_ids for the TRT-LLM backend. Task-id allocation is registration state that belongs to a LoRA-registry abstraction with a defined invariant (e.g. task_id uniqueness across model versions, restart semantics, eviction). Today, every call to _get_model_metadata would re-allocate task_ids starting from 1, and there is no documented contract for how the backend's LoRA cache and the frontend's id allocation stay in sync. The right ADT is a LoraRegistry with explicit register/lookup/evict operations; the parser should only parse.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Variable shadowing of lora_config_path silently breaks repos with multiple LoRAs",
+        "detail": "In the TRT-LLM branch inside the per-entry loop, `lora_config_path = os.path.join(lora_path, \"model.lora_config.npy\")` rebinds the outer-scope `lora_config_path` that pointed at `multi_lora.json`. This is fine for the first iteration but means the loop's invariant `lora_config_path refers to multi_lora.json` is destroyed mid-iteration. If the loop body is ever extended to reference the multi-LoRA manifest after the first entry, behavior will be silently wrong. The abstraction leaks because two distinct concepts (manifest path vs per-adapter config path) share one name. Rename to `lora_adapter_config_path` (or scope it tighter).",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "643, 686-689",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent error swallowing returns None on malformed config, masking ServerError contract",
+        "detail": "The outer try/except for the TRT-LLM path catches `Exception` and returns None after printing a traceback. This means: (a) misconfigured multi_lora.json yields a silently LoRA-less model rather than a startup-time failure; (b) the function's postcondition is now ambiguous \u2014 None means 'no LoRA' or 'configuration is broken,' and callers cannot distinguish. The previous code had the same vLLM-side behavior, but extending it to TRT-LLM (where missing weights is a deployment error) makes the ambiguity load-bearing. Either the postcondition should be 'returns None iff LoRA is intentionally disabled' and raise on malformed config, or there must be a separate ConfigurationError type. Currently the contract is unstated.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "709-714",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stray debug `print(f\"backend: {backend}\")` in hot path",
+        "detail": "Inside the per-LoRA loop of _parse_lora_configs there is a `print(f\"backend: {backend}\")`. This is debug noise that will fire once per LoRA on every model metadata refresh. Server-side stdout chatter is a leak of internal implementation through what should be a quiet, idempotent discovery API. Remove it or convert to a structured logger at debug level.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "682",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "traceback.print to stdout added across three FastAPI routers leaks implementation details and duplicates logging",
+        "detail": "Adding `print(traceback.format_exc())` in chat.py, completions.py, and embeddings.py exception handlers prints stack traces to stdout in three places, in addition to the HTTPException response. This is logging-by-print, not logging, and it bypasses the application's logging configuration. The handler's contract should be 'translate internal errors into HTTP errors and log via the configured logger.' Use the framework's logger (or `logger.exception`) and remove the prints \u2014 otherwise every deployment gets noisy, unstructured stderr and an inconsistent log story.",
+        "file": "python/openai/openai_frontend/frontend/fastapi/routers/chat.py",
+        "lines": "27, 60, 63 (and same pattern in completions.py and embeddings.py)",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_create_trtllm_generate_request does blocking np.load on the request hot path",
+        "detail": "On first use of a LoRA, the request builder synchronously calls `np.load(...)` twice from disk. This belongs in the discovery/registration phase, not the per-request path: it adds unbounded I/O latency to the first request for each LoRA (variable by adapter size) and couples request construction to filesystem availability. The ADT for 'create request' should not also be 'load weights from disk and register with backend.' Preload tensors at parse time and store them on TritonLoraConfig, or introduce an explicit LoraRegistry.ensure_registered(task_id) operation with a documented contract.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-242",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "TritonLoraConfig fields are not partitioned by backend, conflating two ADTs into one",
+        "detail": "The dataclass holds `name` (common), and `task_id`/`path`/`is_registered` (TRT-LLM-only) with optional defaults. This is a small union type pretending to be a single type. A cleaner shape would be either an explicit `VllmLoraConfig` vs `TrtLlmLoraConfig` with a shared protocol/base, or a tagged variant. The current design forces every consumer to know which fields are valid for which backend \u2014 the abstraction's promise to its callers is therefore weaker than it appears. Acceptable for now if documented, but worth revisiting before the third backend lands.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-66",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "lora_task_id starts at 1 with no documented invariant",
+        "detail": "Task ids start at 1 and increment per-LoRA across all repo paths. There is no stated contract about: (a) whether 0 is reserved (TRT-LLM convention), (b) what happens on metadata refresh (do ids stay stable?), (c) collision behavior if two model repos both define LoRAs. State the invariant or derive ids deterministically from (model, lora_name).",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "629, 705",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test `test_parse_lora_configs` only checks the vLLM path's error semantics, not the TRT-LLM postconditions",
+        "detail": "The test now invokes `parse_lora_configs(..., \"tensorrtllm\")` after the vLLM call, but the assertions still target only the ValueError path. The new TRT-LLM-specific contract (ServerError when weights/config files are missing, None when multi_lora.json is absent, registered task_ids monotonically increasing) is unverified. Add unit tests that assert the postconditions of the TRT-LLM branch directly \u2014 otherwise the contract is unspecified in code and unspecified in tests.",
+        "file": "python/openai/tests/test_lora.py",
+        "lines": "55-75",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR extends LoRA support from vLLM to TRT-LLM, but the underlying abstract data type for a LoRA \u2014 what it promises callers, what state it owns, what invariants hold under concurrency \u2014 has not been stated and is now load-bearing. The most serious finding is the mutable `is_registered` flag on a shared TritonLoraConfig: it has no synchronization contract and will race under concurrent first-use requests. Two function signatures (`_parse_lora_configs`, `_get_lora_config`) lie about their return types, which is exactly the SPEC-MISSING failure ADT discipline exists to prevent. Secondary issues are wrong-boundary work (discovery, validation, and task-id registration fused into one function), silent error swallowing, debug prints, and disk I/O on the request hot path. Recommend extracting an explicit LoraRegistry ADT with stated pre/postconditions and invariants, fixing the type annotations, and moving registration off the request path before merge."
+  },
+  "raw": ""
+}

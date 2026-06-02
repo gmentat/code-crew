@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver.resolve() postcondition silently weakened: returned requirements may no longer be `prepared`.",
+        "detail": "Before this PR, resolve() guaranteed every requirement in the returned set had `prepared = True` and `needs_more_preparation = False`. After the PR, that postcondition is removed and the obligation is shifted to callers. This is a classic LSP-style weakening of a postcondition without updating the interface contract. Any caller relying on the old guarantee (third-party, plugin, or future command) is now silently broken.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Implicit precondition on commands: every consumer of `resolver.resolve()` must now call `prepare_linked_requirements_more` itself.",
+        "detail": "The contract for using a resolved requirement set has changed from `use it` to `you must call prepare_linked_requirements_more before use, except when you don't want to`. install/download/wheel were patched, but this precondition is undocumented and unenforced. A new command, or an existing code path (e.g., check, freeze derivatives, third-party resolvers), will forget and get a half-prepared dist.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-423",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`InstallRequirement.get_dist()` contract now ambiguous: caching layer may return stale metadata dist after full preparation.",
+        "detail": "`set_dist()` stores a metadata-only `BaseDistribution`; `get_dist()` returns `_distribution` in preference to `metadata_directory` and `local_file_path`. After `prepare_linked_requirements_more` fully downloads the wheel, the cached metadata-only dist is still returned. The invariant `get_dist() reflects the most-prepared state` is violated. Either invalidate `_distribution` on full prep, or document that the cache wins.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-619",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist`/`get_dist` introduced without specification of preconditions, postconditions, or invariants.",
+        "detail": "`set_dist` accepts any `BaseDistribution` with no docstring, no constraints on when it is valid to call, and no statement of what callers may assume afterward. For a mutable cache on a long-lived object touched by multiple subsystems (resolver, preparer, installer), the spec is the contract. SPEC-MISSING. At minimum: document that it stores a metadata-only view, may be superseded, and is not thread-safe.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`download_info` field now has two producers with no documented precedence.",
+        "detail": "Previously `download_info` was populated by the preparer on full preparation. Now it is also populated in `_fetch_metadata_only` via `direct_url_from_link(req.link, req.source_dir)` when `download_info is None`. The invariant about which fields are guaranteed populated, and at what point in the lifecycle, is not stated. `pip lock` and `--report` consumers now depend on metadata-path-derived values that may differ in subtle ways (hashes, archive_info) from the full-download path.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module boundary between resolver and preparer is being redrawn without an explicit statement of the new responsibility split.",
+        "detail": "The old boundary: resolver owns `resolve -> fully-prepared set`. The new boundary: resolver owns `resolve -> partially-prepared set`; each command owns the final preparation step. This is a defensible redrawing, but it is done by deletion of code, not by stating the new contract on `Resolver.resolve` or on `RequirementSet`. Add a docstring on `resolve()` describing exactly what state the returned requirements are in.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The performance goal is sound and the mechanism (defer `prepare_linked_requirements_more` out of the resolver, cache the metadata-only dist on the requirement) is reasonable. My objection is at the contract level: `Resolver.resolve()`'s postcondition has been silently weakened, a new precondition has been pushed onto every caller without documentation, and `InstallRequirement` has gained a mutable distribution cache with no stated invariants \u2014 including the case where a metadata-only dist remains cached after a full download. SPEC-MISSING on `set_dist`/`get_dist` and on the redrawn resolver/preparer boundary. Recommend: write the contracts down, invalidate `_distribution` on full preparation (or document that it wins), and add a docstring to `resolve()` describing the partially-prepared state of returned requirements."
+  }
+}

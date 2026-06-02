@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "vitest__9521",
+  "review": {
+    "summary": "The PR adds a `coverage.changed` option that lets users compute coverage only on changed files while still running all tests. The implementation is reasonable but has some concerns: comparing `cleanUrl(filename)` (no query string) against `changedFiles` from git (which never contain query strings) is fine for now, but the changed list comparison uses raw git paths rather than slashed/resolved paths, which can cause mismatches on Windows. The `findChangedFiles` result is assigned without resolving to absolute paths, and the `isIncluded` cache is cleared in `onTestRunStart` but populated entries from earlier calls (e.g., during config resolve or watch mode) may have already been written without the changedFiles filter. There's also a CLI transform bug where boolean true/false coming from CLI are typed as strings.",
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles paths from VitestGit may not match the absolute/slashed filenames used by isIncluded",
+        "detail": "In onTestRunStart, this.changedFiles is set directly from VitestGit.findChangedFiles results. In isIncluded, the filename is slash(cleanUrl(_filename)) which is typically absolute. If VitestGit returns absolute paths, fine; but the includes() check is path-sensitive (case, slashes, trailing). On Windows or with symlinked roots, this will silently drop all coverage. Worth normalizing both sides explicitly.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "165-175, 332-345",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache is populated before onTestRunStart runs in some code paths",
+        "detail": "isIncluded writes to globCache regardless of whether changedFiles has been initialized. If isIncluded is called during config resolution or plugin setup before onTestRunStart fires, cached `true` results will not be re-filtered. The clear() in onTestRunStart helps, but only if it runs before any coverage computation. Worth auditing the call order, especially for watch mode reruns.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175, 342-344",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform returns boolean true/false for string inputs but argument type is <commit/branch>",
+        "detail": "The CLI declares argument '<commit/branch>' (required value), yet the transform accepts 'true'/'yes'/'false'/'no' and converts to boolean. Users running `--coverage.changed` with no value will hit the required-argument error rather than getting the documented boolean default. The documented behavior (`--coverage.changed` as a flag) is not actually supported by this config.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart re-runs git diff on every test run including watch mode reruns",
+        "detail": "Every call to runFiles/start triggers a fresh VitestGit.findChangedFiles, spawning git processes. In watch mode this adds noticeable latency per rerun. Consider caching the result for the lifetime of the session, or at least documenting the cost. Also no error handling: if git fails or repo is missing, changedFiles becomes undefined silently and all files are included \u2014 inconsistent with the user's intent.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test file mode changed to 0755 (executable) without justification",
+        "detail": "test/coverage-test/test/changed.test.ts has its mode bit flipped to executable in the diff (`old mode 100644 / new mode 100755`). TypeScript test files should not be executable; this is almost certainly an accidental chmod and should be reverted before merge.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Docs say `Default: false (inherits from test.changed)` but type is `boolean | string`",
+        "detail": "The docs state default is `false` and inherits from `test.changed`. In code, the default is `undefined` and inheritance only happens when undefined. A user explicitly setting `false` will not inherit, which is correct but inconsistent with the docs phrasing. Tighten the wording to avoid confusion about how the inheritance gate works.",
+        "file": "docs/config/coverage.md",
+        "lines": "408-416",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "dijkstra",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver leaves req.prepared and req.needs_more_preparation in stale states",
+        "detail": "The resolver previously, after calling prepare_linked_requirements_more, set req.prepared = True and req.needs_more_preparation = False for every requirement. The patch deletes that bookkeeping but does not relocate it. The invariant 'after the resolver returns, every requirement satisfies needs_more_preparation == False unless it genuinely needs more preparation' is silently abandoned. The new call sites (install/wheel/download) invoke prepare_linked_requirements_more but do not restore the prepared/needs_more_preparation flags. Any downstream code that consults these flags now reads stale values. UNREASONED: the author cannot state the post-resolve invariant on these two fields, because the patch does not preserve one.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185 (deletion)",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`pip install` (non dry-run) path no longer prepares before the pip-self-update check",
+        "detail": "In install.py the new prepare_linked_requirements_more call is placed AFTER the dry-run early-return block and AFTER the pip-self-update lookup, but the original resolver-side call happened BEFORE resolver.resolve returned. The intervening code between resolve() and the new prepare call (the dry-run report writer, the pip self-update guard, etc.) now runs against requirements whose preparation state is half-done: get_dist() will return the metadata-only distribution rather than the fully-prepared one. The author owes a precondition for every consumer between resolve() and the new prepare_linked_requirements_more call stating which is acceptable. None is given. SMUGGLED-GOTO: the control-flow change is concealed as a one-line move but reorders an entire phase boundary.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-426",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist introduces an unstated precedence rule with three competing sources of truth",
+        "detail": "get_dist now consults, in order: self._distribution, self.metadata_directory, self.local_file_path. There is no documented invariant about which of these is permitted to be set simultaneously, nor what it means when more than one is. The previous code had two sources; the patch silently promotes _distribution to highest priority without stating why metadata_directory, once populated by a later full preparation step, must not override the cached metadata-only dist. This is exactly the class of mutable-aliased-state bug that structured reasoning is meant to prevent. UNREASONED.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is populated from direct_url_from_link with req.source_dir which may be None in dry-run",
+        "detail": "Inside prepare.py the patch calls direct_url_from_link(req.link, req.source_dir) inside the metadata-only branch. In a dry-run, req.source_dir is frequently not yet established (no unpack has occurred). direct_url_from_link's contract with respect to a None or unset source_dir is not stated in the patch, and the author offers no precondition that source_dir is meaningful at this point. If source_dir is None or a stale value from a previous run, the resulting DirectUrl is wrong or raises. TESTED-NOT-PROVED at best.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test additions accompany a behavioural change to dry-run and lock semantics",
+        "detail": "The PR description claims pip lock and pip install --dry-run no longer download full wheels when PEP-658 metadata is available. This is a verifiable postcondition: 'for every requirement r resolved via PEP-658 metadata under --dry-run, no wheel file is fetched.' No test enforcing that postcondition appears in the diff. The claim is asserted, not proved. TESTED-NOT-PROVED \u2014 and in this case not even tested. A regression next month will silently restore the old behaviour and no one will notice.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist has no precondition guarding double-assignment",
+        "detail": "set_dist unconditionally overwrites self._distribution. If two code paths set it with different BaseDistribution objects for the same InstallRequirement, the second silently wins. A one-line assert that self._distribution is None or equals distribution would document the intended invariant and catch the bug class before it ships.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three command files duplicate the same prepare_linked_requirements_more incantation",
+        "detail": "download.py, install.py, wheel.py each independently call preparer.prepare_linked_requirements_more(requirement_set.requirements.values()) at a slightly different point in their respective control flow. The shared invariant that was once centralized in the resolver is now scattered across three call sites with no shared helper, no shared comment, and no shared test. This is precisely the accretion of duplicated control flow that structured programming exists to forbid.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The patch moves a preparation step out of the resolver and into three command sites, but abandons the post-resolve invariant on `prepared` and `needs_more_preparation` without restoring it anywhere. It introduces a third source of truth for `get_dist` (`_distribution`) with no documented precedence rule, and populates `download_info` from `req.source_dir` at a point in the lifecycle where that field's value is unspecified. The claimed postcondition \u2014 no wheel download under `--dry-run` when PEP-658 metadata exists \u2014 is asserted without an accompanying test. The author cannot state the invariants this change must preserve; therefore the change is UNREASONED in the strict sense, regardless of whether it happens to work. REFUSED in current form; the fix is not large, but it must begin with a written specification of the resolver's post-condition and a single owner for the preparation-phase transition."
+  },
+  "raw": ""
+}

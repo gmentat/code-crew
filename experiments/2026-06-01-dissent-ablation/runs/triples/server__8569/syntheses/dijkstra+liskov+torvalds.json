@@ -1,0 +1,77 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig.is_registered is shared mutable state mutated without synchronization and before backend acknowledgment.",
+        "detail": "_get_lora_config returns the same TritonLoraConfig instance from model_metadata; _create_trtllm_generate_request flips is_registered=True without a lock and before the backend confirms registration. Concurrent first-use requests race; a request that loses the race or hits a failure leaves the flag lying, so later calls omit weights for a task_id the backend never cached. Needs a per-LoRA lock and a real registration signal.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-243",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig collapses two distinct ADTs (vLLM vs TRT-LLM) into one all-Optional dataclass, violating LSP.",
+        "detail": "vLLM needs only `name`; TRT-LLM call sites index `task_id` and `path` without precondition checks. One shared dataclass with Optional fields hides the contract and lets the TRT-LLM path read fields the vLLM subtype never sets. Split into a sealed hierarchy or tagged union with non-Optional required fields per backend.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "lora_task_id allocation is non-deterministic and not unique across models or restarts.",
+        "detail": "task_id starts at 1 and increments per entry inside _parse_lora_configs, with no invariant tying task_id to LoRA identity across restarts or across different base models. TRT-LLM caches by task_id, so collisions can serve the wrong adapter. Assign deterministically per (model, name) \u2014 e.g., hash \u2014 and document the uniqueness specification.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "625-712",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs return type annotation lies \u2014 declared List[tuple[str,str]] but returns List[TritonLoraConfig].",
+        "detail": "The signature is part of the contract and misleads type checkers and maintainers. Update to Optional[List[TritonLoraConfig]] or, better, return a typed LoraCatalog that also carries backend kind so downstream code stops re-deriving it from a stringly-typed flag.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare `except Exception` returns None, silently conflating parse errors with 'no LoRAs configured'.",
+        "detail": "A malformed multi_lora.json or unrelated bug becomes invisible: the function prints a traceback and returns None, so callers cannot distinguish absence from failure. Either fail loud at startup or log a structured warning with a defined error contract \u2014 do not both print and swallow.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "707-712",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug residue: stray `print(f\"backend: {backend}\")` and `print(traceback.format_exc())` in parser and routers.",
+        "detail": "Unconditional print statements bypass the configured logger, cannot be filtered, and will spam stdout in production. They also bundle unrelated debug churn into a feature patch. Replace with logger calls at appropriate levels and remove the per-iteration backend print before merge.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "681, 688, 712",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on two correctness blockers: TritonLoraConfig.is_registered is shared mutable state mutated without a lock and before backend acknowledgment, and lora_task_id allocation is non-deterministic and not guaranteed unique across models or restarts \u2014 both of which can serve the wrong adapter under load. The dataclass also collapses two distinct backend ADTs into one all-Optional shape, breaking the contract that TRT-LLM call sites rely on. Secondary issues: a wrong return type annotation, a bare `except Exception` that silently disables LoRA listing, and unconditional debug prints in production paths. NEEDS-WORK before merge."
+  }
+}

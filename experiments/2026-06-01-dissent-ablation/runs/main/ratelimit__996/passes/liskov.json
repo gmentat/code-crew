@@ -1,0 +1,94 @@
+{
+  "persona": "liskov",
+  "task_id": "ratelimit__996",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit contract violated: rateLimit pointer is reassigned, mutating shared cached state",
+        "detail": "The new code calls `rateLimit = NewRateLimit(...)` and then mutates `rateLimit.Stats` and `rateLimit.FullKey`. But `rateLimit` came from `nextDescriptor.limit`, which is the *shared* config-tree node returned to every caller. The frame condition of GetLimit was: 'looks up and returns a RateLimit; does not mutate the config tree.' This PR breaks that postcondition \u2014 on every call, a fresh RateLimit is allocated and its Stats is replaced. Worse, because the assignment `rateLimit = NewRateLimit(...)` overwrites the local pointer but the *original* `nextDescriptor.limit` is also being mutated earlier in the function (the existing `rateLimit.Stats = this.statsManager.NewStats(detailedKey)` line was already doing this for detailed_metric \u2014 a pre-existing smell \u2014 and this PR doubles down on it). Under concurrent GetLimit calls with different runtime values, two goroutines race on Stats/FullKey of the same shared *RateLimit. The ADT for `rateLimit` is no longer immutable-after-load; the contract needs to be restated and the implementation made safe, or the per-request key must be returned alongside the limit rather than written into it.",
+        "file": "src/config/config_impl.go",
+        "lines": "414-429",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Specification missing: `value_to_metric` semantics are not stated as a contract",
+        "detail": "The README prose says 'includes the descriptor's runtime value in the metric key, even when the descriptor value is not explicitly defined in the configuration' \u2014 but the code has three branches (matchedViaWildcard, matchedUsingValue, default-key) with subtly different behaviors, and one of them (matchedUsingValue == true, i.e., explicit key+value match) appends the value *regardless* of the `value_to_metric` flag. That contradicts the README note that 'value_to_metric only affects descriptors where the value is not explicitly defined in the configuration' \u2014 because for matchedUsingValue, the value is included whether the flag is set or not, which is the *pre-existing* behavior, but the PR description claims this branch is governed by the new flag. The precondition/postcondition/invariant of GetLimit with respect to the metric key must be written down explicitly per branch (default-key match, explicit key+value match, wildcard match) crossed with (flag set, flag unset, detailed_metric set). Without that table, future maintainers cannot tell whether a behavior change is a bug or intentional.",
+        "file": "src/config/config_impl.go",
+        "lines": "333-385",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: per-request metric-key construction lives inside config tree traversal",
+        "detail": "`rateLimitConfigImpl` is an abstract data type whose responsibility is 'resolve a descriptor tuple to a rate-limit configuration node.' The metric key for an individual *call* is a per-request concern. By writing the per-request enhanced key directly into `rateLimit.FullKey` and `rateLimit.Stats` (both fields of the cached config node), the abstraction now leaks per-call state into the config tree. The right boundary is: GetLimit returns (RateLimit, statsKey) or wraps the cached RateLimit in a per-call value object. The current code conflates two responsibilities that should live on opposite sides of the module boundary, and that conflation is what creates the mutation/race hazard above.",
+        "file": "src/config/config_impl.go",
+        "lines": "318-429",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Subtle LSP-like violation: detailed_metric and value_to_metric do not compose as documented",
+        "detail": "The README states 'detailed_metric takes precedence and value_to_metric is ignored for that descriptor.' But the precedence check uses `rateLimit.DetailedMetric`, which is only true if the *leaf* descriptor has detailed_metric. If an *intermediate* descriptor had `detailed_metric: true` (which the existing system allows at any level for the leaf to inherit metric semantics \u2014 at minimum it is reasonable to expect), the interaction is undefined. The contract 'detailed_metric wins over value_to_metric' needs to state which descriptor's flag is checked and at what scope. As written, a subtype configuration with detailed_metric on an intermediate but value_to_metric on the leaf will exhibit a behavior the README does not describe.",
+        "file": "src/config/config_impl.go",
+        "lines": "414-429",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel metric-key builders duplicate traversal logic and will drift",
+        "detail": "`detailedMetricFullKey` and `valueToMetricFullKey` are both built up inside the same loop, with overlapping but not identical rules. Any future change to descriptor matching will need to be replicated in both builders \u2014 and the tests cover the success paths but not the cross-feature interaction matrix. The right ADT here is a single 'metric-key builder' parameterized by policy (off / detailed / value-to-metric / both), with one place to encode the per-level rule. As-is, this is inheritance-for-reuse-style copy: two near-identical traversal codepaths that maintainers must keep in sync by hand.",
+        "file": "src/config/config_impl.go",
+        "lines": "313-385",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literals make the new field invisible to readers",
+        "detail": "`&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric}` and the matching domain construction use positional initialization. Adding a fourth field this way means every future field addition silently changes the meaning of every construction site, and readers must count positions to know which value is `valueToMetric`. Use named fields. Small change, but it is exactly the abstraction-leak hygiene that keeps a long-lived module readable.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch in the no-next-descriptor case writes a key that is never used",
+        "detail": "In the `else` branch where `nextDescriptor == nil`, the code still appends `entry.Key` to `valueToMetricFullKey`. But if `nextDescriptor` is nil at this point, the loop will continue to subsequent entries and the final rateLimit will be nil-or-unrelated. Writing into the builder here has no observable effect and only muddies the invariant 'valueToMetricFullKey reflects the matched path.' Either document why the write is needed (determinism for partial matches?) or remove it.",
+        "file": "src/config/config_impl.go",
+        "lines": "381-385",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage misses the documented precedence boundary for intermediate detailed_metric",
+        "detail": "Tests cover leaf detailed_metric beating value_to_metric, and value_to_metric at various levels. They do not exercise: (a) intermediate detailed_metric + leaf value_to_metric, (b) concurrent GetLimit on the same descriptor with two different runtime values (would surface the mutation/race issue above), (c) a descriptor with `value_to_metric: true` whose subtree has no rate_limit at the leaf (config load path). These are exactly the boundary cases the spec must pin down.",
+        "file": "test/config/config_test.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The feature is a sensible extension of an existing pattern (detailed_metric), but the implementation degrades the GetLimit contract: a per-request concern (the enhanced metric key) is written into a shared config-tree node (rateLimit.Stats and rateLimit.FullKey), and the rateLimit pointer is reassigned via NewRateLimit and then mutated. This is a module-boundary violation and a likely concurrency hazard, since GetLimit is called once per request against a shared cached config. The spec \u2014 preconditions, postconditions, frame, and the precedence rules between detailed_metric and value_to_metric at every descriptor level \u2014 must be written down before this lands, and the two parallel key-builders should be unified into one policy-parameterized builder. Tests are thorough on the documented happy paths but miss the cross-feature precedence and concurrency boundaries that the contract leaves implicit."
+  },
+  "raw": ""
+}

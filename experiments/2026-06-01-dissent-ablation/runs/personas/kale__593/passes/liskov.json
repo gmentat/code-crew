@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "kale__593",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Silent semantic change to _set_base_image breaks postcondition for KFP-default-image callers",
+        "detail": "Previously, on pod-introspection failure, base_image was set to '' (empty), which the template and downstream KFP interpreted as 'use KFP default'. The new code substitutes 'python:3.12'. This strengthens the postcondition unilaterally: callers relying on the empty-string contract (delegate to KFP) now get a hardcoded image. State the contract for base_image (empty = delegate vs. concrete tag) and preserve it, or migrate all callers explicitly.",
+        "file": "backend/kale/pipeline.py",
+        "lines": "142-145",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "DEFAULT_BASE_IMAGE constant duplicated across Python and TypeScript, violating single source of truth",
+        "detail": "DEFAULT_BASE_IMAGE = 'python:3.12' is now defined in pipeline.py and again in CellMetadataEditor.tsx, plus a fallback literal in Commands.ts. The RPC get_default_base_image exists precisely to centralize this. The TS constant and literal fallbacks will silently diverge when the Python default changes. Remove the TS constant; rely on the RPC value with a single clearly-marked emergency fallback.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "73",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InlineMetadata.createBaseImageText abstraction leak: caller must pass three overlapping props to compute effective image",
+        "detail": "The component now takes baseImage, pipelineBaseImage, and defaultBaseImage and re-implements the precedence chain inline. This same chain appears in the Jinja template and the dialog placeholder. The 'effective base image' is an ADT operation that belongs in one module (e.g., a resolveBaseImage(step, pipeline, default) function) with a stated contract, not duplicated across three call sites that can drift.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "234-245",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_default_base_image uses function-local import, hiding the module dependency from the interface",
+        "detail": "The RPC handler imports DEFAULT_BASE_IMAGE inside the function body. This obscures the module-level dependency between rpc.nb and pipeline and prevents static analysis of the contract. Move the import to the top of the file alongside other kale.pipeline references so the module boundary is honest about what it depends on.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-99",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Replacing inline Input with a modal dialog regresses the editing contract without justification",
+        "detail": "The prior UI exposed base image as a directly-editable Input field; the new UI requires opening a dialog and disables the button until stepName is set. This strengthens a precondition (must name step first) and weakens a postcondition (no inline visibility of current value). If the contract change is intentional, document it; otherwise preserve inline editability for the common case.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "482-496",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Button width: '5%' inside a flex row is a leaky styling contract",
+        "detail": "style={{ width: '5%' }} on a Button labeled 'IMAGE' inside a percentage-width flex layout is fragile \u2014 the button's rendered width depends on parent context the component cannot see. Either size by content (auto) or own the layout contract explicitly at the row level.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "493",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The change introduces a useful default base image surface but violates several ADT and substitution principles. Most importantly, the pipeline.py change silently rewrites the postcondition of _set_base_image from \"empty means delegate to KFP\" to \"concrete python:3.12\", which is a real LSP-style break for any caller that distinguished the two. The default-image constant is also duplicated in three places (Python module, TS constant, TS fallback literal) when the RPC was supposed to be the single source of truth. The UI similarly re-implements the \"effective base image\" precedence chain in multiple sites instead of factoring it into one ADT operation with a stated contract."
+  }
+}

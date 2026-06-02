@@ -1,0 +1,94 @@
+{
+  "persona": "liskov",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "STTv2 violates the stt.STT supertype contract by refusing _recognize_impl",
+        "detail": "stt.STT exposes a non-streaming recognize() entry point as part of its contract; subclasses are expected to honor it (the base class advertises a non-streaming path even when capabilities.streaming=True). This subclass strengthens the supertype's precondition by raising NotImplementedError. Any caller that holds a `stt.STT` reference and calls recognize() will break on substitution. Either advertise a distinct capability flag (e.g., a non_streaming=False capability checked by callers) or have the subclass fall back to a one-shot stream invocation, so the LSP contract is preserved.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "138-146",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTModels Literal forces a single value; the type is a contract that promises future variants",
+        "detail": "`STTModels = Literal[\"scribe_v2_realtime\",]` is a one-element Literal exposed as a public type alias and as the type of a constructor parameter. The abstraction promises an enumerable set of models but currently constrains callers to exactly one symbol, which is identical to a constant. Either widen to `str` for forward compatibility, or commit to the closed set with a documented invariant that new models require a coordinated release. As written, the contract leaks an implementation detail (\"only this one model exists right now\") through the public type.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format coupling to sample_rate is a hidden invariant not enforced by the contract",
+        "detail": "The constructor derives `audio_format = f\"pcm_{sample_rate}\"` and casts to STTAudioFormat without validating that `sample_rate` is one of {8000, 16000, 22050, 24000, 44100, 48000}. The contract states 8kHz-48kHz support, but arbitrary integers (e.g., 12000) silently produce an invalid audio_format value that will only fail at the server. The invariant \"sample_rate is a member of the supported set\" should be checked at the boundary, since this is precisely where the ADT's precondition lives.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "98-115",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Numeric option ranges documented in the docstring are not enforced",
+        "detail": "The docstring states preconditions: `vad_silence_threshold_secs in [0.3, 3.0]`, `vad_threshold in [0.1, 0.9]`, `min_speech_duration_ms in [50, 2000]`, `min_silence_duration_ms in [50, 2000]`. None of these are validated at the constructor boundary; out-of-range values are silently forwarded as query parameters. The contract should either drop these range claims or enforce them where it is stated, otherwise the abstraction's promise to the caller is unenforced and failures surface deep inside the websocket session.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "76-95",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "tasks_group.exception() may raise InvalidStateError when the gather is cancelled",
+        "detail": "After `await utils.aio.gracefully_cancel(...)` and `tasks_group.cancel()`, the gather future is typically in CANCELLED state. Calling `.exception()` on a cancelled future raises `asyncio.CancelledError` (or `InvalidStateError` if not yet done), which will propagate out of the `finally` block and shadow any earlier exception. The intent \u2014 \"retrieve exception to prevent it from being logged\" \u2014 is not satisfied this way; wrap in a try/except or use a `.add_done_callback` that consumes the exception when the future actually completes.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "240-243",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module boundary: STTv2 duplicates STT instead of subtyping or composing",
+        "detail": "STTv2 is named as a versioned twin of STT but does not share any abstraction with STT beyond the framework base class. This is inheritance/duplication-by-naming rather than ADT-driven design. If \"v2\" represents a real protocol break (Scribe v2 wire format), the module boundary is fine; if it is meant to evolve into the default, consider an internal `_ScribeProtocol` ADT with v1/v2 implementations behind a single `STT` facade so callers do not need to know which version they're talking to. As-is, callers must know implementation details (which class to instantiate) to pick a transport.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty committed_transcript semantics are unspecified and implementation-defined",
+        "detail": "The handler treats an empty `committed_transcript` as \"end of speech segment\" \u2014 this is an inferred protocol invariant from the wire, not a contract the abstraction states. If ElevenLabs ever emits an empty committed_transcript mid-segment for any other reason, callers will see spurious END_OF_SPEECH events. Either document this assumption in the contract or detect end-of-segment via a more explicit message_type.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "367-374",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTOptions exposes mutable dataclass with no frame condition",
+        "detail": "`STTOptions` is a plain mutable dataclass passed by reference into SpeechStreamv2. The contract does not state whether the stream may mutate it (e.g., `self._opts.language_code = language_code` in the STT constructor mutates the same options later read by streams). Tighten by using `frozen=True` or by copying into the stream, so the frame condition \"_opts is read-only after construction\" is enforced rather than assumed.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "41-52",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The abstract data type here is a streaming STT module whose contract is inherited from `stt.STT`. The most serious issue is an LSP violation: `_recognize_impl` raises NotImplementedError, which strengthens the supertype's precondition and breaks substitution for any caller holding a base-class reference. Several smaller contract gaps follow the same theme \u2014 preconditions documented in the docstring (VAD numeric ranges, sample_rate membership) are not enforced at the module boundary, and the `STTModels` literal type and empty-commit semantics leak implementation assumptions through the interface. There is also a real correctness risk in the finally-block handling of the cancelled gather. Overall the implementation is structurally close to peer plugins (Deepgram/Cartesia) but the boundary discipline \u2014 what this module promises and what it refuses \u2014 needs to be stated and enforced before this is a substitutable subtype of `stt.STT`."
+  },
+  "raw": ""
+}

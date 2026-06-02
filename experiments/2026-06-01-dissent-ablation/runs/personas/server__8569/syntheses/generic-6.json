@@ -1,0 +1,94 @@
+{
+  "task_id": "server__8569",
+  "arm": "generic-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Race condition on shared lora_config.is_registered mutation in async request handler",
+        "detail": "_create_trtllm_generate_request checks and sets lora_config.is_registered without synchronization on a TritonLoraConfig shared across concurrent requests. Two first-time requests can both see is_registered=False and race, or one can flip the flag before TRT-LLM has actually cached the weights, causing subsequent requests to send only task_id with no registration. Needs a lock or per-task registration confirmation.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-244",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_get_lora_config return type annotated TritonLoraConfig but returns None and can NPE on unknown model",
+        "detail": "Signature declares -> TritonLoraConfig but returns None when lora_name is None or lora_configs is None; should be Optional[TritonLoraConfig]. Also self.model_metadata.get(model_name) can return None and the next attribute access raises AttributeError instead of a clean ClientError. Guard model_metadata and fix annotation.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1089-1098",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_task_id resets to 1 per call and can collide across base models in TRT-LLM cache",
+        "detail": "_parse_lora_configs initializes lora_task_id = 1 per invocation. Two TRT-LLM models each defining LoRAs with ids 1,2,... alias entries in TRT-LLM's task_id-keyed LoRA cache, returning wrong weights. Task IDs should be globally unique within the engine lifetime.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "624-712",
+        "flagged_by": [
+          "generic_1",
+          "generic_4",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Variable shadowing: lora_config_path reused for two different paths in same scope",
+        "detail": "lora_config_path is first bound to version_path/multi_lora.json, then reassigned inside the loop to lora_path/model.lora_config.npy. The outer name is lost after the first iteration, making later references use the wrong path. Rename one (e.g., lora_npy_config_path).",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "658-697",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print and traceback.format_exc() left in production hot paths",
+        "detail": "print(f\"backend: {backend}\") inside the per-LoRA loop plus print(traceback.format_exc()) calls in _parse_lora_configs and in chat.py, completions.py, and embeddings.py routers will spam stdout on every request and model load. Replace with logger.debug/exception at appropriate levels or remove before merge.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "680-713",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs return type annotation does not match actual return",
+        "detail": "The signature declares -> None | List[tuple[str, str]] but the function returns List[TritonLoraConfig] or None. The annotation is stale from refactor and misleads readers and static type checkers. Update to Optional[List[TritonLoraConfig]].",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "generic_1",
+          "generic_3",
+          "generic_5",
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The panel reaches strong consensus that the PR's TRT-LLM multi-LoRA support has a serious concurrency bug: TritonLoraConfig.is_registered is mutated as shared state across async requests without synchronization, enabling races where concurrent first-time requests can omit weights or mark the LoRA registered before the backend has cached it. Secondary correctness issues include lora_task_id colliding across base models in the TRT-LLM cache and _get_lora_config that can return None or NPE on unknown models despite a non-Optional annotation. Code-hygiene issues are widespread: variable shadowing of lora_config_path, debug print and traceback.format_exc() leaks in routers and parse code, and stale return-type annotations on _parse_lora_configs. Address the P0 race and the type/null-safety gaps before merge; clean up logging and shadowing as part of the same change."
+  }
+}

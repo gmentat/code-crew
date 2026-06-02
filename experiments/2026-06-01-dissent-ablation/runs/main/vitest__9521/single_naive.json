@@ -1,0 +1,184 @@
+{
+  "task_id": "vitest__9521",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Race condition: globCache may be populated before changedFiles is set, causing stale exclusions",
+        "detail": "isIncluded() is called during transform/test resolution and caches results in globCache. onTestRunStart() is hooked into Vitest.runFiles / collectTests / etc., but coverage.include glob resolution and other isIncluded calls can happen earlier in the lifecycle (e.g., during spec collection, plugin transforms). The code in onTestRunStart correctly clears the cache after setting changedFiles, but any subsequent call that races with cache reads from another path may return stale 'included=true' values that were computed without changedFiles. Worse, if onTestRunStart hasn't run yet when isIncluded is called (e.g., V8 provider's getUntestedFiles path), the file gets cached as included without the changed-file filter, and later includes won't re-evaluate. This is fragile lifecycle coupling.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180, 329-346",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "changedFiles path comparison likely mismatches due to absolute vs relative paths",
+        "detail": "In isIncluded(), `filename = slash(cleanUrl(_filename))` is typically an absolute path. But `this.changedFiles` comes from either `vitestGit.findChangedFiles(...)` or `this.ctx.config.related`. The git helper returns absolute paths in some flows and the existing `config.related` is absolute, but the prior implementation in getUntestedFiles compared against `includedFiles` produced by glob (relative to root) \u2014 `includedFiles.includes(file)`. The new code in isIncluded does `this.changedFiles.includes(filename)` where filename was passed through `slash(cleanUrl(...))`. There's no normalization of changedFiles entries (no slash(), no cleanUrl()). On Windows, or when paths come with different separators / query strings, the .includes() check will silently fail and exclude everything from coverage.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152, 175-177, 332-342",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior change to isIncluded affects all callers, not just changed-files flow",
+        "detail": "Adding `cleanUrl(_filename)` to the existing isIncluded() changes the semantics of this method for every existing caller (V8 provider, istanbul provider, getUntestedFiles, reporter filtering). cleanUrl strips query strings \u2014 this is presumably to handle Vite query-param transforms, but it's bundled silently into a feature PR for `coverage.changed`. If any existing path depended on the query string being part of the match (e.g., a custom include glob), this is a silent regression. Should be called out and tested independently.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "12, 152",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform is inconsistent and accepts non-boolean strings only by passthrough",
+        "detail": "The transform in cli-config.ts maps 'true'/'yes' -> true, 'false'/'no' -> false, otherwise returns the raw string. This means `--coverage.changed` with no value, or `--coverage.changed=1`, will produce '1' (string) which is then treated as a git ref. There's no validation. Compare to the existing `--changed` option behavior (if it differs, users will be confused). Also: `value === true` / `value === false` branches inside a transform that nominally receives a string suggests the type contract isn't clean.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart spawns git process on every test run, even watch-mode reruns",
+        "detail": "Each runFiles() call invokes `onTestRunStart()` which, when `coverage.changed` is set, dynamically imports VitestGit and shells out to git. In watch mode with frequent reruns, this re-computes the changed-files set on every change, which (a) is expensive, (b) means the 'changed since HEAD' set keeps shifting as the user stages/commits during a session. Worth caching or documenting intentional behavior. The dynamic import is also re-resolved each call \u2014 minor but avoidable.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-339",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test coverage for the case where git returns no changed files or git is unavailable",
+        "detail": "`vitestGit.findChangedFiles` can return null/undefined (not a git repo, git not installed, no changes). The code sets `this.changedFiles = changedFiles ?? undefined`. If the user explicitly sets `coverage.changed: 'HEAD'` but there are no changes, the result is `undefined`, which means isIncluded() falls back to the unfiltered glob \u2014 i.e., coverage reports everything. This is the opposite of what the user asked for. Should be an empty array (no coverage) or an explicit warning. No test exercises this.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "335-336",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documentation type contradicts default",
+        "detail": "Docs say `Type: boolean | string`, `Default: false (inherits from test.changed)`. But the resolveConfig logic sets the default by inheriting from `resolved.changed` only when `coverage.changed === undefined`. So the actual default is `undefined`, not `false`. And when set to `false` explicitly, the inheritance is skipped (good, tested) \u2014 but the documented default of `false` is misleading because `false` is not the same as 'unset'. Tighten the docs.",
+        "file": "docs/config/coverage.md",
+        "lines": "409-416",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isIncluded filter is order-dependent and silently mutates a cache key's meaning",
+        "detail": "globCache.set(filename, included) now stores a value that depends on `this.changedFiles`. If changedFiles is later mutated (e.g., onTestRunStart called again on a rerun with a different git state), the cache still holds the old answer. The mitigation is the globCache.clear() in onTestRunStart, but only when `this.changedFiles` ends up truthy after the call. If a rerun toggles from 'have changes' to 'no changes' (changedFiles becomes undefined), the cache is NOT cleared and stale exclusions persist.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-180, 341-343",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test file mode change (chmod +x) on a TypeScript test",
+        "detail": "test/coverage-test/test/changed.test.ts mode changed from 100644 to 100755. There's no shebang and no reason for a .test.ts to be executable. Likely accidental; should be reverted to avoid noise.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CustomProviderOptions Pick uses string literal alongside type alias",
+        "detail": "`Pick<BaseCoverageOptions, FieldsWithDefaultValues | 'changed'>` adds 'changed' as a one-off rather than including it in FieldsWithDefaultValues. If 'changed' is conceptually one of the default-valued fields (it inherits from test.changed), it should probably be in that type alias for consistency. Minor \u2014 depends on convention elsewhere in the codebase.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "294-295",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart docstring duplicated awkwardly with onTestFailure",
+        "detail": "The added JSDoc `/** Callback called when test run starts */` is fine, but the rewrite of onTestFailure's comment to 'Callback called when test run fails due to test failures' is unrelated cleanup smuggled into a feature PR. Minor.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "31-34",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inline snapshots in new tests may be brittle across platforms",
+        "detail": "The new tests in changed.test.ts assert `<process-cwd>/fixtures/src/...` paths via inline snapshots. If `<process-cwd>` substitution doesn't account for Windows path separators consistently, these snapshots will fail on Windows CI. Worth verifying the test utility normalizes separators.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "71-167",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart not awaited in all start paths",
+        "detail": "In core.ts, three call sites add `await this.coverageProvider?.onTestRunStart?.()`. Verify there aren't additional code paths that call `_testRun.start(...)` without this hook \u2014 e.g., browser mode, type-check mode, benchmark runner. If those paths exist and don't call onTestRunStart, `coverage.changed` will silently not apply there.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "609, 752, 884",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether cleanUrl() change is in-scope",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "It's a small, obviously-correct fix for query-param transforms; the test demonstrates it works; bundling it in is fine and reasonable."
+          },
+          {
+            "persona": "Abstraction discipline",
+            "position": "It changes behavior for every caller of isIncluded(). It should be a separate commit/PR with its own test rationale so bisects and reviews remain clean."
+          }
+        ]
+      },
+      {
+        "topic": "Behavior when changedFiles resolves to empty / unavailable",
+        "positions": [
+          {
+            "persona": "Safe-default framing",
+            "position": "If user asks for `coverage.changed: 'HEAD'` and we can't determine changes, we should report no coverage (empty set) \u2014 fail closed, surface a warning."
+          },
+          {
+            "persona": "Backward-compat framing",
+            "position": "Falling back to 'include everything' matches how `--changed` behaves elsewhere in Vitest; consistency with existing flag is more important than a stricter default."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the race-between-cache-and-onTestRunStart is real or theoretical",
+        "positions": [
+          {
+            "persona": "Formal correctness",
+            "position": "The lifecycle is under-specified. Any isIncluded() call before onTestRunStart() poisons the cache. This must be made deterministic before merge."
+          },
+          {
+            "persona": "Pragmatic",
+            "position": "In practice, coverage provider's first isIncluded calls happen during reporting/instrumentation after onTestRunStart. The maintainers know the order; if existing tests pass and the inline snapshot in changed.test.ts works, it's fine."
+          }
+        ]
+      }
+    ],
+    "summary": "The feature is well-motivated and the diff is small, but it has two likely-real correctness bugs that should block merge: (1) `this.changedFiles.includes(filename)` compares paths without normalizing entries in `changedFiles` against the `slash(cleanUrl(...))`-normalized filename, which will silently mismatch on Windows or when paths have query suffixes; (2) the globCache lifecycle is racy \u2014 entries cached before `onTestRunStart()` runs won't reflect the changed-files filter, and the cache is only cleared when changedFiles is truthy, leaving stale state on toggle. Secondary concerns: the unrelated `cleanUrl` semantic change to isIncluded should be called out, the no-changes case probably should report empty coverage rather than fall back to 'everything', and the inadvertent chmod +x on the test file should be reverted. Tests are decent but miss the negative paths (no git, no changes, watch-mode toggling)."
+  },
+  "raw": ""
+}

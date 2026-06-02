@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__3328",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Default change to TurnDetectionMode.FIXED silently breaks LSP contract for existing callers",
+        "detail": "The supertype contract previously promised that a default-constructed SpeechmaticsSTTService used EXTERNAL endpointing (Pipecat-controlled via UserStoppedSpeakingFrame). Existing callers relying on that postcondition now silently get FIXED behavior, which listens for VADUserStoppedSpeakingFrame instead. This is a postcondition-weakening change: a subtype/version that previously responded to one frame type now responds to another, without any deprecation path. The contract should either preserve EXTERNAL as the default, or this should be marked as a breaking version bump with migration notes in the changelog.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "211",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frame-type contract for process_frame narrowed without spec update",
+        "detail": "process_frame previously accepted UserStoppedSpeakingFrame as the trigger for forced finalization; it now accepts only VADUserStoppedSpeakingFrame. This is a precondition strengthening of the handler's effective contract (callers must now emit the more specific frame type to get finalization). The frame-handler contract (which frames trigger which side effects) is part of the module's interface and must be stated explicitly in the docstring or specification \u2014 currently it is only discoverable by reading the implementation.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "680-686",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Invariant between _enable_vad and turn_detection_mode is implicit and now coupled across two enums",
+        "detail": "_enable_vad is derived from end_of_utterance_mode (FIXED or EXTERNAL disables VAD), but the docstring and changelog describe the behavior in terms of turn_detection_mode. These are two separate configuration enums whose relationship is not stated in the contract. A caller setting turn_detection_mode=FIXED but with a different end_of_utterance_mode will get surprising behavior. State the invariant: which enum governs VAD emission, and what is the relationship between TurnDetectionMode and EndOfUtteranceMode.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "337-340",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "split_sentences contract leaks through to SpeechSegmentConfig with implicit None-to-False coercion",
+        "detail": "The InputParams.split_sentences field is typed Optional[bool] (default None), but _prepare_config coerces None to False when constructing SpeechSegmentConfig(emit_sentences=params.split_sentences or False). The tri-state (None=unset, True, False) at the InputParams boundary collapses to bi-state at the SpeechSegmentConfig boundary, losing the 'use library default' meaning that other Optional[bool] fields in the same params block preserve via the setattr loop. State the contract: is split_sentences=None equivalent to False, or does it mean 'defer to library default'? The two are not the same.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "516-519",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "TurnDetectionMode enum and EndOfUtteranceMode enum are parallel-but-not-identical abstractions",
+        "detail": "Both enums now have FIXED and EXTERNAL members, and the _enable_vad derivation crosses between them. This suggests either (a) they should be unified into a single abstract data type, or (b) their relationship should be made explicit via a mapping function. As written, the reader must hold two enums in their head and infer the correspondence. This is a module-boundary smell worth flagging for the larger architecture even if not fixed in this PR.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "67-77",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Commented-out start_processing_metrics call moved but not removed",
+        "detail": "The line `# await self.start_processing_metrics()` was relocated within _handle_start_of_turn rather than deleted or activated. Commented code is a specification gap: either the metrics call is part of the contract (uncomment) or it is not (delete). Leaving it commented signals that the spec for when metrics begin is unresolved.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "624",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "This PR changes the default endpointing contract of SpeechmaticsSTTService from EXTERNAL to FIXED and narrows the finalization-trigger frame type from UserStoppedSpeakingFrame to VADUserStoppedSpeakingFrame. Both are contract changes visible to every caller, and the changelog labels the latter as a fix rather than a breaking change \u2014 that is a LSP-VIOLATION at the version boundary if any caller relied on the prior default. The introduction of TurnDetectionMode.FIXED parallel to EndOfUtteranceMode.FIXED creates two enums whose relationship governs VAD emission but is never stated as an invariant; this is SPEC-MISSING at the module level. The new split_sentences parameter collapses an Optional[bool] tri-state to a bi-state inside _prepare_config, which is a small abstraction leak worth tightening. Recommended changes: state the contract for which frame types trigger finalization, document the TurnDetectionMode/EndOfUtteranceMode relationship as an invariant, decide whether the default change is breaking and note it in the changelog accordingly, and resolve the commented-out metrics call."
+  },
+  "raw": ""
+}

@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "numba__10276",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Indentation bug: version guard for math.exp2 is outside the Math_unary class body, breaking the contract registration",
+        "detail": "In numba/core/typing/mathdecl.py, the original code had a blank line inside the Math_unary class before the next decorator. The patch removed that blank line and placed `if sys.version_info >= (3, 11): Math_unary = infer_global(math.exp2)(Math_unary)` at module scope, but visually adjacent to the class. This works only because `Math_unary` is also module-scoped, but the placement is misleading and fragile. More importantly, the abstract data type here (Math_unary as the ConcreteTemplate contract for unary float operations) is being re-bound under the same name \u2014 every subsequent reference to `Math_unary` in the module now refers to whatever `infer_global` returns, not the original class. If `infer_global` ever returns a wrapper rather than the class itself, downstream `infer_global(math.X)(Math_unary)` registrations could silently break. The contract should be: register additional globals against the existing class without rebinding the name.",
+        "file": "numba/core/typing/mathdecl.py",
+        "lines": "40-46",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: PYVERSION gating is inconsistent across the three modified modules",
+        "detail": "The abstract contract being asserted is: `math.exp2` is available on Python >= 3.11 and should be a unary float intrinsic. But the three sites that must agree (typing/mathdecl.py, cpython/mathimpl.py, np/math/mathimpl.py) use two different mechanisms to express the same precondition: mathdecl.py uses `sys.version_info >= (3, 11)`, the two impl files also use `sys.version_info` (requiring a new `import sys` that I don't see added in the diff for cpython/mathimpl.py and np/math/mathimpl.py), and the test uses `PYVERSION` from `numba.core.utils`. The project already exposes `PYVERSION` as the canonical way to express this precondition (the test imports it). All four sites should use the same predicate, and the impl files need `import sys` if they continue using `sys.version_info`. Otherwise this will NameError at import on 3.11+.",
+        "file": "numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "176-178 (both files)",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Missing `import sys` in numba/cpython/mathimpl.py and numba/np/math/mathimpl.py",
+        "detail": "The diff adds `if sys.version_info >= (3, 11):` to both numba/cpython/mathimpl.py and numba/np/math/mathimpl.py but the diff does not show an `import sys` being added to either file. If `sys` is not already imported at module top, both files will fail with NameError at import time on Python 3.11+. The contract of the module (its import-time precondition) must include every name it uses. Verify whether `sys` is already imported in each file; if not, add it. Better: use `PYVERSION` from `numba.core.utils` for consistency with the test and the rest of the codebase.",
+        "file": "numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "import section",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Release note file is missing a trailing newline",
+        "detail": "docs/upcoming_changes/10276.new_feature.rst ends with `\\ No newline at end of file`. Minor hygiene issue but reST tooling and POSIX conventions both prefer a trailing newline. Add one.",
+        "file": "docs/upcoming_changes/10276.new_feature.rst",
+        "lines": "4",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage does not exercise the LSP-relevant contract of math.exp2 (special values)",
+        "detail": "The contract of `math.exp2` includes specified behavior at boundary values: `exp2(0) == 1`, `exp2(-inf) == 0`, `exp2(inf) == inf`, `exp2(nan) == nan`, and overflow behavior on large inputs. The new test only checks integer and small float inputs ([-2, -1, -2, 2, 1, 2, .1, .2]). Other `test_exp` style tests in this file likely have similar gaps, so this matches local convention, but the substitution contract \u2014 that njit'd exp2 behaves the same as CPython's math.exp2 \u2014 would be strengthened by adding 0.0, +/-inf, and nan to x_values for the float types. Also note the x_values list contains `-2` twice; likely a copy-paste from `test_exp` but worth cleaning up.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": "267-275",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicate registration pattern not extracted; ADT seam invites future drift",
+        "detail": "The same conditional registration appears in three files (mathdecl.py, cpython/mathimpl.py, np/math/mathimpl.py). Each repeats the precondition `if sys.version_info >= (3, 11):` and the LLVM intrinsic name `'llvm.exp2'`. This is a small ADT-design smell: the contract for 'a unary math function added in Python 3.11 that maps to an LLVM intrinsic' is now smeared across three sites with three near-identical guards. For one function this is fine; for the next four 3.11+ math additions it becomes a maintenance liability. Worth noting for future contributors but not blocking.",
+        "file": "numba/core/typing/mathdecl.py, numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "ADT-SOUND in concept \u2014 `math.exp2` is a clean unary float function with a well-defined contract that maps naturally to `llvm.exp2`, and registering it on the existing `Math_unary` ConcreteTemplate is the right modular decomposition. However, the contract's *preconditions* (Python >= 3.11) are expressed three different ways across four sites (`sys.version_info` in three files, `PYVERSION` in the test), and two of those sites likely lack the `import sys` they now require \u2014 that's a SPEC-MISSING and a likely import-time NameError on 3.11+. The Math_unary rebinding via `infer_global(math.exp2)(Math_unary)` works but is fragile; the indentation also makes it ambiguous whether the registration is intended inside or outside the class body. Recommend: unify on `PYVERSION` everywhere, verify `import sys` is not needed (or add it), tighten the contract test with 0/inf/nan, and add the missing trailing newline to the release note. Decision: needs revision before merge \u2014 small but real correctness risk."
+  },
+  "raw": ""
+}

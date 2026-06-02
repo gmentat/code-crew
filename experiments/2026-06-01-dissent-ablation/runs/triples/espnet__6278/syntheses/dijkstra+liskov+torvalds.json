@@ -1,0 +1,76 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring says max_steps/val_interval but code reads max_step and never uses val_interval",
+        "detail": "The docstring documents the contract as max_steps, log_interval, val_interval, save_interval, but __init__ reads trainer_args['max_step'] and the loop validates every save_interval. Configs written to the documented contract will KeyError on launch or get wrong validation cadence. Pick one spelling, honor it, and validate required keys at __init__.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-77",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery parses 'step_' substrings with no atomicity guard, admitting malformed or half-written directories",
+        "detail": "split('step_')[-1] accepts names like 'foo_step_10' or crashes on 'step_3_backup', and there is no marker confirming a save completed. A crash mid-save leaves a corrupt directory that resume silently picks. Use a strict regex full-match and write a 'latest' marker (or verify completeness) before loading.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-128",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has surprising frame: mutates tensors in place and rebinds dict entries with no stated contract",
+        "detail": "The function all_reduces in place then reassigns stats[key] = stats[key] / world_size, so callers holding the original tensor see partial mutation while the dict entry is replaced. Callers also rebuild stats as floats afterward. Make the contract either purely functional (return a new dict) or cleanly destructive, and document the frame.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-160",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Collective-call discipline unstated: _all_reduce_stats and valid() can deadlock when ranks see different keys or empty iterators",
+        "detail": "_all_reduce_stats iterates `for key in stats` and issues one all_reduce per key, assuming every rank has identical keys in identical order. valid() similarly iterates per-rank iterators; if any rank yields zero batches while others yield some, NCCL collectives diverge and the job hangs. State and enforce globally identical keys and matched iteration counts.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-194",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "run() loop lacks a clear termination invariant and mishandles max_step boundaries",
+        "detail": "The outer while loop depends on train() advancing global_step by save_interval; an empty iterator spins forever overwriting the same checkpoint. If save_interval does not divide max_step, the final window validates and saves at an odd step, and resume at global_step==max_step exits without saving final state. Make boundary semantics explicit.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-176",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid_specifier is whitespace-split despite containing colon-delimited paths that may contain spaces",
+        "detail": "args.valid_unregistered_specifier.split() silently breaks any path containing whitespace, while train_specifier is passed whole \u2014 inconsistent and fragile. The grammar 'task:name:data_json[:factor]' lives only in --help with no parser/validator. Pick one convention (comma-separated or repeated --flag) and lift the grammar into a typed parser at the ADT boundary.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-79, 187-199",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is NEEDS-WORK. The headline defect is a docstring/code contract mismatch on trainer_args (max_steps vs max_step, val_interval unused) that will KeyError on first launch or silently mis-validate. Checkpoint discovery parses substrings with no atomicity guard, so a crashed save leads to silent resume from junk. Distributed discipline is underspecified \u2014 _all_reduce_stats mixes in-place mutation with dict rebinding, and neither it nor valid() establishes the matched-collective-call invariant required to avoid NCCL hangs. Smaller but real: the run() loop has no clean termination story at max_step boundaries, and the launcher's whitespace-split specifier parser breaks on paths with spaces."
+  }
+}

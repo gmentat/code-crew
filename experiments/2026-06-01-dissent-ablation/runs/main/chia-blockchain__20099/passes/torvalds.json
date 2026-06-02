@@ -1,0 +1,94 @@
+{
+  "persona": "torvalds",
+  "task_id": "chia-blockchain__20099",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Install script version-floor check still allows Python 3.7-3.9 to pass",
+        "detail": "install.sh now claims '>= 3.10 and < 3.13.0' in the error message, but the conditional immediately above still reads `[ \"$PYTHON_MINOR_VER\" -lt \"7\" ]`. So if a user has python3.8 or python3.9 on PATH, the script will happily march on and try to install with an unsupported interpreter, then fail downstream with a worse error. If you're dropping 3.9, raise the floor in the actual check to 10, not just in the printed string. This is exactly the kind of patch that does one thing in the message and another thing in the code.",
+        "file": "install.sh",
+        "lines": "138-140",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "find_python keeps PYTHON_MAJOR_VER==3 branch that can no longer be satisfied",
+        "detail": "The `for V in ... 3` loop still probes a bare `python3`, which on Amazon Linux / Rocky / older distros may resolve to 3.9 or earlier. Combined with the stale `-lt 7` check above, this is how you end up shipping a half-removed 3.9. Either drop the bare `3` from the search list or tighten the version gate. Pick one.",
+        "file": "install.sh",
+        "lines": "75",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "test-install-scripts.yml adds noisy `dnf search` and silently swallows update failures",
+        "detail": "`dnf search python3.12` produces output but has no effect on the install -- it's a diagnostic left in a CI script. `dnf update -y` before installing git on a CI runner is gratuitous: it churns the image, slows the job, and can fail for reasons unrelated to this PR. The patch should be `dnf install -y git python3.12`. One line, does one thing. If you want the search output for debugging, that's a separate patch you don't land.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "215-218, 246-249",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ruff.toml suppresses the very rules this PR enables -- the cleanup is deferred indefinitely",
+        "detail": "The PR description says `Union` types will soon not be supported through Ruff, but the diff adds `UP045`, `UP007`, `UP035` to the ignore list with a TODO comment 'it's a lot of errors'. That's the patch admitting it stopped halfway. Either land the codemod in this PR (it's mechanical -- `ruff check --fix --select UP007,UP035,UP045`) or don't claim the rule is enforced. A TODO in a ruff config that disables the rule you say you want is the polite version of 'we won't do this'.",
+        "file": "ruff.toml",
+        "lines": "102-105",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Patch does three things at once -- drop 3.9, switch yum->dnf, partial PEP 604 migration",
+        "detail": "The stated change is 'remove Python 3.9 support'. The diff also: switches Amazon/Rocky from yum to dnf with added update/search steps, removes the `kw_only_dataclass` helper and inlines its expansion across ~15 dataclasses, swaps a zip-pairwise idiom for itertools.pairwise, and adds three ruff ignores. Each is defensible individually. Bundled, the diff is harder to bisect when something breaks on an Amazon Linux runner three weeks from now. THREE-PATCHES.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "default_raise() helper and its comment still reference '< 3.10 compatibility' after the floor moved",
+        "detail": "wallet_request_types.py keeps `def default_raise()` with the comment 'This should be impossible to hit and is just for < 3.10 compatibility'. With 3.9 gone and every relevant dataclass now `kw_only=True`, the `field(default_factory=default_raise)` pattern is the workaround for the old constraint. The comment is now misleading, and the pattern itself is worth a follow-up audit -- a kw_only field with no default is enforced by the dataclass machinery itself; default_factory=default_raise is belt-and-suspenders. Not blocking the patch, but it's dead weight the next maintainer will trip over.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "42-43",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inlining `@dataclass(frozen=True, kw_only=True)` 15 times instead of keeping a one-line helper",
+        "detail": "The PR description correctly notes kw_only is now supported everywhere, so the version-guard in `kw_only_dataclass` is dead. Fine. But the helper itself -- a named decorator that documented the project's convention -- was useful. Replacing one helper application with `@streamable / @dataclass(frozen=True, kw_only=True)` on fifteen classes is more characters, more noise in every future diff, and zero clarity gained. Keeping the helper (minus the version guard) would be the smaller, better patch. Not a blocker; a taste note.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "234-1588",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead `pragma: no cover` and stale comments referencing 3.9 left scattered through the codebase",
+        "detail": "conditions.py drops the 3.9-coverage-bug comment but leaves a bare `continue` with no explanation; cmd_classes.py removes the version branches cleanly; but a grep for 'pragma: no cover' and '3.9' across the repo almost certainly still finds stragglers in files this PR didn't touch. If you're closing out 3.9 support, close it out -- otherwise the next person doing a python-version bump will fight the same ghosts.",
+        "file": "chia/wallet/conditions.py",
+        "lines": "1475",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The shape of this patch is right -- drop a dead Python version, simplify the version-guarded dataclass helpers, raise the floor. But the diff does three or four things at once and it shows: install.sh tells the user '>= 3.10' while the actual numeric check still accepts 3.7; the CI install scripts grew gratuitous `dnf update` and `dnf search` lines that don't belong; and the ruff.toml change disables the exact `UP007/UP035/UP045` rules the PR description says are coming, with a TODO that means 'someone else does this later'. The wallet_request_types.py change is mechanically correct but replaces a named helper with fifteen copies of the same decorator stack, which is more noise, not less. NEEDS-WORK: split the patch, fix the install.sh floor check, drop the CI diagnostic noise, and either land the PEP 604 codemod or don't claim the rule."
+  },
+  "raw": ""
+}

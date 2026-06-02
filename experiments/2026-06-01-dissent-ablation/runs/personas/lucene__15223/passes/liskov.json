@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "lucene__15223",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "LSP violation: deprecated formats keep KnnVectorsFormat contract but throw on fieldsWriter",
+        "detail": "KnnVectorsFormat.fieldsWriter's contract is to return a writer. Lucene99HnswScalarQuantizedVectorsFormat and Lucene99ScalarQuantizedVectorsFormat now throw UnsupportedOperationException, strengthening the precondition (caller must know the codec is read-only). Substitutability is broken: code holding a KnnVectorsFormat reference cannot reliably call fieldsWriter. The narrowing should be expressed in the type (a ReadOnlyKnnVectorsFormat supertype) rather than via runtime exception.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "fieldsWriter override",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary violated: backward_codecs depends back on core lucene99 internals",
+        "detail": "The moved classes still import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat/Reader and Lucene99FlatVectorsFormat. The backward_codecs module is meant to be a sealed boundary owning legacy code; reaching into core lucene99 couples a 'legacy' module to a current one, so future changes in core can silently break the legacy contract. Either copy the needed pieces into backward_codecs or expose a stable shared interface.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "imports",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Inheritance used for code reuse: RW test subclasses override to restore write capability",
+        "detail": "Lucene99RWScalarQuantizedVectorsFormat and Lucene99RWV1HnswScalarQuantizationVectorsFormat extend formats whose contract now says 'read-only' and override fieldsWriter to write again. This is inheritance-for-reuse that re-violates LSP from the other direction: the subtype weakens the supertype's 'throws UnsupportedOperationException' postcondition. Compose with an internal writer helper rather than subclassing the read-only format.",
+        "file": "lucene/backward-codecs/src/test/org/apache/lucene/backward_codecs/lucene99/Lucene99RWScalarQuantizedVectorsFormat.java",
+        "lines": "fieldsWriter override",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: OffHeapQuantizedByteVectorValues fields downgraded from protected to package-private while class stays public abstract",
+        "detail": "The class is still public abstract with public nested DenseOffHeapVectorValues, but its previously protected fields are now package-private. External subtypes that the public abstraction implicitly invited can no longer be written, yet the type is still exported. Either make the class package-private (sealing the hierarchy) or restore the protected contract; the current half-step leaves a public ADT with no usable extension surface.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/OffHeapQuantizedByteVectorValues.java",
+        "lines": "field declarations",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Spec missing: 'Old codecs may only be used for reading' is not part of the KnnVectorsFormat contract",
+        "detail": "There is no stated invariant on KnnVectorsFormat that some implementations are read-only. The UnsupportedOperationException encodes a contract that exists only in prose in the changelog. Add a ReadOnlyKnnVectorsFormat marker (or a sealed supertype) and document the invariant where callers will see it. Without that, every caller must defensively try/catch.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsFormat.java",
+        "lines": "fieldsWriter",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DIRECT_MONOTONIC_BLOCK_SHIFT duplicated rather than shared via interface",
+        "detail": "The constant previously imported from Lucene99FlatVectorsFormat is now redeclared as a package-private constant in Lucene99ScalarQuantizedVectorsFormat. Two sources of truth for the same on-disk parameter is exactly the invariant-drift risk ADT discipline is meant to prevent. Either keep importing the canonical value or move the constant to a shared on-disk-format spec class in backward_codecs.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsFormat.java",
+        "lines": "DIRECT_MONOTONIC_BLOCK_SHIFT",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The relocation of the Lucene99 scalar-quantized formats into backward_codecs is directionally correct, but the contract work is incomplete. The biggest issue is that KnnVectorsFormat.fieldsWriter has been turned into a runtime-throwing operation on the legacy types, which is an LSP violation expressed as an exception rather than as a type. The test-only RW subclasses then override that behavior back to a working writer, which is inheritance-for-reuse violating substitutability in the other direction. The new backward_codecs classes still import from core lucene99, leaving the module boundary porous, and a public abstract ADT (OffHeapQuantizedByteVectorValues) has lost its protected extension surface without being closed. Introduce a ReadOnlyKnnVectorsFormat supertype, replace test inheritance with composition, sever the residual core imports, and de-duplicate DIRECT_MONOTONIC_BLOCK_SHIFT into one spec source."
+  }
+}

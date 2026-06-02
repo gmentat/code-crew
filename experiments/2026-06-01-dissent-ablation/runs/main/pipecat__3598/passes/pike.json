@@ -1,0 +1,74 @@
+{
+  "persona": "pike",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ModelConfig and TTSModelConfig duplicate logic that the data could express directly",
+        "detail": "Both files introduce a frozen dataclass plus a dict-of-configs plus a parallel set of boolean capability flags (supports_prompt, supports_mode, supports_language, supports_pitch, supports_loudness, supports_temperature). The data structure is fighting the data shape: capabilities are really 'which keys does the wire payload include?' Replace the boolean fan-out with a single set of supported_params (a frozenset of field names) and let payload-building be a filter over that set. Then 'does model X support Y' is `y in cfg.supported_params`, not seven hand-maintained booleans that must stay in sync with three different validation sites.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "72-126",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Validation logic repeated three times per parameter (init, setter, _connect)",
+        "detail": "Each parameter (prompt, mode, language) is validated in __init__, again in set_*, and again gated when building connect_kwargs. That's the algorithm fighting the data: with a `supported_params` set, validation becomes a single helper `_require_supported(name)` and payload construction becomes `{k: v for k, v in candidates.items() if k in cfg.supported_params and v is not None}`. Right now adding a fourth parameter means touching at least five places. Pick the data structure and the algorithm becomes self-evident.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "176-205, 271-310, 365-425",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TTS payload construction does the same conditional dance three times",
+        "detail": "In SarvamHttpTTSService.__init__ the settings dict is built with conditional pitch/loudness/temperature inserts and warnings; then in run_tts the same conditionals run again to build the payload; the WebSocket variant likely repeats it a third time. This is exactly the 'algorithm fighting data shape' case. Build one helper that takes (config, params) and returns a dict \u2014 the filter shape. Then both HTTP and WebSocket services pipe through it. Right now the warning-on-non-default check (`params.pitch != 0.0`) is also fragile: a caller who explicitly passes 0.0 to v3 gets no warning, and a caller who passes the default 1.0 to loudness gets no warning either. That's a symptom of the missing data structure, not a bug to patch in place.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "330-410, 456-475",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Enums for speaker names buy nothing the dict couldn't",
+        "detail": "SarvamTTSSpeakerV2 and SarvamTTSSpeakerV3 are str-enums whose only consumer is `tuple(s.value for s in ...)` inside TTS_MODEL_CONFIGS. The wire API takes a string; the validator (if any) just checks membership in a set. Two enums + a tuple + a list-returning helper is three representations of the same data. A plain `frozenset[str]` per model is the right data structure here \u2014 the algorithm (membership test) is then self-evident and there's nothing to keep in sync. This is small enough to leave if you genuinely want the IDE autocomplete on enum names, but it's the kind of hierarchy built before the use cases justify it.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "85-145, 195-215",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_speakers_for_model silently falls back to v2 speakers for unknown models",
+        "detail": "The function returns v2 speakers for any unknown model name. That's clever in a bad way \u2014 it hides typos and makes future models look valid. Either raise KeyError (the data structure already validates this in __init__) or return an empty list. Quiet fallbacks are the kind of thing that bites someone six months from now when a new model ships and nobody notices the speaker list is wrong.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "218-230",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "input_audio_codec silently dropped from STT connect_kwargs",
+        "detail": "The diff removes `input_audio_codec` from connect_kwargs without a comment. If that was deliberate (the v3 endpoint doesn't accept it) it should be guarded by config like language and mode; if it was accidental, v2.5 callers lose the ability to set codec. Either way, the change isn't explained and the data structure doesn't capture it. Add `supports_input_audio_codec` to the config or document why it was removed.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "388-396",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "Decision: WRONG-DATA-STRUCTURE. The PR is correct and the validation discipline is real, but it ships seven parallel boolean capability flags per model when the underlying data is just 'which parameters does this model accept.' The result is the same conditional logic written three times (init, setter, connect/payload) in both STT and TTS, and it will get worse the next time Sarvam ships a model. Replace the boolean fan-out with a `supported_params: frozenset[str]` on each config, build payloads as a filter over that set, and the algorithm becomes self-evident \u2014 exactly what Rule 5 is about. The enums for speaker names are TOO-MUCH-HIERARCHY for what a frozenset would do, and `get_speakers_for_model`'s silent fallback to v2 is TOO-CLEVER. None of this is a merge blocker on correctness; it's the kind of cleanup that pays back the next time someone touches this file."
+  },
+  "raw": ""
+}

@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "ratelimit__996",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared rateLimit on every call \u2014 place-oriented programming in a hot path",
+        "detail": "The function reaches into `rateLimit` (a pointer shared across all callers of this descriptor) and overwrites `rateLimit.Stats` and `rateLimit.FullKey` based on the *current* request's runtime values. The rateLimit value belongs to the descriptor tree (one identity per leaf) but is being treated as per-request mutable place. Under concurrent traffic with different runtime values, two goroutines will race to stomp `Stats`/`FullKey`, and one request's metric increment will land on another request's counter. This is the exact `value vs. identity vs. time` confusion the lens exists to call out: the descriptor's identity is being smeared with per-call value.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unbounded metric cardinality from raw runtime values written into stats keys",
+        "detail": "`valueToMetricFullKey` concatenates `entry.Value` directly into a statsd-style key with no sanitization, length cap, or cardinality guard. Runtime values like `subject_id`, `route`, or wildcard-matched `action` are exactly the user-controlled, high-cardinality strings the existing `detailed_metric` doc warns about \u2014 yet this new path lacks even that warning's enforcement. A single misbehaving client emitting unique values explodes the stats store. The essential problem (selective per-value metrics) is real; the incidental complexity (no bound, no escape) is being shipped as if it were simple.",
+        "file": "src/config/config_impl.go",
+        "lines": "330-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel key builders complect 'how we matched' with 'what we name the metric'",
+        "detail": "The function now maintains `detailedMetricFullKey` and `valueToMetricFullKey` side by side, plus `matchedViaWildcard`, `matchedUsingValue`, and a post-loop reconciliation that calls `NewRateLimit` purely to 'get a clean stats struct' before immediately overwriting it. The naming concern (what string identifies this counter) is intertwined with the matching concern (which descriptor node fits) and the construction concern (how rateLimit is built). A pure function `metricKey(descriptor, entries) string` taking already-resolved match info would decompose this cleanly; instead we have three flags and a branchy in-loop builder whose three arms produce nearly identical code.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The three branches in the value_to_metric builder collapse to one rule but are written as if they were different",
+        "detail": "Reading the branches: wildcard+flag appends key_value, wildcard-no-flag appends key, matchedUsingValue always appends key_value, default+flag appends key_value, default-no-flag appends key. That is a single rule: `append key, and append _value iff (flag is set OR matchedUsingValue) AND value != \"\"`. Writing it as five interleaved if/else arms makes it look essentially complex when it is incidentally complex. This is exactly the 'easy-not-simple' pattern \u2014 copy-paste branches feel familiar but obscure the one underlying predicate.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-388",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconciliation path calls NewRateLimit for its side effects then discards the stats it just created",
+        "detail": "`rateLimit = NewRateLimit(... NewStats(rateLimit.FullKey) ...); rateLimit.Stats = NewStats(enhancedKey); rateLimit.FullKey = enhancedKey` constructs a Stats keyed on the *old* FullKey only to immediately replace it. That is two NewStats calls per request on the hot path (one wasted) and a constructor used as a struct-zeroer. The comment 'Recreate to ensure a clean stats struct' suggests the author wanted immutability but reached for a constructor with side effects instead of just allocating the new value. A small helper that returns a fresh `*RateLimit` value with the desired key would be both simpler and avoid the wasted Stats allocation/registration.",
+        "file": "src/config/config_impl.go",
+        "lines": "419-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature overlaps detailed_metric without a clear conceptual line",
+        "detail": "`detailed_metric` already means 'include runtime values in the metric key'. `value_to_metric` means 'include runtime values in the metric key, but selectively, and with precedence rules.' Two flags on the same descriptor now answer the same question with subtly different semantics, and the doc has to explain a precedence rule because the two concepts overlap. The question that should have been asked first is whether `detailed_metric` should have grown a per-level scope rather than introducing a second, partially-overlapping flag that future readers will have to mentally diff against the first one.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-71",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal updated in two places \u2014 fragile to future field additions",
+        "detail": "`&rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric}` and the domain initializer use positional initialization. Adding a fifth field will require touching every call site and silently mis-assigning if order shifts. Named-field initialization (`&rateLimitDescriptor{descriptors: ..., valueToMetric: ...}`) makes the value's shape explicit and immune to field reordering \u2014 a small, simple change.",
+        "file": "src/config/config_impl.go",
+        "lines": "188-268",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert on stats keys but never exercise concurrent requests with differing runtime values",
+        "detail": "Every new test issues sequential GetLimit calls and reads `rl.Stats.Key`. That tests the happy single-threaded case but does not catch the shared-rateLimit mutation flagged above. A test that calls GetLimit concurrently with two distinct entry values against the same leaf and asserts that *each returned* rl has the correct key would either fail (confirming the race) or document the intended semantics. As written, the tests prove the metric formatting code is wired up \u2014 they do not prove the feature is safe.",
+        "file": "test/config/config_test.go",
+        "lines": "955-1595",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature represents a real, value-shaped fact (which descriptor levels should fold their runtime value into the metric name), but the implementation complects naming, matching, and construction inside an already-complex GetLimit, and then mutates a shared rateLimit identity with per-request values \u2014 a textbook place-oriented bug waiting for concurrent traffic with varying values. The five-armed key builder collapses to a single rule (append key, append _value when flag-or-matched-by-value and value non-empty); writing it as branches is easy-not-simple. Cardinality is left to the operator with no guardrails, despite the adjacent detailed_metric doc explicitly warning about exactly this. The cleanest path is to extract a pure `metricKey(descriptorPath, entries) string` function, build a fresh `*RateLimit` value rather than mutating the shared one, and ask whether this should be a scoped form of `detailed_metric` rather than a second overlapping flag. Decision label: COMPLECTED with a PLACE-ORIENTED leak on the hot path."
+  },
+  "raw": ""
+}

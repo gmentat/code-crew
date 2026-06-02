@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "openbao__2362",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub always returns false, defeating its purpose and any caller that relies on it",
+        "detail": "vault/core.go adds (*Core).NamespaceSealed which unconditionally returns false. ListAllNamespaces and other callers reportedly depend on this to include/exclude sealed namespaces. Until SealManager lands, any code path treating this as authoritative (e.g., ACL fast-path, listing, routing) will silently behave as if no namespace is ever sealed, producing potential security/correctness regressions if merged before the follow-up.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Root policy ACL no longer requires root namespace, expanding privilege scope without audit trail",
+        "detail": "vault/acl.go removes the `ns.ID != namespace.RootNamespaceID` guard in NewACL when constructing root policy. Previously, attaching a `root` policy outside the root namespace was rejected; now any namespace can hold a root-policy ACL and grant fast-path root privileges to descendants via HasParent. This is a significant security-model change that needs explicit policy-creation gating elsewhere, otherwise child namespaces could mint root-equivalent tokens.",
+        "file": "vault/acl.go",
+        "lines": "101-110",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation returns empty ACLResults silently when namespace is missing from context",
+        "detail": "In vault/acl.go AllowOperation, namespace.FromContext error now returns `ret` (Allowed=false) before the root fast-path is even attempted. Previously root fast-pathed without needing ns. Any caller that passed an ACL with root policy but a malformed context would have succeeded; now it denies. This is likely intentional but worth confirming no internal call site relies on the old behavior.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent semantics for root-self check are unverified in the diff",
+        "detail": "The new root check uses `!ns.HasParent(a.root)` to allow. It's unclear whether HasParent returns true when ns == a.root (i.e., same namespace). If HasParent is strict ancestor-only, a root-policy token in ns1 would fail to fast-path on ns1 itself. Diff lacks a same-namespace test case (test only covers ns1 vs root). Add a test for ns1->ns1 and confirm semantics.",
+        "file": "vault/acl.go",
+        "lines": "349-360",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AdjustErrorStatusCode refactor changes ErrAPILocked precedence relative to HTTPCodedError",
+        "detail": "sdk/logical/response_util.go converts sequential if-blocks into a switch. Previously, multiple conditions could each mutate `*status` (sealed AND HTTPCoded would let HTTPCoded win last). Now switch executes only the first matching case, so an error wrapping both ErrSealed and an HTTPCodedError will return 503 instead of the coded status. This is a subtle behavior change that needs confirmation it's intentional.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-180",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NamespaceSealed TODO comment hardcodes a developer handle and lacks a tracking issue link",
+        "detail": "vault/core.go contains `// TODO(wslabosz): implement with seal manager`. Prefer linking the tracking issue (#1357 referenced in PR) so the stub isn't orphaned if the author leaves. Also worth documenting in the godoc that the method currently always returns false, so callers don't assume real behavior.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR lays groundwork for per-namespace sealing and namespace-owned root tokens. The two highest-risk changes are the NamespaceSealed stub that always returns false (so ListAllNamespaces and any other dependent path silently behaves as if nothing is sealed) and the removal of the root-namespace restriction on root-policy ACLs, which broadens privilege semantics. The response_util switch refactor changes precedence between ErrSealed and HTTPCodedError and should be verified intentional. Test coverage for the new namespace-aware root fast-path is thin (only ns1 vs root, no same-namespace case)."
+  }
+}

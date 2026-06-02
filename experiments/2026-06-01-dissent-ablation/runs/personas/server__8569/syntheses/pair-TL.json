@@ -1,0 +1,73 @@
+{
+  "task_id": "server__8569",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Shared TritonLoraConfig.is_registered is mutated in the request builder, creating a race and stale-cache hazard.",
+        "detail": "_create_trtllm_generate_request flips is_registered=True on a shared object returned from model_metadata, with no lock and before the backend has confirmed caching. Concurrent first-requests race, and if inference fails or the model reloads, subsequent requests omit weights the engine no longer holds. Move registration state to a per-(model,task_id) registry updated on confirmed server-side caching.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-243",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig collapses two distinct backend ADTs into one all-Optional dataclass, violating LSP.",
+        "detail": "vLLM requires only name; TRT-LLM requires task_id and path. Call sites index task_id/path without precondition checks. Split into a sealed hierarchy or tagged union (VllmLoraConfig, TrtllmLoraConfig) with non-Optional required fields so substitution is total and the contract is enforced by the type system.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs return annotation lies \u2014 declared List[tuple[str,str]] but returns List[TritonLoraConfig].",
+        "detail": "The annotation is stale from the rename. Type checkers and the next maintainer are misled. Update to Optional[List[TritonLoraConfig]] or, better, return a typed LoraCatalog value object carrying the backend kind so downstream code stops re-deriving it.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print(traceback.format_exc()) and print(f\"backend: {backend}\") leaked into production paths.",
+        "detail": "Unconditional prints sprinkled into routers and the parser are not gated and will spam stdout in production. Replace with logger calls at appropriate levels or remove. Feature patches should not ship with debug churn baked in.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "681, 688, 712",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_task_id assignment is non-deterministic and collides across model repos.",
+        "detail": "Task IDs start at 1 and increment per call to _parse_lora_configs based on dict iteration order. There is no guarantee the same LoRA name maps to the same task_id across restarts, and IDs collide across base models. TRT-LLM caches by task_id; collision means the wrong adapter is served. Hash the name or assign per-(model,name) deterministically.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "625-712",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Backend dispatch via stringly-typed parameter inside _parse_lora_configs leaks the abstraction.",
+        "detail": "The function bundles two parsers (vllm and trtllm) selected by a backend string, forcing every call site to know the backend and the function to grow a branch per backend. Introduce a LoraCatalogProvider protocol with per-backend implementations registered by name to clean the module boundary.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR ships a working multi-LoRA happy path but bundles a feature with debug churn and hides two real correctness bugs. The shared, mutable is_registered flag on TritonLoraConfig creates a race and stale-cache hazard, and conflating vLLM and TRT-LLM into one all-Optional dataclass is a clear LSP violation. The new parser has a wrong return annotation, a stringly-typed backend dispatch, and non-deterministic task_id assignment that risks serving the wrong adapter. Strip the debug prints, split the ADT, make task_id deterministic, and move registration state to a confirmed-caching registry before landing."
+  }
+}

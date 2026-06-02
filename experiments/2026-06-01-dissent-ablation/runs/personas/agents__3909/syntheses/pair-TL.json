@@ -1,0 +1,72 @@
+{
+  "task_id": "agents__3909",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Sample rate is silently coerced into an audio_format string with no validation against the declared STTAudioFormat literal",
+        "detail": "STTAudioFormat enumerates exactly six pcm_* literals, but the constructor builds f\"pcm_{sample_rate}\" via typing.cast, bypassing the type contract. Passing sample_rate=11025 produces \"pcm_11025\" which the server rejects. Validate sample_rate against the allowed set at __init__ and raise immediately, or accept audio_format directly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "STTv2.recognize raises NotImplementedError, violating the STT supertype contract",
+        "detail": "The STT supertype promises _recognize_impl returns a SpeechEvent. STTv2 weakens postconditions by raising, breaking LSP \u2014 any caller treating STTv2 as STT may fail. Either widen the supertype to express streaming-only capability, or make recognize fall back to a single-shot stream consumption.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "153-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "APIConnectionError raised inside recv_task is swallowed by bare except, leaving a dead session spinning",
+        "detail": "_process_stream_event raises APIConnectionError on auth_error/quota_exceeded, but recv_task wraps the call in `except Exception: logger.exception(...)` and continues. The connection error is logged and the loop keeps running on a dead session. Re-raise APIConnectionError specifically, or set a flag and break.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "228-232, 396-403",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect scaffolding is dead code \u2014 nothing sets _reconnect_event on task failure",
+        "detail": "The outer `while True` only loops when _reconnect_event is set, but nothing sets it. If send/recv task raises, tasks_group exits with an exception and the function terminates. A transient network blip kills the stream. Either wire reconnect on failure or delete the scaffolding.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "243-273",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented VAD/duration parameter ranges are not enforced as preconditions",
+        "detail": "Docstring asserts vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_*_duration_ms in [50, 2000]. None are checked; out-of-range values are forwarded to the server, which fails opaquely. Validate at __init__ and raise ValueError with bounds, or remove the range claims from the docstring.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "76-107",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speech-segment invariant relies on an empty-commit terminator with no fallback",
+        "detail": "_speaking should be True iff START_OF_SPEECH was emitted without a matching END_OF_SPEECH. Currently only an empty committed_transcript ends the segment; if the server never sends it (network drop, error), downstream consumers never see END_OF_SPEECH. State the protocol contract explicitly or add a timeout-based fallback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-378",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The PR adds a streaming Scribe v2 client in the right shape \u2014 a separate STTv2 class mirroring the Deepgram pattern with sensible chunking \u2014 but several contract-level and runtime bugs must be addressed before landing. Most serious: sample_rate is cast into an audio_format string bypassing the STTAudioFormat literal, STTv2.recognize raises NotImplementedError in violation of the STT supertype contract, and APIConnectionError from the server is swallowed by a bare except in recv_task. The reconnect scaffolding is dead code, documented parameter ranges are unenforced, and the speech-segment end relies on a fragile empty-commit terminator. Fix the validation, error propagation, and reconnect path, clarify the substitutability story, and this lands."
+  }
+}

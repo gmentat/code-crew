@@ -1,0 +1,74 @@
+{
+  "persona": "pike",
+  "task_id": "stylelint__9044",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "HAS_PERCENTAGE regex omits the `i` flag while HAS_KEYWORD uses it \u2014 inconsistent and likely a bug for uppercase `FROM`/`TO`-style selectors using percentages",
+        "detail": "In keyframe-selector-notation, `HAS_KEYWORD` is built with the `i` flag but `HAS_PERCENTAGE` is not. Selectors are case-insensitive in CSS, and the rest of the file (and the keyword lowercasing logic) assumes that. If a user writes `0%, 50%` it works, but the asymmetry is a code smell that says the author hadn't pinned down the data shape (selectors as case-insensitive strings) before writing the filter. Make both case-insensitive or document why one isn't.",
+        "file": "lib/rules/keyframe-selector-notation/index.mjs",
+        "lines": "35-37",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pre-filter regexes duplicate the rule's own matching logic \u2014 two sources of truth for what counts as a keyword/numeric/percentage",
+        "detail": "HAS_NAMED/HAS_NUMERIC in font-weight-notation, HAS_PERCENTAGE/HAS_KEYWORD in keyframe-selector-notation, and the `url(` check in import-notation each restate the matching criteria already encoded by the downstream parser-driven check. That's the right data structure (a single source: the keyword sets / parsed AST) being shadowed by a second one (regex). When the underlying sets change, both must change. A small shared helper like `buildKeywordRegex(set, flags)` derived from the same Set would keep the data primary and remove the drift risk.",
+        "file": "lib/rules/font-weight-notation/index.mjs",
+        "lines": "42-48",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`/:/` pre-filter in selector-pseudo-element-colon-notation is barely a filter \u2014 almost every selector has a colon",
+        "detail": "Replacing `ruleNode.selector.includes(':')` with `walkRules(/:/, ...)` is a wash \u2014 postcss still has to test each rule's selector with the regex instead of with `.includes`. The win is removing one line; the cost is a tiny regex test per rule. Fine, but not really a performance fix \u2014 call it what it is (consistency with the other selector-* rules) rather than letting the changeset imply throughput gains.",
+        "file": "lib/rules/selector-pseudo-element-colon-notation/index.mjs",
+        "lines": "40",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`selectorRegex = /./` sentinel in keyframe-selector-notation is a tell \u2014 the data shape wants an optional filter, not a no-op regex",
+        "detail": "Using `/./ ` as a match-everything regex so `walkRules` always fires is a small wart. The natural shape is `selectorRegex: RegExp | undefined`, then `if (selectorRegex && !selectorRegex.test(getRuleSelector(rule))) return;` inside the walker \u2014 same as media-feature-range-notation already does two files over. The pattern in this PR is inconsistent across the two files for no reason. Pick one shape (an optional pre-filter) and apply it uniformly; the algorithm follows the data.",
+        "file": "lib/rules/keyframe-selector-notation/index.mjs",
+        "lines": "78-86",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`import-notation` inverts the regex semantics between branches \u2014 small but easy to misread",
+        "detail": "One branch is `!/url\\(/i.test(params)` (skip if no url), the other is `/url\\(/i.test(params)` (skip if url present). Correct, but the asymmetric polarity invites a future bug. A two-line `const hasUrl = /url\\(/i.test(params); if ((primary === 'string') !== hasUrl) ... ` style \u2014 or just `if (primary === 'string' ? !hasUrl : hasUrl) return;` \u2014 names the data (hasUrl) once and makes the policy obvious.",
+        "file": "lib/rules/import-notation/index.mjs",
+        "lines": "50-54",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No measurements quoted in the changeset \u2014 \"performance\" claim is asserted, not shown",
+        "detail": "Rule one: don't tune for speed until you've measured. Rule two: measure. The PR description and changeset both say \"performance\" but neither cites a benchmark, a workload, or a before/after number. That's fine for obviously-correct skip-fast filters (selector-not-notation's `:not(` filter is clearly a win on selector-heavy stylesheets), but the font-weight and import-notation filters do non-trivial regex work on every decl/at-rule and could be a wash on inputs that don't trigger them. A one-line `hyperfine` or internal benchmark note in the PR body would close the loop.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The PR is the right shape: cheap regex pre-filters in front of expensive AST parsing, applied across a family of `*-notation` rules. That's exactly the kind of small, composable optimization Pike likes \u2014 it leaves the algorithm alone and uses the data shape (the raw string) to skip work. The main concern is that the filtering criteria are now restated in two places (the regex and the parser-driven check) per rule, with no shared builder \u2014 `HAS_NAMED`, `HAS_NUMERIC`, `HAS_PERCENTAGE`, `HAS_KEYWORD` all reconstruct sets that already exist as data structures elsewhere. The case-insensitivity asymmetry in keyframe-selector-notation looks like a real bug, and the `/./ ` sentinel vs. `RegExp | undefined` inconsistency between media-feature-range-notation and keyframe-selector-notation should be unified. No measurements are quoted; for a PR titled \"performance,\" at least one before/after number belongs in the changeset. SMALL-AND-COMPOSABLE overall, with one WRONG-DATA-STRUCTURE smell around duplicated keyword sources of truth."
+  },
+  "raw": ""
+}

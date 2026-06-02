@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "pipecat__3410",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "FrameSerializer subtype weakens the serialize() postcondition by silently dropping audio when remainder < packet_size",
+        "detail": "VonageFrameSerializer.serialize promises to return serialized bytes for AudioRawFrame. The new FastAPIWebsocketTransport buffering layer then withholds bytes shorter than fixed_audio_packet_size without ever flushing. The supertype contract (every serialized payload reaches the wire) is weakened: trailing PCM is dropped at EOS/close. Either flush on Cancel/EndFrame (pad with silence) or document the lossy postcondition.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization concern lives on the wrong side of the module boundary",
+        "detail": "Audio framing (20ms @ 16kHz = 640B) is a property of the Vonage protocol \u2014 it belongs to VonageFrameSerializer's contract, not to FastAPIWebsocketTransport. Pushing fixed_audio_packet_size into the generic transport leaks a serializer-specific invariant upward and forces every future protocol to re-negotiate this knob. Composition (a packetizing wrapper serializer) would respect the boundary.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "56-66, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Missing invariant: fixed_audio_packet_size must be compatible with sample format",
+        "detail": "The contract for fixed_audio_packet_size is unstated. It must be a multiple of (bytes_per_sample * channels) or the receiver gets misaligned PCM and noise. No validation in setup() or __init__; a caller passing 641 silently corrupts every packet. State the precondition and enforce it (assert or raise on StartFrame).",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InterruptionFrame ordering: buffer cleared in process_frame but _write_frame may have inflight data",
+        "detail": "process_frame clears _audio_send_buffer before delegating, but if _write_frame is racing on another task (websocket send is async), an in-progress chunk send is not cancelled and stale audio still reaches the wire after interruption. The invariant 'no pre-interruption PCM after InterruptionFrame' is not preserved. Needs a send lock or sequence guard.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "428-435, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "deserialize() return type widens \u2014 non-audio events return None silently, hiding protocol drift",
+        "detail": "Unknown Vonage events fall through to a debug log and return None. The contract should distinguish 'event handled, no frame needed' from 'unknown event'. As Vonage evolves the protocol, this swallows new events with no observable signal beyond a debug line. Consider a SystemFrame for unhandled-event telemetry, or at minimum warn-level logging.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "155-180",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF digit shape is under-specified at the contract boundary",
+        "detail": "deserialize tries message.get('digit') then message.get('dtmf', {}).get('digit'). Two accepted shapes with no spec reference means the contract isn't pinned to the Vonage docs \u2014 it's pinned to whatever was observed. Cite the documented shape and treat the other as a compatibility shim with a TODO, or the abstraction quietly drifts.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "165-178",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The Vonage serializer itself is a reasonably clean ADT \u2014 clear setup/serialize/deserialize contract, hidden resampler state. The substitution problem is on the transport side: FastAPIWebsocketTransport now buffers serialized output to enforce a packet size, which weakens the serializer's postcondition (trailing bytes are dropped at shutdown) and pulls a protocol-specific concern (Vonage's 20ms framing) into a generic module \u2014 a boundary violation. The right shape is a composing PacketizingFrameSerializer wrapper, leaving FastAPIWebsocketTransport's interface unchanged. Secondary issues: missing alignment invariant on fixed_audio_packet_size, a race between InterruptionFrame buffer-clear and in-flight sends, and under-specified deserialize() handling for unknown events and DTMF shapes."
+  }
+}

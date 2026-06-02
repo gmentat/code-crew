@@ -1,0 +1,77 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil *result on leader-panic violates run()'s postcondition and pushes nil-deref risk to callers",
+        "detail": "When CompareAndSwap fails and t.result.Load() is nil, the new code returns nil. Every other run() exit yields a non-nil *result and downstream callers rely on that. The fix should return a sentinel result with Fatal set, not nil \u2014 otherwise the nil-deref simply moves one layer up.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The t.result lifecycle invariant is unstated; the race between Load and use is patched, not reasoned",
+        "detail": "The fix depends on the leader CASing t.result back to nil on panic, but that invariant is not documented at the call site or module boundary. The two branches (pending-output and CAS-failure) now handle the same race inconsistently. State the t.result state machine and memory ordering, or unify the snapshot path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Cycle detection is skipped on the CAS-failure slow path where it previously ran",
+        "detail": "Before the refactor, checkCycle ran whenever t.result.Load() was non-nil at entry. After the change, when CAS fails and a waiter joins an already-pending task, control jumps straight to waitUntilDone with no checkCycle. A caller in a cycle will now deadlock on output.done instead of returning ErrCycle.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test exercises the panicking-leader-with-waiters race",
+        "detail": "A concurrency bug that produced a nil deref is being fixed with zero new tests. Add a deterministic reproducer: inject a panic in the leader, have N waiters contend, and assert each gets a sensible error rather than nil or panic. Without this, the fix will regress silently.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' inverts the meaning of its branch",
+        "detail": "The surrounding logic fires precisely when no result was observed. The comment should read 'did not see a result'. Comments are part of the spec; an inverted comment on a subtle concurrency branch will mislead maintainers about when this path fires and whether returning nil is intended.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inner `output := t.result.Load()` shadows the outer named return and obscures roles",
+        "detail": "Inside the CAS-failure branch a new `output` shadows the function's named return. The two variables represent different roles (this goroutine's own result vs. the leader's). Rename the inner one (e.g., `leader`) to make the relationship explicit and prevent accidental misuse.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is NEEDS-WORK. The checkCycle extraction is a fine cleanup, but the race fix is half-done: returning bare nil from run() on leader-panic relocates the nil-deref into every caller rather than eliminating it, and the underlying t.result lifecycle invariant is never stated. Liskov additionally observes that cycle detection is now skipped on the CAS-failure path, introducing a deadlock regression. Required changes: return a Fatal-carrying sentinel instead of nil, reinstate checkCycle on the slow path, document the t.result state machine, fix the inverted comment, and add a deterministic regression test for the panicking-leader case."
+  }
+}

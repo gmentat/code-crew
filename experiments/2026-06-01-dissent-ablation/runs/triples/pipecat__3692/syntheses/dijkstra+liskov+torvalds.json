@@ -1,0 +1,77 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Control frame embeds a live FrameProcessor reference instead of a stable identifier",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service is typed as FrameProcessor, embedding a stateful runtime object in a value-flowing control frame. This couples frame identity to object identity, leaks the processor abstraction through the frame ADT, breaks serializability, and invites identity-vs-equality bugs. Use a stable identifier (service name or id) and resolve at the switcher.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Suppression via `==` on FrameProcessor is fragile and undefined for inactive targets",
+        "detail": "The switcher only consumes the frame when `frame.service == self.strategy.active_service`, relying on identity-fallback equality. If the active service is wrapped, proxied, or re-instantiated, the check silently fails open. Behavior for frames targeting inactive services is neither documented nor handled \u2014 they leak downstream. Use `is` or a stable id, and specify all cases.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Handler contract is split across switcher and STTService without being written down",
+        "detail": "STTService now re-pushes the request frame and relies on the switcher to suppress it. The postcondition (downstream invisibility) silently weakens when STTService runs outside a switcher, and any STTService subclass overriding process_frame can violate the new invariant unknowingly. Document the contract on the frame and STTService, or centralize the re-push.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string `\"FrameProcessor\"` may hide a missing import",
+        "detail": "The dataclass field annotation is a string forward reference. Dataclasses don't resolve annotations at runtime, but `get_type_hints()`, schema introspection, or IDE tooling will fail if FrameProcessor isn't actually importable in frames.py. Either import the symbol properly under TYPE_CHECKING or document why the string was required.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename is a breaking public-API change with no deprecation alias",
+        "detail": "RequestMetadataFrame was an exported symbol; renaming it outright breaks downstream importers on the next version bump. A one-line `RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame` alias with a DeprecationWarning costs nothing and preserves back-compat. A changelog entry alone is insufficient.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test verifies frame presence but not that it targets the correct service",
+        "detail": "The updated test asserts service2 received one ServiceSwitcherRequestMetadataFrame but never checks `request_frames[0].service is service2`. The whole point of the rename is targeted dispatch; the test does not prove the target field is correct. Add an assertion on the service field to verify the invariant the rename was meant to introduce.",
+        "file": "tests/test_service_switcher.py",
+        "lines": "475-482",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The rename is mechanically clean, but the panel converges on a single taste failure: a live FrameProcessor reference is the wrong payload for a control frame. This identity-based design forces fragile `==` comparisons in the switcher, leaves behavior for inactive targets undefined, and splits the handler contract across STTService and the switcher without documentation. Secondary concerns include a string forward-reference that may hide a missing import, no deprecation alias for the renamed public symbol, and tests that verify presence but not targeting correctness. NEEDS-WORK: narrow the frame to a stable identifier, document the contract, and add a back-compat alias."
+  }
+}

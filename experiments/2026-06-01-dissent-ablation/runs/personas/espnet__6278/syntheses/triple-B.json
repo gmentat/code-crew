@@ -1,0 +1,77 @@
+{
+  "task_id": "espnet__6278",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring promises max_steps/val_interval, code reads max_step and never uses val_interval",
+        "detail": "__init__ reads trainer_args['max_step'] (singular) while the docstring documents 'max_steps'. val_interval is documented but never honored; run() calls valid() every save_interval instead. Callers writing configs to the documented contract will KeyError or get wrong validation cadence. Pick one spelling, honor the documented val_interval, and validate the dict at construction.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-77, 147-167",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint discovery parses directory names via split('step_')[-1] and crashes on any stray dir",
+        "detail": "_load_checkpoint globs 'step_*' and sorts by int(name.split('step_')[-1]). A directory named 'step_3_backup' or 'foo_step_10' silently misparses or raises mid-run. Replace string archaeology with a regex full-match (skipping non-matches) or a 'latest' symlink / index.json written at save time.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "95-118",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has unstated collective-call discipline and surprising in-place/rebind semantics",
+        "detail": "The function iterates `for key in stats` issuing one all_reduce per key, requiring every rank to pass identical keys in identical order or NCCL hangs. It also both mutates tensors in-place and rebinds dict entries to new tensors after division, contradicting the 'in-place' docstring. State and enforce the precondition, or return a fresh dict.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "118-152",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Specifier strings are a stringly-typed mini-language re-parsed by every consumer",
+        "detail": "The 'task:name:data_json[:factor]' grammar lives only in argparse --help, with train.py splitting validation specifiers on whitespace and passing train specifiers whole. Paths with colons or spaces silently mishandle. Lift the grammar into a small typed dataclass parser at the CLI boundary so the contract sits in one place.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-87, 187-204",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer silently depends on a global wandb.run with no precondition check",
+        "detail": "__init__ mutates wandb.config and run() calls wandb.log unconditionally, but there is no assert wandb.run is not None and no injected logger sink. Additionally get_global_grad_norm() can return None on skipped/fp16-overflow steps, polluting or erroring the log. Inject a logger or assert preconditions, and guard None metrics with nan.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "18-25, 88-90, 180-199",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_load_checkpoint silently falls back to step 0 when an explicit resume_path is missing",
+        "detail": "If the caller passes a resume_path that does not exist, the code silently starts from scratch rather than raising. Users expecting resumption may waste a full training run. Raise FileNotFoundError when resume_path is explicit and missing; only fall back to auto-discovery when resume_path is unset.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-122",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel converges on one root cause: trainer_args is an untyped dict whose documented contract (max_steps, val_interval) diverges from what the code actually reads (max_step) and honors (validation runs every save_interval, not val_interval). Around that core defect, reviewers agree on a cluster of contract and discipline failures: checkpoint discovery parses directory names via fragile string splitting, _all_reduce_stats assumes identical key ordering across ranks without stating or checking the precondition, the CLI relies on a stringly-typed specifier mini-language re-parsed by every consumer, and wandb is a hidden global dependency. Smaller issues \u2014 silent resume fallback and unguarded None metrics \u2014 should be cleaned up in the same pass. Fix the dict-as-API into a small dataclass with validated keys and most of these vanish."
+  }
+}

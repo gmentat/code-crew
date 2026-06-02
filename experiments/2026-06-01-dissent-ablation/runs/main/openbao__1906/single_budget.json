@@ -1,0 +1,154 @@
+{
+  "task_id": "openbao__1906",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "RevokeErr is unconditionally exposed via the API; the PR author flagged this as a security concern that was not resolved",
+        "detail": "The new field `revoke_error` is returned from `handleLeaseLookup` whenever `leaseInfo.RevokeErr != \"\"`. Revoke errors are produced by downstream backend code paths (database/SSH/AWS/etc.) and can contain raw driver/server output, hostnames, usernames, SQL fragments, and stack-like details. The PR description itself raises this question and leaves it unanswered. At minimum this should be gated to a privileged operation (sudo on `sys/leases/lookup`) or redacted to a short stable error class, otherwise any caller that can look up a lease can scrape sensitive infra details that were only ever intended for operator logs.",
+        "file": "vault/logical_system.go",
+        "lines": "2199-2201",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public method rename FetchLeaseTimes -> FetchLeaseInfo is a breaking API change with no shim",
+        "detail": "`FetchLeaseTimes` is an exported method on `*ExpirationManager` and was the documented entry point for fetching lease times. Renaming it to `FetchLeaseInfo` breaks any external consumer (forks, enterprise overlays, plugins that import `vault`) and any in-tree callers that weren't updated. The safer migration is to keep `FetchLeaseTimes` as a thin wrapper that calls `FetchLeaseInfo`, marked deprecated, and remove it in a later release. The changelog entry also does not mention this rename.",
+        "file": "vault/expiration.go",
+        "lines": "1703-1710",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cross-namespace information disclosure not verified",
+        "detail": "`namespace_path` is now returned from the lease entry's stored namespace. `handleLeaseLookup` does not appear to verify that the caller's namespace matches (or is an ancestor of) the lease's namespace. If a parent-namespace token can already look up child-namespace lease IDs, exposing the full child namespace path is at worst a minor leak; if a caller can guess/enumerate lease IDs from a sibling namespace, this newly leaks topology. The PR should include a test that asserts namespace scoping is enforced before adding `namespace_path` to the response.",
+        "file": "vault/logical_system.go",
+        "lines": "2195-2197",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport now leaks more state through the cachedLeaseInfo / inMemoryLeaseInfo path than the comment suggests",
+        "detail": "`inMemoryLeaseInfo` calls `leaseInfoForExport`, which now also copies `Path`, `RevokeErr`, and `namespace` into the pending/in-memory cache representation. The comment above `inMemoryLeaseInfo` says it restricts the entry to 'a low-cost subset' \u2014 that contract is now weaker, and `RevokeErr` in particular can be a long string that gets retained in memory for every pending lease. Either confirm this is intentional (and update the comment) or split the export shape from the in-memory shape so the cache stays small.",
+        "file": "vault/expiration.go",
+        "lines": "1737-1760",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "OpenAPI schema marks `path` as Required:true but older leases / irrevocable cache paths may not populate it",
+        "detail": "In `logical_system_paths.go` the new `path` field is declared `Required: true`. The cached/in-memory and irrevocable branches in `FetchLeaseInfo` return whatever `leaseInfoForExport` copies from `le.Path`; if any lease entry in storage was written before Path was reliably set, the field will be empty and the response will violate its own schema. Either mark it not required, or assert in a test that all code paths (pending cache hit, irrevocable cache hit, storage load) return a non-empty Path.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test context change is inconsistent and possibly behavior-altering",
+        "detail": "One test was changed from `namespace.RootContext(nil)` to `namespace.RootContext(t.Context())` while a nearby test in the same file kept `namespace.RootContext(nil)`. This is unrelated to the rename and should either be applied consistently or reverted; mixing the two styles in a single PR makes the diff noisier and obscures intent.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for new fields is minimal",
+        "detail": "`TestSystemBackend_leases` only asserts the `path` field. There is no test asserting `namespace_path` is populated for a namespaced lease, no test asserting `namespace_path` is absent for root, and no test asserting `revoke_error` is populated when a lease has a recorded revoke failure. Given that `revoke_error` is the security-sensitive addition, it deserves a direct test.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Metric label still says 'fetch-lease-times'",
+        "detail": "`defer metrics.MeasureSince([]string{\"expire\", \"fetch-lease-times\"}, time.Now())` inside the renamed `FetchLeaseInfo` keeps the old metric name. Keeping the metric name is actually the right call for dashboard continuity, but it deserves a brief comment so a future cleanup doesn't 'fix' it and break dashboards.",
+        "file": "vault/expiration.go",
+        "lines": "1711",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changelog entry undersells the change and omits the rename",
+        "detail": "The changelog says only that lookup now includes three new fields. It does not call out the exported method rename `FetchLeaseTimes` -> `FetchLeaseInfo`, which is the actual API-surface change downstream consumers care about. Add a `change` (or `breaking-change`) note as appropriate.",
+        "file": "changelog/1906.txt",
+        "lines": "1-3",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Docs updated for `path` only; `namespace_path` and `revoke_error` are not documented",
+        "detail": "`website/content/api-docs/system/leases.mdx` and `website/content/docs/commands/lease/lookup.mdx` were updated to show `path`, but neither file documents the new `namespace_path` or `revoke_error` fields. Users reading the API reference won't know these fields exist or when they appear.",
+        "file": "website/content/api-docs/system/leases.mdx",
+        "lines": "45-50",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether revoke_error should be exposed at all",
+        "positions": [
+          {
+            "persona": "security-conservative",
+            "position": "Revoke errors are produced by arbitrary backends and have historically only been operator log content. Default deny: do not return them through the API, or gate behind sudo. The PR author themselves flagged this and left it open \u2014 that uncertainty alone is grounds to block merge until resolved."
+          },
+          {
+            "persona": "operator-pragmatist",
+            "position": "Today operators only learn about revoke failures by tailing server logs or scanning irrevocable leases. Surfacing the error on lookup is genuinely useful for debugging stuck leases, and the caller already has the lease ID (i.e., already authorized to see lease state). Ship it, and follow up with redaction if a concrete leak is shown."
+          }
+        ]
+      },
+      {
+        "topic": "Whether renaming FetchLeaseTimes is acceptable",
+        "positions": [
+          {
+            "persona": "API-stability",
+            "position": "It's an exported symbol on a core type. Even if no in-tree caller breaks, forks/plugins/enterprise overlays will. Keep the old name as a deprecated wrapper."
+          },
+          {
+            "persona": "clean-naming",
+            "position": "The new name is more accurate (it returns more than times now), the in-tree callers are all updated in this PR, and openbao's compatibility surface for `vault` package internals has never been strong. The rename is fine."
+          }
+        ]
+      },
+      {
+        "topic": "Whether sharing leaseInfoForExport between API export and in-memory cache is good design",
+        "positions": [
+          {
+            "persona": "DRY",
+            "position": "One function, one redaction policy, easy to audit what's exposed. Sharing is correct."
+          },
+          {
+            "persona": "separation-of-concerns",
+            "position": "The 'what is safe to return to a caller' policy and the 'what should we keep cheap in memory per pending lease' policy are different concerns and will drift. They should be two functions; reusing one couples a security boundary to a memory-footprint optimization."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR cleanly adds three useful fields (`path`, `namespace_path`, `revoke_error`) to `sys/leases/lookup` and renames `FetchLeaseTimes` to `FetchLeaseInfo` with all in-tree callers updated. The dominant concern is security: `revoke_error` is returned verbatim from backend-produced error strings, the PR author explicitly flagged this as unresolved, and there is no gating, redaction, or test for sensitive content \u2014 this should block merge until a decision is documented. Secondary concerns are the breaking rename of an exported method without a deprecation shim, missing verification that `namespace_path` doesn't leak across namespace boundaries, and the dual use of `leaseInfoForExport` for both API export and in-memory cache (which weakens the previously narrow cache contract). Documentation and tests cover `path` but not the two more interesting new fields. None of the changes are wrong in spirit; the PR needs a security decision on `revoke_error`, a deprecation alias for `FetchLeaseTimes`, and tests/docs for the other two new fields before it should land."
+  },
+  "raw": ""
+}

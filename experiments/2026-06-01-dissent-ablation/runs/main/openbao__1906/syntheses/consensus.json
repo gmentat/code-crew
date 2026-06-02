@@ -1,0 +1,104 @@
+{
+  "task_id": "openbao__1906",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "RevokeErr exposed to API consumers without sanitization or stated invariant on contents",
+        "detail": "The PR author themselves asks 'Is it safe to display the revoke error?' and ships it anyway. RevokeErr is populated from backend plugins (database, PKI, AWS, KMS, etc.) and can embed connection strings, partial credentials, internal hostnames, stack traces, or upstream API error payloads. 'It gets logged' is not a security argument \u2014 logs and API responses have different threat models and ACLs. Resolution: either sanitize/whitelist at the producer side (markLeaseIrrevocable and friends), redact to a stable code or boolean (has_revoke_error), gate the field behind sudo/root capability, or replace the raw string with a structured {code, message} value with a documented stability contract. State and enforce the postcondition before merge.",
+        "file": "vault/logical_system.go",
+        "lines": "2197-2202",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo widens the contract without a compatibility shim or restated spec",
+        "detail": "FetchLeaseTimes had a precise contract: return time fields plus a stripped Secret/Auth. FetchLeaseInfo is both a breaking change for out-of-tree library callers (no deprecated wrapper, no changelog note about the break) and a vaguer name that invites future drift of what 'non sensitive information' means. The renamed function is now the chokepoint for what crosses the trust boundary on sys/leases/lookup, and its doc comment must enumerate exactly which fields are exposed and why each is safe. Resolution: keep FetchLeaseTimes as a thin forwarder or document the break, pick a sharper name (e.g. FetchLeaseExport / FetchPublicLeaseView), and write the contract into the doc comment rather than asserting 'non sensitive' as aspiration.",
+        "file": "vault/expiration.go",
+        "lines": "1700-1741",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for the new response fields is shallow \u2014 only `path` presence is asserted",
+        "detail": "TestSystemBackend_leases adds one assertion: resp.Data['path'] == 'secret/foo'. The two more contract-sensitive new fields (namespace_path, revoke_error) have no coverage for either their present or absent cases, and the three code paths through FetchLeaseInfo (cached, irrevocable, freshly-loaded) are not exercised for consistent population. The conditional emission logic (three separate if-blocks in handleLeaseLookup) is exactly where omission bugs hide. Add table-driven tests covering (root namespace vs child namespace) x (no revoke err vs revoke err set), plus a lookup-after-markLeaseIrrevocable case.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "leaseInfoForExport returns a partially-populated *leaseEntry and aliases the unexported namespace pointer",
+        "detail": "Reusing *leaseEntry as the export type complects 'full lease' with 'public view' \u2014 readers cannot tell from the type whether zero fields are redacted or genuinely empty, and the function now copies the unexported namespace pointer by reference into the returned value with no stated rule about lifetime, mutability, or ownership. Resolution: introduce a small LeasePublicInfo value type with explicit fields, or at minimum copy only the scalar fields actually needed (namespace.Path) rather than aliasing the pointer, and document the aliasing/ownership contract on the returned value.",
+        "file": "vault/expiration.go",
+        "lines": "1737-1760",
+        "flagged_by": [
+          "hickey",
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI schema marks `path` as Required:true but Path may be empty for some lease shapes",
+        "detail": "logical_system_paths.go declares the new `path` field with Required:true, and handleLeaseLookup unconditionally writes resp.Data['path'] = leaseInfo.Path. Some lease shapes (notably tokens on certain code paths) historically carry an empty Path, which would violate the Required contract silently. Either guarantee non-empty Path for any lease that can reach this handler and document it, or drop Required to match reality.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Drive-by t.Context() change applied to one call site but not its siblings",
+        "detail": "The diff changes namespace.RootContext(nil) to namespace.RootContext(t.Context()) at expiration_test.go line 2450 but leaves the sibling calls at lines 3104 and 3120 as nil. Either the context propagation matters (apply uniformly with a stated rationale) or it does not (drop the unrelated change). As written, the asymmetry leaves a reader unable to tell which form is correct, and mixes mechanical rename churn with a semantic change.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450, 3104, 3120",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "namespace_path emission conflates 'root namespace' with 'no namespace info'",
+        "detail": "handleLeaseLookup emits namespace_path only when leaseInfo.namespace != nil && leaseInfo.namespace.Path != \"\". That means absence of the field encodes two distinct states (root namespace vs no namespace data), forcing clients to know internal convention to disambiguate. Either always emit namespace_path (with \"\" or \"root/\" for root) or document explicitly in the API docs that absence means root namespace.",
+        "file": "vault/logical_system.go",
+        "lines": "2193-2195",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The diff is small and the direction is right: widen sys/leases/lookup to surface path, namespace_path, and revoke_error, and rename FetchLeaseTimes/leaseTimesForExport accordingly. Two issues are load-bearing before merge. First, RevokeErr is exported verbatim with no stated invariant that its contents are operator-safe \u2014 the author themselves flagged this and shipped a question mark; backend plugins routinely embed credentials, hostnames, and upstream payloads in error text, so this needs sanitization at the producer side, redaction here, or a capability gate. Second, the rename widens the abstract contract of the export helper without a compatibility shim or a written spec of which fields are exposed and why; 'non sensitive information' is aspiration, not specification. Secondary cleanups: deepen tests to cover namespace_path and revoke_error branches across cached/irrevocable/loaded paths, reconsider returning a partially-populated *leaseEntry (and stop aliasing the unexported namespace pointer), reconcile the OpenAPI Required:true claim on path with reality, drop the asymmetric t.Context() drive-by, and decide how namespace_path encodes the root-namespace case."
+  },
+  "raw": ""
+}

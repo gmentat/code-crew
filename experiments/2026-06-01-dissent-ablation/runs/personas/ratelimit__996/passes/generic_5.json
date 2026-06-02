@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared rateLimit pointer, causing global stats corruption across requests",
+        "detail": "In config_impl.go around lines 412-432, the code reassigns rateLimit.Stats and rateLimit.FullKey directly on the shared *RateLimit returned from the descriptor tree. This pointer is shared across all requests hitting the same limit. Each request with a different runtime value will overwrite Stats with a new key, breaking metrics and also racing with concurrent goroutines. The detailed_metric path has the same pre-existing pattern but value_to_metric makes it far worse because keys now vary per request.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unbounded metric cardinality from runtime values can OOM the stats store",
+        "detail": "value_to_metric injects raw entry.Value (e.g. subject_id, user, route) into the metric key with no sanitization or cardinality cap. Unlike detailed_metric which is documented as dangerous, this feature is positioned as the safer alternative but has the same unbounded-cardinality risk. A descriptor like user or session_id with value_to_metric: true will create unbounded counters in the stats store. The README warning is much weaker than detailed_metric's.",
+        "file": "src/config/config_impl.go",
+        "lines": "330-388",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Redundant double NewStats call leaks/creates an unused stats struct",
+        "detail": "Lines 425-427 call NewRateLimit which already creates a stats struct via this.statsManager.NewStats(rateLimit.FullKey), then immediately overwrite rateLimit.Stats with another NewStats(enhancedKey) call. The first stats object is discarded but already registered in the stats store, polluting it with the non-enhanced key. The comment 'Recreate to ensure a clean stats struct' does not justify creating two.",
+        "file": "src/config/config_impl.go",
+        "lines": "423-429",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric key collision between runtime-value and literal-key forms",
+        "detail": "A descriptor key 'route' matched via default produces 'route_api' when value_to_metric is on. But a sibling descriptor literally named 'route_api' (or a configured key+value matching 'route' + 'api') would produce the identical metric key. Without an escape character between key and value, collisions are silent. Worse, runtime values containing '.' will break the dotted metric path entirely.",
+        "file": "src/config/config_impl.go",
+        "lines": "354-385",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literals are fragile to future field additions",
+        "detail": "Lines 191 and 268 use positional struct initializers for rateLimitDescriptor: {map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric}. Any future field added to rateLimitDescriptor will silently shift meaning or fail to compile in non-obvious ways. Prefer named field initialization, especially since this struct is being extended in this very PR.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch when nextDescriptor is nil still writes to enhanced key builder",
+        "detail": "Lines 386-388 append entry.Key to valueToMetricFullKey when no descriptor was found. But when nextDescriptor is nil the loop's subsequent logic returns rateLimit (the previously-set one) and the enhanced key path may never be used, or worse may be used with a partial path. The 'deterministic' comment doesn't explain the semantics. Either document why this matches detailedMetricFullKey behavior or drop the write.",
+        "file": "src/config/config_impl.go",
+        "lines": "386-388",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "This PR introduces value_to_metric as a more granular alternative to detailed_metric but has serious correctness concerns. The biggest issue is mutating the shared *RateLimit pointer's Stats/FullKey on every GetLimit call, which races across goroutines and overwrites metrics globally. Additionally, the feature introduces unbounded cardinality without commensurate warnings, and the implementation creates redundant stats objects. The test coverage is good but only exercises single-request scenarios and does not catch the shared-state mutation bug."
+  }
+}

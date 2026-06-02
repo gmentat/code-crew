@@ -1,0 +1,60 @@
+{
+  "name": "generic_1",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking read can hang forever if writer never closes the FIFO",
+        "detail": "Once the first chunk arrives, the code switches to blocking mode and loops on os.read until EOF. If the subprocess hangs after writing partial data (or a different writer holds the FIFO open), the parent process will block indefinitely with no timeout or process-exit check. The previous select.poll loop provided liveness via the timeout; that protection is now gone for the bulk of the read.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-145",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of check_process_exited fallback may regress macOS EOF detection",
+        "detail": "The deleted branch handled a known case where macOS does not deliver EOF after the writer closes. The new code relies on blocking read returning 0 to detect EOF, but the original comment explicitly stated this may not happen on macOS. If that platform-specific behavior persists, this fix trades an intermittent JSONDecodeError for a guaranteed hang.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "152-158",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unused has_blocking_error tracking and dead BlockingIOError path",
+        "detail": "The BlockingIOError handler is now just `pass`, and has_blocking_error (if referenced elsewhere) may be dead code. Worth confirming the variable is fully removed and the except clause is still reachable in practice now that the first successful read immediately breaks to the blocking inner loop.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test added for the race condition fix",
+        "detail": "This is a tricky concurrency bug with a subtle fix involving fcntl mode switching. A regression test (e.g., a writer that produces a large payload then exits quickly) would lock in the behavior and prevent future reverts. None is included in the diff.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl is POSIX-only; consider Windows fallback",
+        "detail": "The new import and F_SETFL call will fail on Windows. If this code path is only exercised on POSIX (likely for FIFOs), confirm with an import guard or comment; otherwise the import alone may break Windows users on import time.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "7",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies a real race in non-blocking FIFO reads and switches to blocking mode once data starts flowing, which is a sound POSIX-based approach. However, it removes existing liveness safeguards (timeout via poll, check_process_exited on macOS) and replaces them with an unbounded blocking read loop that can hang if the writer stalls or if macOS fails to signal EOF. The fix should preserve a liveness check or timeout inside the inner blocking loop, and ideally include a regression test for the truncation scenario."
+  }
+}

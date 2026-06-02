@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20317",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "verify_signature leaks the RPC VerifySignatureResponse type into the util layer.",
+        "detail": "chia/wallet/util/signing.py imports VerifySignatureResponse from wallet_request_types and returns it directly. The util's contract should be a plain (bool, reason) result, not an RPC-shaped DTO. This couples the library to the RPC wire schema and undermines the reuse motivation for the extraction.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "13-65",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum truth table relies on implicit fall-through instead of an exhaustive dispatch.",
+        "detail": "The free function enumerates three of four (is_hex, safe_mode) combinations with elif and falls through to CHIP_0002 for the remaining case. Replace with a dict lookup keyed on the (is_hex, safe_mode) tuple or an explicit match so the contract is stated and a future flag combination cannot silently default.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sign_message and verify_signature duplicate the SigningMode-to-bytes transform.",
+        "detail": "Both functions in signing.py reimplement the same SigningMode -> message-bytes mapping with parallel if/elif ladders. Extract a single private helper (mode, message) -> bytes so the encoding table lives in one place. The two sites also disagree on whether unknown modes raise or silently default to CHIP_0002.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-39, 71-85",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "convert_secret_key_to_synthetic is placed on Wallet but called via main_wallet for unrelated DID/NFT keys.",
+        "detail": "Callers in wallet_rpc_api.py reach through main_wallet.convert_secret_key_to_synthetic to derive keys for DID/NFT wallets, and the method uses no instance state. It should be a module-level function in chia/wallet/util/signing.py alongside sign_message, where the synthetic-key derivation actually belongs.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "112-115",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "verify_signature docstring still references a removed `request` parameter.",
+        "detail": "The new function takes signing_mode, public_key, message, signature, and address as keyword args, but the docstring carried over from the RPC method still reads ':param request:'. Either describe the actual parameters or remove the stub; stale docs on a freshly extracted library function are a spec-missing signal.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "19-25",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "signing_mode_enum exists as both a module function and a property on request classes.",
+        "detail": "wallet_request_types.py defines a free function signing_mode_enum and also adds @property signing_mode_enum on two request classes that delegate to it. Pick one: keep the property and inline the logic, or keep the function and drop the property. Two names for one behavior invites drift.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the extraction is the right structural move: three near-duplicate sign_message implementations across Wallet, DIDWallet, and NFTWallet collapse into a single library function. The remaining concerns cluster on under-specified contracts in the new util layer. Most pressing: the util returns the RPC VerifySignatureResponse DTO, the (is_hex, safe_mode) dispatch leans on implicit fall-through, the SigningMode-to-bytes transform is duplicated inside signing.py, and convert_secret_key_to_synthetic sits on Wallet despite being a pure function used through main_wallet for unrelated DID/NFT keys. None block merge, but tightening these would make the boundary clean."
+  }
+}

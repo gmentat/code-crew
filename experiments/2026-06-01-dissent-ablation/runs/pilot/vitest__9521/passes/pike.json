@@ -1,0 +1,74 @@
+{
+  "persona": "pike",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles membership uses an array; should be a Set",
+        "detail": "isIncluded() runs once per file and does this.changedFiles.includes(filename) \u2014 O(n) per lookup. The data structure is fighting the algorithm: a Set<string> gives O(1) membership and makes the intent obvious. Same applies to the filter() in line ~200. n is usually small, but the glob cache exists precisely because this gets hit a lot.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "~89, ~175-178, ~200, ~332-348",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path normalization between changedFiles and isIncluded is not obviously consistent",
+        "detail": "isIncluded() normalizes the candidate via slash(cleanUrl(_filename)) before comparing to this.changedFiles, but onTestRunStart() stores whatever VitestGit.findChangedFiles() returns with no normalization. If git returns POSIX-relative paths and isIncluded gets absolute, slashed, query-stripped URLs, the includes() check silently returns false and coverage quietly excludes everything. The data shape on both sides of the comparison should be made identical at one place, with a comment naming the canonical form.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152, 175-178, 332-339",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two parallel \"changed\" code paths could be one",
+        "detail": "onTestRunStart has an if/else that produces this.changedFiles from either options.changed (via VitestGit) or ctx.config.changed (via config.related). Downstream code (isIncluded, the filter in includedFiles) now branches only on this.changedFiles. Good \u2014 that's the right shape. But resolveConfig also copies config.changed into coverage.changed when unset, which means the else branch is nearly dead in practice. Pick one: either always resolve to coverage.changed and let onTestRunStart use one path, or drop the resolveConfig inheritance and keep both branches honestly. Right now both exist and it's not obvious which wins.",
+        "file": "packages/vitest/src/node/coverage.ts, packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "coverage.ts 332-345; resolveConfig.ts 421-424",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform reinvents a boolean-string parser inline",
+        "detail": "The transform() in cli-config.ts hand-rolls 'true'/'yes'/'false'/'no' \u2192 boolean. Other CLI options in this file presumably handle the same coercion; if there's a shared helper, use it. If there isn't, this is the second or third place that wants one \u2014 extract a tiny toBoolOrString() and compose. Small tools, not copy-paste.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "File mode bit change on changed.test.ts is gratuitous",
+        "detail": "test/coverage-test/test/changed.test.ts flipped from 0644 to 0755 (old mode 100644 \u2192 new mode 100755). A test file does not need to be executable. This is the kind of accidental drag-along that survives because nobody looks at mode bits \u2014 drop it.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "mode header",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart hook is added at three call sites by hand",
+        "detail": "core.ts now calls await this.coverageProvider?.onTestRunStart?.() in three separate places, each immediately after this._testRun.start(...). That's a duplicated pairing waiting to drift. Either fold the hook into _testRun.start (it already knows when a run starts), or wrap the pair in one helper. Three identical calls means the abstraction boundary is in the wrong place.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "~609, ~752, ~884",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature is small and the data flow is mostly right: a single optional changedFiles list on the provider, consulted by isIncluded and the includedFiles filter. The shape is correct; the execution is a bit loose. Two real concerns: changedFiles should be a Set (the algorithm is fighting an array), and the path normalization on both sides of the membership check is not provably identical, which is the kind of silent-miss bug that makes coverage quietly report nothing. Two smaller concerns: the onTestRunStart hook is hand-pasted at three call sites in core.ts and would be better folded into _testRun.start, and the inheritance from test.changed exists in two places (resolveConfig and onTestRunStart) so it's unclear which wins. Decision label: SMALL-AND-COMPOSABLE with WRONG-DATA-STRUCTURE on the array-vs-set point. Strip the executable mode bit on the test file; it earns nothing."
+  },
+  "raw": ""
+}

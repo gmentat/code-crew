@@ -1,0 +1,78 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "GetLimit complects descriptor traversal, wildcard matching, and metric-key construction in one loop with duplicated builders",
+        "detail": "Two parallel key builders (detailedMetricFullKey, valueToMetricFullKey) with three near-identical branches (matchedViaWildcard, matchedUsingValue, default) collapse to one rule: append key, optionally with value. Extract a per-descriptor segment renderer driven by a single mode decision so the algorithm is self-evident and the descriptor owns its segment representation.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Post-hoc RateLimit reconstruction-then-mutation violates the abstraction and is a workaround for wrong data flow",
+        "detail": "The override block calls NewRateLimit and then overwrites Stats/FullKey on the returned value, mutating a value derived from shared descriptor state. Compute the final key once during the walk and pass it to a single NewStats call at construction. The extra allocation and discarded intermediate stats indicate the data is fighting the algorithm.",
+        "file": "src/config/config_impl.go",
+        "lines": "419-432",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Enhanced-key branch reads rateLimit.FullKey before non-detailed paths have set it, and FullKey semantics are quietly extended",
+        "detail": "The comparison enhancedKey != rateLimit.FullKey is undefined when the detailed_metric branch did not run, since FullKey may be zero or stale from shared config state. The detailed_metric path now also mutates FullKey as a piggybacked behavior change. Establish FullKey-matches-Stats.Key as a single invariant at construction time.",
+        "file": "src/config/config_impl.go",
+        "lines": "413-432",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two boolean knobs (detailed_metric, value_to_metric) with a prose precedence rule encode one decision: how to render the metric segment",
+        "detail": "These are not orthogonal flags; they are one render-mode choice (KeyOnly | KeyValue | Detailed) whose precedence is enforced by code ordering. Model it as a single metric_mode enum computed once per descriptor at load time. The current design will accrete more flags and more precedence rules as it grows.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-46, 412-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile against new fields",
+        "detail": "&rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric} relies on field order. The next field added will silently misalign every call site or force mechanical edits. Use named-field initialization so the struct's contract is explicit at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests cover happy-path rendered key strings but miss unmatched-descriptor and cross-level flag-interaction cases",
+        "detail": "Every new test pins a fully-rendered dotted string, so the per-level decision is not asserted as data. The nil-nextDescriptor fallback (which still appends entry.Key 'for determinism') and parent-vs-leaf flag interactions are not directly covered. Add tests for early-terminated walks and document the cross-level contract for which descriptor's flag controls which segment.",
+        "file": "test/config/config_test.go",
+        "lines": "955-1595",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the feature is useful but the implementation is complected: GetLimit runs two parallel key builders through the descriptor walk with three near-identical branches that collapse to one rule. The post-hoc RateLimit reconstruction-then-mutation is a workaround for the wrong data flow and weakens the abstraction's contract, and the enhanced-key comparison reads FullKey before non-detailed paths establish it. The two boolean knobs are really one render-mode decision. Decompose: compute a per-descriptor metric mode at load time, extract a pure segment renderer owned by the descriptor, build the key once, and construct RateLimit as a single value. Add tests for unmatched-descriptor and cross-level flag interactions, and switch to named-field struct literals."
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit allocates and discards a Stats counter on every request, registering counters in the stats store per call",
+        "detail": "When the enhanced key differs from FullKey, NewRateLimit is called with the old FullKey just to be thrown away, then NewStats is called again for enhancedKey. GetLimit is the hot path; this registers counters per request instead of once at config load. Build the right key once and allocate once.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared RateLimit Stats/FullKey without locking, creating a data race on shared config state",
+        "detail": "rateLimit is a pointer into the loaded config tree shared across concurrent requests. Reassigning rateLimit.Stats and rateLimit.FullKey inside GetLimit is a textbook race; concurrent callers with different runtime values will stomp each other. Resolve Stats per-call into a local view rather than writing back into shared descriptor state.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-432",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical key-builder branches collapse into one general rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default branch all reduce to: always write key; if (matchedUsingValue || (nextDescriptor.valueToMetric && value != '')) append '_' + value. The current 30-line switch special-cases what is one rule, hurts readability, and hides the equivalence. Collapse into a single conditional.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "value_to_metric work runs unconditionally on the hot path even when no descriptor enables it",
+        "detail": "valueToMetricFullKey builder and the NewStats override path run for every GetLimit call regardless of whether any descriptor in the matched chain sets valueToMetric. Precompute a boolean at config load time and gate the entire override (builder + stats override) behind it so the common case pays nothing.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric-key construction is duplicated and entangled with lookup control flow; should live behind a descriptor-owned helper",
+        "detail": "Three parallel key builders (detailedMetricFullKey, valueToMetricFullKey, plus matchedViaWildcard/matchedUsingValue flags) inline near-identical logic inside the lookup loop. Extract a per-descriptor metricSegment(entry, matchKind) helper so each mode's contract is stated once and the lookup loop stops reaching into descriptor internals.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-388",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literals for rateLimitDescriptor are fragile against future field additions",
+        "detail": "Two call sites construct rateLimitDescriptor positionally: {map{}, rateLimit, nil, descriptorConfig.ValueToMetric}. Adding any field will silently shift meanings at both sites with no compile error if types align. Use named-field literals to make the contract explicit at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this feature is reasonable but the implementation has two serious hot-path defects: GetLimit allocates and registers a throwaway Stats counter on every request, and it mutates the shared config-owned RateLimit's Stats/FullKey without locking \u2014 a data race under concurrent traffic. Beyond correctness, the new key-builder has three branches that collapse to one general rule, and the metric-key logic is duplicated and entangled with the lookup loop rather than living behind a descriptor-owned helper. The override should also be gated on a load-time boolean so the common case pays nothing. Positional struct literals should be replaced with named fields before merge."
+  }
+}

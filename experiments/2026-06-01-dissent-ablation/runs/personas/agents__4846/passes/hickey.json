@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "agents__4846",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Crash-log path complects buffering lifecycle with recording configuration and OTLP handler discovery.",
+        "detail": "Three concerns are intertwined: (1) whether to buffer, (2) whether/when to initialize recording, (3) finding the OTLP handler by isinstance scan. _on_cleanup synthesizes a RecordingOptions with logs=True regardless of what the user/server asked. Separate the buffer (a value: list of records) from the sink decision (a policy) from handler discovery (keep a direct reference at install time).",
+        "file": "livekit-agents/livekit/agents/job.py",
+        "lines": "186-313",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Handler discovery by isinstance scan over root logger handlers is place-oriented and fragile.",
+        "detail": "Both _flush_early_log_buffer and _shutdown_telemetry iterate root.handlers looking for a LoggingHandler instance. That couples this module to global mutable state and to whoever else may have added or wrapped that handler. Hold the handler returned by _setup_cloud_tracer as a value/identity on the JobContext and address it directly.",
+        "file": "livekit-agents/livekit/agents/job.py, livekit-agents/livekit/agents/telemetry/traces.py",
+        "lines": "job.py 215-223; traces.py 514-525",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unbounded in-memory log buffer with no cap, no drop policy, no time bound.",
+        "detail": "_BufferingHandler.buffer grows without limit between _start_log_buffering and either flush or cleanup. A job that crashes slowly, or a chatty library at DEBUG, can balloon memory before the worker ever notices. Make the buffer a bounded ring (size or bytes), and decide explicitly what to drop. The buffer is a value; give it a defined shape.",
+        "file": "livekit-agents/livekit/agents/telemetry/traces.py",
+        "lines": "102-110",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Shutdown handler removal mutates global logging state and can silently drop later log routing.",
+        "detail": "_shutdown_telemetry now strips every LoggingHandler from the root logger before force_flush. Any non-OTLP LoggingHandler the user installed is collateral. The essential problem (re-entrant emit during flush) deserves a narrower fix: remove only the handler this module installed, by reference, not by type scan.",
+        "file": "livekit-agents/livekit/agents/telemetry/traces.py",
+        "lines": "514-525",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unrelated worker.py reorder and makefile/test changes complect this PR's intent.",
+        "detail": "Reordering _pending_assignments registration before queuing availability_resp, disabling pytest -n auto, dropping test_plugin_google_stt, and the test_ipc retry-batch change are all separate facts about the world. They may each be correct, but bundling them with the crash-log feature makes the value of this change harder to reason about and to revert.",
+        "file": "livekit-agents/livekit/agents/worker.py, makefile, tests/test_ipc.py",
+        "lines": "worker.py 1193-1199; makefile 84-101; test_ipc.py 315-330",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_on_entry_done forces shutdown_fut on any exception, conflating crash with normal task exception semantics.",
+        "detail": "Setting _shutdown_fut with reason='job crashed' from a done-callback complects task failure with shutdown identity. If shutdown_fut is later awaited expecting a user-initiated value, the meaning of that value just got broader. Make the reason a typed value (CRASH vs USER vs TIMEOUT) and ensure consumers branch on it; don't overload one future with two life events.",
+        "file": "livekit-agents/livekit/agents/ipc/job_proc_lazy_main.py",
+        "lines": "326-340",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The intent is right \u2014 crash logs are facts the operator needs, and burying them inside session.start() complects \"the job ran\" with \"we can see what happened.\" But the implementation entangles three separable concerns: a buffer (value), a sink policy (when/whether to upload), and OTLP handler discovery (identity). Today those are smeared across JobContext, _on_cleanup, _flush_early_log_buffer, and _shutdown_telemetry, with isinstance scans over global logger state holding it together. Decompose: hold the OTLP handler by reference, give the buffer a bounded shape, and let _on_cleanup ask a policy \"should we upload crash logs?\" rather than synthesize RecordingOptions inline. Also: the worker.py reorder, makefile change, and test_ipc edits are separate stories and should travel separately."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "protocompile__645",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Contract for zero/nil receivers is implicit \u2014 no spec states the invariant being enforced",
+        "detail": "The PR establishes a new contract for the ir package: every public accessor on a zero or nil receiver must return a zero value rather than panic. This is a real invariant being added to the abstract data type, but it is encoded only in test code (zero_test.go) and scattered nil/IsZero guards. The package-level doc comment and the type doc comments for File, Member, Type, Oneof, ReservedName, Element, Imports, Symbol, etc. should state the contract explicitly: 'All accessors are safe to call on the zero value (and on a nil *File); accessors return the zero value of their result type.' Without a written spec, the next contributor will add a method that violates the invariant and the zero test will appear to be an arbitrary lint rather than a contract check.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Substitutability of *File and nil *File is not uniform \u2014 only some accessors handle nil",
+        "detail": "The PR teaches some *File accessors (IsDescriptorProto, Imports, TransitiveImports, Types, AllTypes, Extensions, AllExtensions, Extends, AllExtends, AllMembers, Services, Options, FeatureSet, Symbols) to accept a nil receiver, but leaves others (InternedPath, Path, Package, InternedPackage, ImportFor, Deprecated, AST, and any not listed) untouched. Under the new contract, nil should be substitutable for any *File at every accessor \u2014 that is the LSP claim the test is implicitly making. The audit is incomplete: either every accessor handles nil (preferred, and provable by a test that iterates methods on a nil receiver), or the contract explicitly excludes some methods and the doc says so. The current half-state is the worst of both \u2014 a partial substitution that callers cannot rely on.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "148-360",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero test does not exercise *File nil receiver \u2014 the LSP claim is unverified for the most important type",
+        "detail": "testZeroAny constructs `var z T` and invokes methods on it. For T = *ir.File, z is a nil pointer, which is correct \u2014 but the test only iterates ty.NumMethod() on the value, and several of the newly-guarded methods (Imports, TransitiveImports, Types, etc.) are reached. Good. However, the test silently skips methods with parameters (NumIn != 1), so ImportFor(*File) and any other multi-arg accessor are never exercised on the nil receiver. The contract being asserted ('no accessor panics on zero') is therefore weaker than the test name suggests. Either narrow the contract in the spec to 'zero-arg accessors are zero-safe', or extend the test to invoke parameterized accessors with zero arguments.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "108-115",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Repeated `if f != nil { slice = f.foo[:f.barEnd] } else { var slice []T }` pattern is contract enforcement scattered at every call site",
+        "detail": "Eleven near-identical guard blocks appear across ir_file.go and ir_type.go. The contract \u2014 'on zero receiver, return empty indexer' \u2014 is being implemented by hand at every accessor. A small helper on *File and on Type (e.g. `func (f *File) typesSlice() []id.ID[Type]` that returns nil when f is nil) or a guarded variant of seq.NewFixedSlice would localize the invariant and make future additions automatically correct. The current form invites the next accessor to forget the guard, and the test only catches it by reflection \u2014 which, as noted, has gaps. This is a module-boundary cleanliness issue: the zero-safety contract belongs inside the type, not at every public method.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "212-365",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Element.ValueNodeIndex sentinel of -1 widens the postcondition without specifying it in the type",
+        "detail": "ValueNodeIndex now returns -1 for the zero Element, where previously it returned a non-negative index or panicked. The doc comment was updated ('If the element is empty, this returns -1.'), which is good. But the return type is still `int`, so every caller must now check for -1 or risk an out-of-range index into MessageKeys. Consider either (a) returning (int, bool) so the contract is in the type signature, or (b) documenting at the call-site pattern (`key := e.Value().MessageKeys().At(e.ValueNodeIndex())`) that the caller must guard. The current shape is a leaky abstraction: the sentinel encodes a precondition the type does not express.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symbol.RawData zero handling lives in export_test.go \u2014 test-only patch hides a production-relevant invariant",
+        "detail": "The guard `if s.IsZero() { return arena.Nil() }` is added in export_test.go, meaning the production Raw().data path on a zero Symbol still panics or returns garbage. If the zero-safety contract applies to Symbol (and the zero test includes ir.Symbol via testZeroNode), then the production accessor that the test exposes should also be zero-safe, not just the test export. Either move the guard into the real Symbol accessor and re-export, or document why Symbol's raw data is exempt from the contract. The current placement makes the test pass without the underlying type honoring the invariant.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "38-42",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "imports.Transitive nil-guard reads i.files but the nil-receiver branch still touches i.publicEnd in the closure",
+        "detail": "In ir_imports.go, Directs and Transitive now guard against `i == nil` when building the slice, but the closures passed to seq.NewFixedSlice still reference `i.publicEnd` and `i.weakEnd` (Directs) and capture `i` directly. On a nil receiver the slice is empty so the closure is never invoked, which makes this correct in practice \u2014 but it is correct by accident. A reviewer or a future change that makes the closure run with an empty slice (e.g. logging, instrumentation) would dereference nil. Prefer either copying the needed fields into locals before the closure, or returning a pre-built empty seq.Indexer when i is nil, so the nil case is structurally impossible to hit inside the closure.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-245",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR establishes a valuable new invariant for the ir package \u2014 zero/nil receivers are substitutable for valid ones across accessors \u2014 which is exactly the kind of contract that earns ADT discipline. The work is sound in direction but the contract is not written down: the invariant lives only in scattered guards and a reflective test, not in package or type doc comments. Substitutability is incomplete (only some *File methods accept nil), the test silently skips parameterized accessors so the LSP claim is unverified for several methods, and the repeated guard pattern at every accessor signals that the zero-safety responsibility belongs inside the type rather than at every public boundary. The Element.ValueNodeIndex -1 sentinel and the export_test.go Symbol guard are smaller leaks of the same shape: contract decisions made at call sites or in test code rather than in the type itself. Recommend stating the contract in doc comments, completing the substitution audit on *File, extending the reflective test to cover parameterized accessors, and consolidating the guard pattern into helpers so future accessors inherit zero-safety by construction."
+  },
+  "raw": ""
+}

@@ -1,0 +1,131 @@
+{
+  "task_id": "sqlfluff__7499",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Removed test case is not replaced \u2014 coverage gap for mixed ADD/DROP in single ALTER TABLE",
+        "detail": "The diff removes the example `ALTER TABLE dbo.doc_exc ADD column_b VARCHAR(20) NULL CONSTRAINT exb_unique UNIQUE, DROP COLUMN column_a, DROP COLUMN IF EXISTS column_c` and its YAML fixture. The PR description states this is 'invalid' but Microsoft docs do not forbid mixing ADD and DROP within a single ALTER TABLE through outer-level commas in the original Delimited form. Removing the outer Delimited eliminates the ability to chain heterogeneous top-level operations (e.g., one ALTER COLUMN plus one ADD plus one DROP) which T-SQL does support via comma-delimited specifications in some forms. At minimum a follow-up issue link or a fixture confirming that this is rejected should accompany the removal.",
+        "file": "test/fixtures/dialects/tsql/alter_table.sql",
+        "lines": "5-10 (removed)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Outer `Delimited(...)` wrapper removed from AlterTableStatementSegment \u2014 narrows previously accepted grammar",
+        "detail": "Before this change, the top-level operations of ALTER TABLE were wrapped in `Delimited(OneOf(...))`, allowing multiple comma-separated alter actions (e.g., `ADD col, DROP COLUMN x`). The new structure replaces this with a bare `OneOf(...)` so only one top-level action per statement is allowed. While the PR pushes Delimited inward for DROP COLUMN and DROP CONSTRAINT lists, this loses the ability to combine heterogeneous actions. Confirm this matches Microsoft's documented grammar and add a regression fixture asserting the now-rejected forms produce parse errors (currently the removal is silent).",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "4731-4736",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`SignedSegmentGrammar` allowed on identity increment but T-SQL accepts arbitrary sign for both seed and increment without negative increment being meaningful",
+        "detail": "The change inserts `SignedSegmentGrammar` before both seed and increment in `IdentityGrammar`. The seed truly can be negative (the case being fixed), but the parser also now happily accepts `IDENTITY(1, -1)`. T-SQL does support negative increment, so this is technically correct, but no test exercises the negative-increment path nor a stand-alone `IDENTITY(-2, -3)` case. Add a fixture (and confirm SQL Server actually accepts negative increment) so this widening is not silently regressed.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "5116-5123",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`DEFAULT_LANGUAGE` now accepts `NumericLiteralSegment` with no fixture coverage",
+        "detail": "The grammar for `_default_language` was widened to include `NumericLiteralSegment` (since language can be specified by LCID like 1033), but no test in `create_login.sql` exercises a numeric language value. The fixture only tests `DEFAULT_LANGUAGE=us_english` (naked identifier). Without coverage, a future refactor could remove the numeric branch unnoticed. Add a `DEFAULT_LANGUAGE=1033` test case.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "7985-7991",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inconsistent options: DEFAULT_DATABASE does not accept numeric literal, but DEFAULT_LANGUAGE does",
+        "detail": "DEFAULT_LANGUAGE accepts {Numeric, Quoted, NakedIdentifier}, but DEFAULT_DATABASE accepts only {Quoted, NakedIdentifier}. While semantically database names aren't typically numeric, T-SQL allows bracketed/quoted database names and there's no obvious reason for asymmetric naked-identifier handling. Consider documenting this divergence in a comment or aligning grammars.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "7975-7991",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing test for declared table variable with both column-level index and table-level index together",
+        "detail": "The new `TableIndexSegment` ref allows a standalone `INDEX` line inside `DECLARE @var TABLE(...)`. The new fixture tests only this in isolation. The earlier fixture tests column-level inline `INDEX _name (name)`. A combined case (one inline column index and one table-level index) would catch ordering ambiguities in the `OneOf` (TableConstraintSegment / ComputedColumnDefinitionSegment / ColumnDefinitionSegment / TableIndexSegment) since `TableIndexSegment` was added last and may shadow / be shadowed by another alternative.",
+        "file": "test/fixtures/dialects/tsql/declare_table_type.sql",
+        "lines": "29-33",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New `declare @var table (...)` fixture lacks trailing semicolon and statement_terminator in YAML",
+        "detail": "Other DECLARE fixtures end with `;` and yield a `statement_terminator` node; the new one does not. This is permissible T-SQL, but inconsistency in test corpus can mask issues. Consider adding `;` for parity.",
+        "file": "test/fixtures/dialects/tsql/declare_table_type.sql",
+        "lines": "29-33",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DROP CONSTRAINT IF EXISTS / DROP COLUMN IF EXISTS placement inside Delimited may allow odd repetition",
+        "detail": "The new grammar nests `Sequence('CONSTRAINT', IfExistsGrammar, optional=True)` inside the Delimited, so each delimited item can independently include `CONSTRAINT` and `IF EXISTS`. This matches the test fixture (e.g., `CONSTRAINT IF EXISTS X, CONSTRAINT Y`) but it also accepts `DROP CONSTRAINT X, CONSTRAINT IF EXISTS Y, X` \u2014 i.e., heterogeneous IF EXISTS per item. T-SQL does allow per-item IF EXISTS, so this is correct, but warrants a comment to make intent explicit.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "4768-4781",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Negative-seed test uses `int` lower-bound `-2147483648` which exercises the boundary correctly, but no positive-large-seed counterpart",
+        "detail": "Adding a fixture for `IDENTITY(2147483647, 1)` (positive max) and a small negative seed `IDENTITY(-1, 1)` would make the test set complete. Currently only `(-2147483648, 1)` is tested.",
+        "file": "test/fixtures/dialects/tsql/create_table_constraints.sql",
+        "lines": "44-45",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether removing the outer `Delimited` from AlterTableStatementSegment is correct",
+        "positions": [
+          {
+            "persona": "Strict-grammar (spec-aligned)",
+            "position": "Microsoft's documented grammar treats `<alter_table_action>` as a single specification per ALTER TABLE invocation; the prior outer Delimited was overly permissive. Tightening is correct and the removed fixture was invalid input that the parser accepted by accident."
+          },
+          {
+            "persona": "Pragmatic-compat (real-world SQL)",
+            "position": "Real-world T-SQL scripts and several Microsoft examples include comma-separated actions in a single ALTER TABLE. Tightening the grammar without a fixture confirming the now-rejected forms is a silent backward-compat break for users whose scripts previously parsed."
+          }
+        ]
+      },
+      {
+        "topic": "Whether allowing `SignedSegmentGrammar` before the increment is desirable",
+        "positions": [
+          {
+            "persona": "Minimal-fix",
+            "position": "Only the seed needs to be negative for the reported bug; widening the grammar for the increment too increases surface area without a corresponding test or user demand."
+          },
+          {
+            "persona": "Symmetric-grammar",
+            "position": "SQL Server allows negative increments (auto-decrementing identity); the parser should accept what the engine accepts. The change is correct and proportional."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR adds four targeted TSQL parser improvements (table-var indexes, CREATE LOGIN option widening, negative IDENTITY seed, multi-item DROP COLUMN/CONSTRAINT) with corresponding fixtures. The most consequential change is the structural rewrite of `AlterTableStatementSegment` that removes the outer `Delimited(...)` wrapper and deletes a previously-passing fixture mixing ADD and DROP \u2014 this narrows accepted input and should be confirmed against Microsoft's grammar with a negative-parse fixture rather than a silent removal. Other widenings (DEFAULT_LANGUAGE accepting numerics, SignedSegmentGrammar before identity increment) lack direct test coverage even though their grammar additions are reasonable. No P0 correctness defects spotted; the main risks are silent behavior changes and thin test coverage on widened branches."
+  },
+  "raw": ""
+}

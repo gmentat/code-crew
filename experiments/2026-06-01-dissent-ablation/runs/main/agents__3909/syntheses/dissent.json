@@ -1,0 +1,410 @@
+{
+  "task_id": "agents__3909",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "Severity of _recognize_impl raising NotImplementedError",
+        "positions": [
+          {
+            "persona": "Liskov",
+            "position": "P0 \u2014 this is an LSP violation of the stt.STT supertype contract; substitution will break callers holding a base-class reference"
+          },
+          {
+            "persona": "Torvalds",
+            "position": "P1 \u2014 breaks the base STT contract and crashes recognize() callers; ship with proper capability flag or a one-shot internal stream"
+          },
+          {
+            "persona": "Knuth, Hickey, Pike, Dijkstra",
+            "position": "Not flagged as a distinct issue"
+          }
+        ]
+      },
+      {
+        "topic": "Severity of reconnect machinery being dead (event never set) and audio loss across reconnect",
+        "positions": [
+          {
+            "persona": "Dijkstra",
+            "position": "P0 \u2014 reconnect would drop audio and never re-establish AudioByteStream invariant; smuggled goto via flags; either prove reconnect impossible or uphold the invariant"
+          },
+          {
+            "persona": "Knuth",
+            "position": "P1 \u2014 reconnect machinery is dead code (event never set); either wire it up or delete the scaffolding so the reader is not misled"
+          },
+          {
+            "persona": "Torvalds",
+            "position": "P1 \u2014 half-working ceremony; either wire up reconnect on transient WS errors or rip it out"
+          },
+          {
+            "persona": "Hickey, Liskov, Pike",
+            "position": "Not flagged"
+          }
+        ]
+      },
+      {
+        "topic": "Severity of closing_ws flag and _speaking state machine without stated invariants",
+        "positions": [
+          {
+            "persona": "Dijkstra",
+            "position": "P0 \u2014 smuggled goto via closing_ws and _speaking flags; control flow is a joint function of coroutines plus shared bits with no stated invariant; closing_ws is set unconditionally even on cancellation/error, hiding genuine remote failures"
+          },
+          {
+            "persona": "Knuth",
+            "position": "P1 \u2014 speaking-state machine has no stated invariant; edge cases (reconnect, empty first message) leak; needs literate comment and reset on reconnect"
+          },
+          {
+            "persona": "Hickey",
+            "position": "P1 \u2014 _speaking identity is complected across handlers with duplicated transitions; pull into one method that owns mutation"
+          },
+          {
+            "persona": "Pike",
+            "position": "P2 \u2014 message dispatch chain has duplicated START_OF_SPEECH emission; a tag-keyed table or two small handlers would remove the duplication"
+          },
+          {
+            "persona": "Torvalds, Liskov",
+            "position": "Not flagged as such"
+          }
+        ]
+      },
+      {
+        "topic": "Whether STTv2 as a parallel class is the right architecture",
+        "positions": [
+          {
+            "persona": "Hickey",
+            "position": "P1 \u2014 STTv2 complects 'new feature' with 'forked implementation'; the values that differ (wire protocol, message schema, event mapping) should be extracted as data behind one STT class; Deepgram precedent makes it familiar, not decomposed"
+          },
+          {
+            "persona": "Liskov",
+            "position": "P2 \u2014 duplication-by-naming rather than ADT-driven design; consider an internal _ScribeProtocol ADT with v1/v2 behind one facade"
+          },
+          {
+            "persona": "Pike",
+            "position": "P2 \u2014 parallel hierarchies risk becoming three-deep; flag before it ossifies but the precedent is established, not blocking"
+          },
+          {
+            "persona": "Torvalds",
+            "position": "P2 \u2014 the commit message doesn't defend why a separate class; propose the answer rather than asking the maintainer to decide"
+          },
+          {
+            "persona": "Knuth, Dijkstra",
+            "position": "Not flagged as an architectural issue"
+          }
+        ]
+      },
+      {
+        "topic": "Severity / framing of swallowed APIConnectionError in recv_task",
+        "positions": [
+          {
+            "persona": "Knuth, Hickey, Torvalds, Dijkstra",
+            "position": "P1 \u2014 raise inside _process_stream_event is swallowed by broad except in recv_task; auth/quota errors become log lines instead of stream terminations"
+          },
+          {
+            "persona": "Liskov, Pike",
+            "position": "Not flagged as a separate issue"
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "STTv2 violates stt.STT supertype contract by raising NotImplementedError in _recognize_impl",
+        "detail": "The base stt.STT class advertises a non-streaming recognize() entry point as part of its contract. STTv2 strengthens the supertype's precondition by raising NotImplementedError, breaking LSP substitution for any caller holding an stt.STT reference. Either advertise a distinct capability flag (so callers know non-streaming is unavailable) or fall back to a one-shot stream invocation internally. Torvalds and Liskov disagree on severity (P0 vs P1) but agree on the substance.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "138-170",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Reconnect loop drops audio and never re-establishes the AudioByteStream invariant",
+        "detail": "The outer while True loop creates fresh send/recv/keepalive tasks per iteration, but self._input_ch is consumed once. If _reconnect_event ever fires, frames already pulled and base64-encoded into the now-closed socket are lost. No replay buffer, no documented invariant bridging audio across reconnects. Either prove reconnect is impossible (in which case the entire scaffolding is dead code) or state and uphold the no-audio-loss invariant. Knuth and Torvalds flag this as the dead-scaffolding variant at P1; Dijkstra flags it as P0 because the invariant itself is unstated.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "183-289",
+        "flagged_by": [
+          "dijkstra",
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Smuggled goto via closing_ws and _speaking flags with no stated invariants",
+        "detail": "closing_ws is a nonlocal mutable bit set by send_task and read by recv_task to decide whether a CLOSE is benign or an error \u2014 control flow is a joint function of two coroutines plus a shared bit. Worse, closing_ws=True is set unconditionally when _input_ch ends, even on cancellation or upstream error, so recv_task silently swallows genuine remote failures. Likewise self._speaking is mutated from three branches with no stated invariant that START_OF_SPEECH and END_OF_SPEECH are paired. Replace with an explicit state machine and written invariant, or restrict the assignment to the orderly-completion branch.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "150-235, 310-389",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sample_rate -> audio_format derivation has no precondition check; typing.cast is a no-op at runtime",
+        "detail": "The constructor builds audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\") with no membership check. STTAudioFormat enumerates exactly six legal pcm_* values, but typing.cast is a no-op at runtime, so sample_rate=11025 or 12345 silently produces an invalid format string that only fails at the server. The docstring claims 8kHz-48kHz support (a range) while the type admits only six discrete values \u2014 the comment and code disagree. Enforce sample_rate in {8000,16000,22050,24000,44100,48000} at __init__ and raise ValueError on miss.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "95-124",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Numeric VAD/timing option ranges documented but not validated",
+        "detail": "Docstring states vad_silence_threshold_secs must be in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_speech_duration_ms and min_silence_duration_ms in [50, 2000]. None of these preconditions are checked at construction; out-of-range values are silently forwarded as query params and fail late at the server. Either enforce at the boundary with ValueError, or stop claiming the ranges in the docstring \u2014 right now the comment and code disagree.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "63-118",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "APIConnectionError raised inside _process_stream_event is swallowed by recv_task's broad except",
+        "detail": "_process_stream_event raises APIConnectionError on auth_error / quota_exceeded / transcriber_error, but recv_task wraps the dispatch call in try/except Exception: logger.exception(...). The error is logged and the loop keeps running against a server that has already told us auth is bad. The intended postcondition (server error terminates the stream) is not delivered. Narrow the except to JSONDecodeError around the parse only, let protocol-level errors propagate, or return a typed fatal-error value from _process_stream_event.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "224-258, 372-413",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query string built with raw f-strings and no URL encoding",
+        "detail": "_connect_ws assembles params via params.append(f\"language_code={self._language}\") and \"&\".join(params), with no percent-encoding of user-controllable values. If language_code or any other value contains '+', space, '&', or other reserved characters, the request is malformed silently \u2014 the server simply receives a different value than intended. Use urllib.parse.urlencode or aiohttp's params= kwarg. Hickey additionally notes the manual https->wss string.replace complects URL transformation with parameter encoding.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "242-308",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect machinery is dead code \u2014 _reconnect_event is never set anywhere",
+        "detail": "_run() arranges a careful reconnect protocol with wait_reconnect_task and event-clearing, but no code path ever calls self._reconnect_event.set(). The reconnect path is dead scaffolding; any transient WS failure exits the outer loop instead of retrying. Either wire up reconnect on recoverable errors or delete the scaffolding so the reader is not misled into thinking the stream is resilient.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "183, 246-289",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speaking-state machine has no stated invariant and edge cases leak",
+        "detail": "The invariant 'self._speaking is True iff we have emitted START_OF_SPEECH without a matching END_OF_SPEECH' is never stated. Several paths violate it: reconnect mid-utterance doesn't reset _speaking; the same 'if not self._speaking: send START_OF_SPEECH; _speaking=True' block is duplicated verbatim across two handlers; and a long if/elif chain over message_type with duplicated emission is the wrong shape. Pull transitions into _ensure_speaking()/_end_speech_segment() so one method owns mutation, and document the state machine.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "302-389",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "tasks_group.exception() called on a Future whose state has not been reasoned about",
+        "detail": "After gracefully_cancel and tasks_group.cancel(), the gather future is typically CANCELLED. Calling .exception() on a cancelled or not-yet-done future raises asyncio.CancelledError or InvalidStateError, which propagates out of the finally block and shadows any earlier exception. The comment 'Retrieve exception to prevent it from being logged' names the intent but the mechanism is fragile and unproved. Replace with explicit try/except around await tasks_group, or use add_done_callback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "208-272",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Residual audio in AudioByteStream is dropped at end-of-stream",
+        "detail": "After async for data in self._input_ch exits, closing_ws=True is set but any partial samples buffered in audio_bstream (less than a 50ms frame) are silently dropped. The loop invariant 'all input audio bytes are forwarded before WS close' does not hold. Call audio_bstream.flush() once after the loop ends so trailing audio is sent before the close frame.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "190-215",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTOptions/NotGivenOr/Optional triple-encoding of optional fields is incidental complexity",
+        "detail": "The same fact ('was this option supplied?') is represented in three encodings: NotGivenOr at the API boundary, the if/else is_given ternary in __init__, and Optional[X]=None on the dataclass. Three places to keep in sync, three opportunities to drift. The NotGivenOr layer adds nine lines of boilerplate and one extra concept (sentinel vs None) for a struct that only needs Optional. Collapse via a small from_kwargs classmethod or pick one representation for absent values.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "60-138",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTv2 as parallel class complects new wire protocol with forked implementation",
+        "detail": "STTv2 shares the option bag, connection lifecycle, audio chunking, and event channel pattern with STT but inherits none of it. 'v1 vs v2' is being used to name two different concerns: a different wire protocol (essential) and a stable public surface for existing users (organizational). Extract the wire-protocol piece as data (URL template, message schema, event-mapping table) and let one STT class dispatch on model. The Deepgram precedent makes the duplication familiar, not decomposed. Pike and Liskov rate this lower (P2) noting the precedent is established; Torvalds notes the PR description asks the maintainer to make the call rather than defending the choice.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "60-176",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTModels Literal pins to a single value, exposing implementation detail through the type",
+        "detail": "STTModels = Literal[\"scribe_v2_realtime\",] is a one-element Literal exposed as a public type alias and constructor parameter type. The abstraction promises an enumerable set but constrains callers to exactly one symbol \u2014 identical to a constant. Either widen to str for forward compatibility or commit to the closed set with a documented invariant that new models require a coordinated release. Torvalds and Knuth additionally note the trailing comma reads as a typo or one-element tuple.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "liskov",
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR ships without automated tests for a non-trivial protocol/state machine",
+        "detail": "The author admits test_stt.py has been broken since May 2025 and points at the Deepgram STTv2 precedent as also shipping without tests. The module has at least four server message types, a reconnect protocol, a chunking invariant, a docstring full of numeric preconditions, and a flag-driven speech state machine \u2014 none of which is covered by an automated test that requires no network or API key. At minimum add a fake-WS unit test exercising the four message_type values (including unknown) and the empty-commit segment-end boundary.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Per-frame base64 + json.dumps + send_str at 20 Hz is plausibly the hot spot, but unmeasured",
+        "detail": "Each 50ms frame triggers base64 encoding, a json.dumps of a four-field dict, and ws.send_str \u2014 20 cycles per second per stream. Asymptotically fine, practically wasteful at concurrency: a pre-built template or length-prefixed binary framing would cut allocations meaningfully. Flag for measurement before scaling; do not change without a profile.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "204-215",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty committed_transcript-as-end-of-segment is an inferred protocol invariant, not a documented contract",
+        "detail": "The handler treats an empty committed_transcript as 'end of speech segment' \u2014 meaningful protocol semantics borrowed from Cartesia, but nowhere documented. If ElevenLabs ever emits an empty committed_transcript mid-segment for another reason, callers see spurious END_OF_SPEECH events. Add a literate paragraph above _process_stream_event documenting the wire state machine with all three message types and what each does to (text, speaking) state.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "310-380",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "committed_transcript_with_timestamps branch logs at debug and drops information",
+        "detail": "The handler for this message type does nothing but log at debug, while the server presumably emits these because they carry timestamps that could populate SpeechData.start_time/end_time. Either populate SpeechData from the payload, or remove the elif so the 'unknown message type' warning fires loudly. Dijkstra puts the same point as: either it is unreachable (state that and remove it) or it is reachable and the stream silently drops the only authoritative transcript message.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "367-387",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "keepalive_task swallows all exceptions silently",
+        "detail": "keepalive_task catches bare Exception and returns with no log. If pings start failing for a real reason (half-open network, server bug), the keepalive quietly stops while send/recv continue against a corpse until they notice on their own. State the postcondition ('ping failure implies stream teardown') and uphold it, or at minimum log at debug/warning.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "143-180",
+        "flagged_by": [
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "language identity duplicated between STTOptions.language_code and SpeechStreamv2._language",
+        "detail": "The same fact ('which language') lives in two places: opts.language_code on the STT and self._language on the stream (initialized from either the stream() argument or opts.language_code). _process_stream_event reads self._language for SpeechData but ignores opts.language_code. One identity, two storage places, asymmetric read path. Pass language through opts only, or remove it from opts and pass it explicitly on stream() \u2014 but not both.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "129-131, 196-198, 318-323",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded 'en' fallback in SpeechData.language",
+        "detail": "language=self._language or \"en\" \u2014 if the model is processing French audio with no language code set, output is labeled English. Either pass the model's reported language back (if the API returns it), pass None, or stop pretending to know.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "335-339",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Parameter `stt` shadows the imported `stt` module",
+        "detail": "def __init__(self, *, stt: STTv2, ...) shadows the imported stt module inside SpeechStreamv2. Happens to work because internal references are to the parameter, but it's a readability trap. Rename to stt_instance or pass positionally.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-182",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTOptions is a mutable dataclass with no frame condition on _opts",
+        "detail": "STTOptions is a plain mutable dataclass passed by reference into SpeechStreamv2. The contract does not state whether the stream may mutate it \u2014 and the STT constructor does mutate it (self._opts.language_code = language_code) before passing to streams. Use frozen=True or copy into the stream so 'opts is read-only after construction' is enforced rather than assumed.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "41-52",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`commit` field hardcoded to False on every audio chunk message",
+        "detail": "Every outgoing audio chunk includes \"commit\": False. If this codepath only supports VAD commit, the field is noise on the wire and noise in the source. If it does something, the comment is wrong. Strip the field or document why it must be present.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "204-212",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTModels Literal has trailing comma that reads as a typo",
+        "detail": "STTModels = Literal[\"scribe_v2_realtime\",] \u2014 the trailing comma in a single-element Literal is legal but reads as a one-element tuple or copy-paste error to humans skimming. Either drop the comma or add a comment that more models are coming so the next reader does not 'fix' it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three patches submitted as one with a single-line commit message",
+        "detail": "The diff bundles (1) type literal additions to models.py, (2) STTv2/SpeechStreamv2 in stt_v2.py, (3) re-export plus example. Acceptable to land together, but the commit message is one line and doesn't defend why a separate STTv2 class instead of modifying STT. The PR description punts the architecture choice to the maintainer rather than proposing and defending an answer.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a clear story: the PR ships a working Scribe v2 WebSocket client that copies the Deepgram-v2 shape, but key invariants are unstated and key preconditions unenforced. Six reviewers independently flag the audio_format/sample_rate cast as a typing.cast fig leaf over an unchecked precondition; four independently flag that APIConnectionError raised inside _process_stream_event is silently swallowed by recv_task's broad except, defeating fatal-error semantics; three flag that _reconnect_event is wired up but never set anywhere (dead scaffolding); four flag that documented VAD/timing ranges are not enforced. The strongest preserved disagreement is on architecture and severity: Liskov calls the NotImplementedError in _recognize_impl a P0 LSP violation while Torvalds rates it P1 and others do not flag it; Dijkstra escalates the reconnect/closing_ws/_speaking flag soup to P0 ('smuggled goto') where Knuth and Torvalds treat the same code as P1 dead-scaffolding; Hickey wants the STTv2-as-parallel-class refactored into data while Pike and Liskov accept it given the Deepgram precedent. Across the board the panel is loud about the absent automated tests for a non-trivial protocol+state machine, and about the docstring/code disagreement on numeric ranges and supported sample rates."
+  },
+  "raw": ""
+}

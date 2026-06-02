@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Renaming public frame class is a breaking API change without deprecation alias",
+        "detail": "RequestMetadataFrame is removed outright and replaced by ServiceSwitcherRequestMetadataFrame. Any downstream user code importing the old name will break on upgrade. Either keep a deprecated alias (RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame) emitting a DeprecationWarning, or document this clearly as a breaking release. The changelog entry alone is insufficient if pipecat follows semver.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1723-1736",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Required `service` field has no default, breaking any external construction sites",
+        "detail": "ServiceSwitcherRequestMetadataFrame now requires a `service: FrameProcessor` argument. Any code that constructed bare RequestMetadataFrame() will fail at instantiation, not just import. Consider making the field Optional with default None and have ServiceSwitcher fill it in, or document the contract change explicitly.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frame holding a FrameProcessor reference risks cycles and pickling/logging issues",
+        "detail": "Frames are typically serializable/loggable dataclasses, and storing a live FrameProcessor reference inside one creates strong references that may interfere with garbage collection, repr, and any frame serialization. Consider storing a service name/id string and resolving it in the switcher instead of embedding the processor object.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identity check `frame.service == self.strategy.active_service` may misbehave if active service changed",
+        "detail": "If the active service changes between dispatch and the frame reaching push_frame, the request from the previously-targeted service will leak downstream (since equality fails). This contradicts the docstring promising suppression of the targeting frame. Use `is` for identity, and consider whether the leak is acceptable when active_service has rotated again.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-237",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pushing ServiceSwitcherRequestMetadataFrame downstream after handling may leak past the switcher boundary",
+        "detail": "STTService and the mock now push the request frame downstream. The switcher suppresses it only when `frame.service == active_service`. If an STT service outside a ServiceSwitcher receives this frame (e.g. constructed directly), the internal control frame escapes into the downstream pipeline with a live processor reference attached.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string type hint `\"FrameProcessor\"` is unimported, no TYPE_CHECKING guard",
+        "detail": "The annotation uses a string literal for FrameProcessor but there's no `if TYPE_CHECKING: from ... import FrameProcessor` block visible in the diff. Tools like `get_type_hints` or pydantic-style introspection will fail to resolve it. Add a TYPE_CHECKING import for clarity and tooling support.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "summary": "The rename is mechanical and the test changes look consistent, but the PR introduces a breaking public API change without a deprecation alias and adds a required field with no default, which will break external callers. Embedding a live FrameProcessor inside a dataclass Frame is a smell \u2014 it risks cycles, complicates logging/serialization, and the equality check in push_frame is fragile under active-service rotation. The new pattern of pushing the request frame downstream after handling means an internal control frame can leak past a switcher boundary when STT runs standalone. Worth tightening the contract before merge."
+  }
+}

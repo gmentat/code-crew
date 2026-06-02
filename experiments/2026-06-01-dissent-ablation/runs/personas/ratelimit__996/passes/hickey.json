@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Metric-key construction is complected with limit lookup in GetLimit",
+        "detail": "GetLimit now interleaves three concerns in one loop: descriptor traversal, wildcard matching, and building a value_to_metric key string. The branches for wildcard/matchedUsingValue/default all converge on the same conditional emit. Extract a pure function buildMetricSegment(entry, descriptor, matchMode) -> string. The values (entry, flag, match-mode) and the rendering are different concerns; right now they share a builder and a control-flow tree.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three boolean flags (DetailedMetric, ValueToMetric, default-key) encode one decision: how to render the metric",
+        "detail": "What the code is really about is: given a descriptor match, what does its metric segment look like? That is one value (a render mode), not three orthogonal booleans whose precedence is enforced by ordering. Model it as a single MetricMode enum (KeyOnly | KeyValue | Detailed) computed once per descriptor at load time. The current shape will accrete more flags and more precedence rules.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-46, 412-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "RateLimit is reconstructed via NewRateLimit then immediately mutated -- identity confusion",
+        "detail": "The override block calls NewRateLimit to get \"a clean stats struct\" and then overwrites Stats and FullKey on the returned value. This complects construction with mutation and treats the same identity as two different values within four lines. Either compute the final key before constructing RateLimit once, or make RateLimit immutable with a With-style constructor. The current code is place-oriented at a moment that should be a value.",
+        "file": "src/config/config_impl.go",
+        "lines": "420-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile",
+        "detail": "newDescriptor := &rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric} relies on field order. Adding the next per-descriptor flag (and there will be one -- this PR is evidence of the pattern) will silently misalign or force every call site to change. Use named-field initialization. This is incidental complexity introduced by an easy keystroke choice.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert on the metric key string -- testing the renderer, not the decision",
+        "detail": "Every new test pins a fully-rendered dotted string. The renderer is one concern; the per-level decision (key-only vs key_value vs detailed) is another. If the segment function were extracted, tests could assert mode-per-level as data and a single test could cover rendering. Right now adding a separator change touches every test. Beck would feel this too.",
+        "file": "test/config/config_test.go",
+        "lines": "955-1595",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: why isn't this just one metric_mode field?",
+        "detail": "detailed_metric and value_to_metric are two boolean knobs with a precedence rule documented in prose. Users now must learn: what each does, when they interact, and that one silently wins. A single metric_mode: key | key_value | detailed field would be simpler (one concept, decomposable) even if slightly less easy (one migration). The current design optimized for easy backward compatibility at the cost of conceptual simplicity.",
+        "file": "src/config/config_impl.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature works, but it is EASY-NOT-SIMPLE: a second boolean knob bolted onto detailed_metric with a precedence rule, when both are really one decision -- how to render the metric segment at this level. GetLimit is now COMPLECTED: descriptor traversal, wildcard matching, and string building share one loop and three boolean signals (matchedViaWildcard, matchedUsingValue, valueToMetric) collapse into nearly identical branches. The RateLimit reconstruction-then-mutation is PLACE-ORIENTED at a moment that wants to be a value. Decompose: compute a per-descriptor MetricMode at load time, extract a pure renderSegment(entry, mode) function, and build the key from data. Tests would then assert decisions, not strings."
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "task_id": "pip__13482",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver silently drops the post-condition that requirements are fully prepared, pushing an implicit protocol onto every caller.",
+        "detail": "The deleted block in resolver.py used to set req.prepared=True and needs_more_preparation=False. Now install/download/wheel each must call prepare_linked_requirements_more, and any other consumer of RequirementSet (extensions, future commands, tests) inherits half-prepared state. Either restore enforcement in the resolver, document the contract loudly, or assert it at the boundary.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist caches a metadata-only distribution with no invalidation or documented precedence after full preparation.",
+        "detail": "get_dist now returns self._distribution before checking metadata_directory or local_file_path, but nothing invalidates the cached metadata-only dist once the real wheel lands. If the two diverge (RECORD, file list) callers silently see stale data. Pick one canonical dist field, or invalidate/upgrade the cache on full prepare and document precedence.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identical prepare_linked_requirements_more call copy-pasted into three commands instead of one shared helper.",
+        "detail": "download.py, install.py, and wheel.py each now open their post-resolve block with the same line. The next command (pip lock, the very motivator) will forget it. Extract a finish_preparation helper, or push the call back behind a dry_run flag in resolve(). Copy-paste across call sites is not decoupling.",
+        "file": "src/pip/_internal/commands/",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info backfill inside _fetch_metadata_only entangles two concerns and is unsafe when source_dir is missing.",
+        "detail": "prepare_linked_requirement now both fetches metadata and synthesizes download_info via direct_url_from_link(req.link, req.source_dir). In dry-run source_dir may be unset, and the if-None guard hides ordering bugs. The contract for download_info in the metadata-only path is undocumented. Separate the two outputs or set download_info at the single site that needs it.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-545",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No visible test proves --dry-run actually avoids downloading the wheel.",
+        "detail": "The headline behavior is one assertion: run --dry-run against a PEP-658 wheel and confirm the wheel bytes were never fetched. The diff ships zero such test, so a future refactor silently reintroduces the regression. Add a test that fails on the old behavior and passes on the new one, ideally also covering VCS URLs and --report.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Patch bundles two distinct changes: the dry-run resolver fix and download_info plumbing for pip lock/--report.",
+        "detail": "The news entry itself names both behaviors. Splitting into two patches makes review and revert tractable: one moves the eager prepare out of the resolver, the other adds download_info population for metadata-only fetches. As one patch it is harder to bisect when either half regresses.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the direction is right: removing the eager full-download from the resolver is overdue, and dry-run/lock benefit from PEP-658 metadata-only fetches. But execution leaks an implicit protocol onto callers by silently dropping the resolver's post-condition, copy-pastes the replacement call across three commands, and adds a cached metadata-only distribution with no invalidation or precedence story. The download_info backfill mixes concerns and is unsafe under dry-run with missing source_dir. Most damning: no test pins the headline behavior. Verdict: NEEDS-WORK \u2014 restore or document the invariant, consolidate the call site, fix the cache contract, split the patch, and add a regression test."
+  }
+}

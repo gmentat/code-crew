@@ -1,0 +1,64 @@
+{
+  "persona": "liskov",
+  "task_id": "falcon__2540",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Contract for `delimiter` argument is ambiguous: a `str | None` typed parameter whose accepted values are a fixed enum-like set",
+        "detail": "The signature declares `delimiter: str | None`, but the contract actually accepts only five string values (',', '|', ' ', 'pipeDelimited', 'spaceDelimited'). This is a leaky abstraction: the type says 'any string,' the postcondition says 'one of five strings or ValueError.' The supertype-of-overloads promises a wider precondition than the implementation accepts. Either narrow the type to `Literal[',', '|', ' ', 'pipeDelimited', 'spaceDelimited'] | None`, or expose the constants as named symbols (e.g., a small Enum or module-level constants) so callers can program against the contract rather than against magic strings. Document the precondition (`ValueError` raised on unsupported delimiter) in the docstring's Raises section, which currently does not mention it.",
+        "file": "falcon/request.py",
+        "lines": "2019-2125",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent contract divergence: `delimiter` is ignored when the value is already a list, violating substitution expectations across explode vs. non-explode parameter styles",
+        "detail": "When the same query parameter appears multiple times (explode style) or has already been split by `auto_parse_qs_csv`, `delimiter` becomes a no-op because `isinstance(items, str)` is false. The docstring mentions this only as a Note, but the postcondition observable to a caller now depends on a hidden upstream state (was the value pre-split?). This is a classic LSP-style hazard: two callers passing semantically identical inputs at the HTTP level (`?phrase=a%20b&phrase=c` vs `?phrase=a%20b,c` with csv on) get materially different results from the same call. The test `test_get_param_as_list_multiple_values_vs_delimiter` documents this behavior but does not justify it. Consider either (a) applying the delimiter to each element of the list, or (b) raising/warning when the caller's intent is unclear. At minimum, surface this in the Returns/Raises spec, not buried in a Note.",
+        "file": "falcon/request.py",
+        "lines": "2116-2126",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`_PARAM_VALUE_DELIMITERS` conflates two distinct concepts (literal character vs. symbolic OpenAPI style)",
+        "detail": "The mapping `{',': ',', '|': '|', ' ': ' ', 'pipeDelimited': '|', 'spaceDelimited': ' '}` is a single namespace mixing literal delimiters and OAS style identifiers. This is a small abstraction smell: the abstract data type 'delimiter specification' is actually two types (a Char and a NamedStyle) collapsed into one dict. A cleaner contract would expose the OAS styles as named constants and accept either a literal character or one of those constants. The current design will be awkward to extend (e.g., when `tabDelimited` or future OAS styles arrive) and forces the precondition check to be a runtime dict lookup rather than a type-level guarantee.",
+        "file": "falcon/request.py",
+        "lines": "61-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Docstring contract incomplete: `Raises` section not updated for new failure mode",
+        "detail": "The method's docstring lists `HTTPBadRequest` under Raises but does not document the new `ValueError` raised when an unsupported delimiter is passed. Per the discipline that 'the interface is the contract,' every observable postcondition \u2014 including raised exceptions \u2014 belongs in the spec. A caller reading the docstring cannot learn the precondition on `delimiter` without reading the implementation.",
+        "file": "falcon/request.py",
+        "lines": "2103-2107",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage missing for interaction between `delimiter` and `keep_blank_qs_values`, and for empty/edge-case inputs",
+        "detail": "The docstring promises that `keep_blank_qs_values` has no effect on delimiter splitting, but no test pins this promise. Similarly there is no test for the trailing-delimiter case (e.g., `names=a,b,`) which would produce an empty trailing element under `str.split` \u2014 observable behavior that should be specified. Adding these tests would lock down the postcondition stated in the Notes block.",
+        "file": "tests/test_request_attrs.py",
+        "lines": "1015-1058",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is a reasonable extension of an existing operation, and the implementation is small and localized. From an abstract-data-type lens, however, the contract of the new `delimiter` parameter is under-specified: its declared type (`str | None`) is much wider than the five values actually accepted, the new `ValueError` failure mode is not in the Raises section of the docstring, and the literal-vs-symbolic delimiter forms are conflated into a single string namespace. The most consequential design concern is substitution: identical-looking HTTP inputs produce materially different results depending on whether the value arrived pre-split (multiple instances or `auto_parse_qs_csv`), and this divergence is acknowledged only in a Note rather than in the contract proper. Recommend tightening the type (Literal or an Enum-like constant), documenting the new exception and the pre-split no-op behavior in the formal Raises/Returns spec, and adding tests that pin the `keep_blank_qs_values` and trailing-delimiter postconditions. Decision label: LEAKY-ABSTRACTION with a side of SPEC-MISSING \u2014 the underlying mechanism is sound, but the boundary needs a clearer promise."
+  },
+  "raw": ""
+}

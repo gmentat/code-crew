@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "zod__5578",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "`Seen.ref` and `Seen.parent` lack a written contract distinguishing their roles",
+        "detail": "Two fields now carry overlapping meaning: `ref` (processor-set inheritance source) and `parent` (clone-chain ancestor), with the rule `if (!result.ref) result.ref = parent`. The invariants \u2014 when ref==parent, when they diverge, what each guarantees to `flattenRef` \u2014 are nowhere stated. SPEC-MISSING. Without a docblock describing the two-field contract, future maintainers will re-confuse them. Write the contract on the `Seen` interface.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "75-83, 188-195",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`flattenRef` silently mutates `seen.ref` to null as recursion guard, conflating 'unset' with 'already-flattened'",
+        "detail": "The sentinel `seen.ref === null` means 'already processed' while `undefined` means 'never had one'. Callers reading `Seen.ref` post-finalize cannot distinguish these states. LEAKY-ABSTRACTION: an internal recursion guard leaks into the field's domain. Introduce a separate `flattened: boolean` flag or a local visited set so `ref`'s type stays honest.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "381-385",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Property de-duplication via `JSON.stringify` equality is an unstated, fragile contract",
+        "detail": "Two passes delete keys when `JSON.stringify(schema[key]) === JSON.stringify(refSeen.def![key])`. This silently assumes key-order stability, no undefined values, no Dates/functions, and structural (not referential) equality semantics. The ADT here is 'JSON Schema fragment equality' \u2014 it deserves a named helper with a stated contract, not stringify-as-equals scattered in two places.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "410-417, 437-444",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of `if (!seen.isParent)` guard around `ctx.override` weakens an existing postcondition",
+        "detail": "Previously `override` was invoked only for non-parent nodes; the test `overrideCount` doubling 6 -> 12 confirms a behavior change for user-supplied overrides. This is an LSP-style contract weakening of `ctx.override`'s call frequency. Either document this as the new contract (parents are now overridable) and call it out in changelog, or restore the guard. Silent doubling will surprise downstream override authors.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "446-450",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`isParentRef` check via `(zodSchema as any)._zod.parent === ref` re-derives state that `Seen` already tracks",
+        "detail": "`flattenRef` already has `seen.parent` available, but reaches back into `zodSchema._zod.parent` with an `any` cast to decide branch behavior. The module boundary is being crossed for information the local Seen record should already carry. Compare `seen.parent === ref` instead, and lift the `any` cast \u2014 the type of `_zod.parent` should be expressed on the schema interface.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "402",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`play.ts` switched from package import to deep relative source path",
+        "detail": "`play.ts` now imports `./packages/zod/src/index.js` instead of `zod/v4`. This is a scratchpad change that shouldn't ship in the PR \u2014 it couples a top-level playground file to internal source layout and will break for anyone consuming the repo via the published entry. Revert before merge.",
+        "file": "play.ts",
+        "lines": "1-19",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The patch adds a useful distinction between processor-set `ref` and clone-chain `parent`, fixing a real bug for wrapper schemas with ids. But the new two-field contract on `Seen` is not written down anywhere, and the implementation leans on stringify-equality and `any` casts to compensate. The override-guard removal silently doubles user override invocations \u2014 a contract change that needs to be either reverted or declared. Tighten the spec on `Seen`, extract a named JSON-fragment-equality helper, and decide deliberately about the override semantics before merge."
+  }
+}

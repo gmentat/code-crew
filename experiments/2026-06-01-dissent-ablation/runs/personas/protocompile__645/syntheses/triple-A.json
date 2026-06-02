@@ -1,0 +1,78 @@
+{
+  "task_id": "protocompile__645",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil/zero-guard boilerplate repeated across ~20 accessors instead of one helper",
+        "detail": "ir_file.go and ir_type.go now open every accessor with the same `var x T; if f != nil { x = f.field }; return seq.NewFixedSlice(...)` shape. The fix should remove the special case, not spread it: one helper (sliceOrNil, or a nil-tolerant indexer) that encodes the 'nil/zero receiver yields empty indexer' invariant once. All three reviewers flagged this as the dominant smell.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "179-365",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "imports.Transitive/Directs invariant ('last element is implicit descriptor.proto') is unstated and fragile under refactor",
+        "detail": "Transitive uses files[:max(0, len(files)-1)] to strip the implicit descriptor.proto, and Directs closures capture i to read publicEnd/importEnd. The empty-slice path saves the nil case today, but the invariant is asserted nowhere and the next refactor that drops a length guard will crash. Bail out earlier on nil and add a literate comment stating the trailing-element invariant.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-244",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value semantics not decided at the domain boundary",
+        "detail": "The PR patches symptoms one accessor at a time without answering whether a zero *File / zero Type is a legitimate domain value or a programming error. Either model it once (empty singleton, IsZero witness, or value-with-IsZero), or reject nil at the boundary. The current shape forces every reader to disambiguate identity from absence at each call site.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven zero test under-specifies its contract and silently skips parameterized accessors",
+        "detail": "testZeroAny filters to NumIn()==1, so accessors taking arguments (e.g. ImportFor) are never exercised on zero values, and the Len()==0 probe treats any type with a Len method as a container. Document the invariant being checked, add an explicit allowlist for skipped methods, and tighten the Len heuristic so future accessors cannot silently escape.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "90-137",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex returns in-band -1 sentinel, inconsistent with the rest of the zero-value convention",
+        "detail": "Every other zero accessor returns the zero value of its declared return type; ValueNodeIndex returns -1 for the zero element. That complects value with absence and forces callers to know two sentinels. Either switch to (int, bool) / Optional[int], or align with the rest of the API and document the exception explicitly on the type.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test addition and ~20 behavioral nil-guard fixes should not land as one commit",
+        "detail": "The diff mixes the reflection-driven zero test with a wide spray of accessor fixes. Land the test first (red), then each panic fix (or grouped helper-based fix) as its own diff with justification. As submitted, future bisects on regressions in File.Imports() and friends will point at 'add zero test' and be useless.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR fixes real panics but takes the wrong shape. Zero-handling is complected with every accessor: the same nil/IsZero guard is copy-pasted across roughly twenty methods in ir_file.go and ir_type.go instead of being centralized in one helper or resolved at the domain boundary. The reflection-driven zero test is a good idea but under-documented, skips parameterized accessors, and was bundled with the behavioral fixes in a single commit that will poison future bisects. Smaller issues: imports.Transitive's trailing-descriptor invariant is unstated, and ValueNodeIndex's -1 sentinel breaks the otherwise-consistent zero-value convention. Verdict: needs rework on shape before landing \u2014 no P0, but the next change here will pay the complecting tax again."
+  }
+}

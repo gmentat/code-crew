@@ -1,0 +1,67 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Control frame stores a live FrameProcessor reference instead of a stable identifier.",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service holds a FrameProcessor instance. Control frames should carry value-like identity (name or id), not live runtime handles. The current shape breaks serialization, retains swapped-out services via GC, and couples the frame to mutable runtime state. Pass a service_name or id and resolve at the switcher.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality check on FrameProcessor relies on default __eq__ and is fragile.",
+        "detail": "`frame.service == self.strategy.active_service` works only because FrameProcessor inherits identity equality. A future __eq__ override, wrapper, or proxy silently changes routing and leaks the frame downstream. Use `is` for explicit identity comparison, or compare a stable id, and document the invariant.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference annotation \"FrameProcessor\" is unresolved in frames.py.",
+        "detail": "The dataclass field annotation is a string and works at runtime only because dataclasses don't resolve annotations. Any get_type_hints call, pydantic adapter, or schema introspection will fail unless FrameProcessor is importable. Add a TYPE_CHECKING import or weaken the annotation to Any with a documented contract.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Suppression invariant in push_frame is implicit and undocumented.",
+        "detail": "The new branch only drops the frame when it targets the active service, assuming no inactive-service request frames ever reach push_frame. That holds today because the dispatcher only sends to the active service, but the invariant is implicit. Add a literate comment explaining the chain, or assert it defensively.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "222-240",
+        "flagged_by": [
+          "knuth",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTService now forwards the request frame downstream, leaking it outside a switcher.",
+        "detail": "Old code suppressed RequestMetadataFrame at the STT boundary; new code pushes it downstream relying on ServiceSwitcher to swallow it. When STTService is used standalone without a switcher, the frame escapes into the rest of the pipeline. Document the contract or consume the frame when no switcher is present.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The rename and targeting refinement is structurally sound, but the panel converges on one shape problem: embedding a live FrameProcessor reference inside a control frame and comparing it with `==` is the wrong data structure. Control frames should carry identifiers (name or id), not live processor handles, and identity checks should be explicit. Secondary concerns include an unresolved forward-reference annotation, an implicit suppression invariant in push_frame, and STTService now leaking the request frame downstream when used outside a switcher. NEEDS-WORK: fix the service-field shape and identity comparison, then the patch lands cleanly."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "PerformanceWarning is raised as an exception, contradicting both its name and the docstring/test intent",
+        "detail": "The code does `raise PerformanceWarning(msg)` to abort to_zarr. A class named PerformanceWarning should be issued via warnings.warn, not raised. The test even calls this `test_zarr_risky_shards_warns` but uses `pytest.raises`. This is a confusing API: users expecting a warning will get a hard exception, and silencing it via warning filters will not work.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3922",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` and missing loop exit on success path",
+        "detail": "Line after `raise PerformanceWarning(msg)` is a `break` that can never execute. More importantly, when the condition is satisfied (chunks divide evenly) the loop continues silently \u2014 fine \u2014 but the placement of `break` indicates confused control flow that likely was meant to short-circuit. Dead code should be removed.",
+        "file": "dask/array/core.py",
+        "lines": "3922",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Divisibility check uses `not a % b == 0` which is parsed as `not (a % b == 0)` but is confusing and fragile",
+        "detail": "`if not nominal_dask_chunk_size % zw == 0` relies on Python precedence (`%` and `==` bind tighter than `not`). It works but is highly unidiomatic and easy to misread/misedit into a bug. Prefer `if nominal_dask_chunk_size % zw != 0`.",
+        "file": "dask/array/core.py",
+        "lines": "3903",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "safe_chunk_size byte computation is wrong for multi-axis arrays and uses misleading `max(1, itemsize)`",
+        "detail": "`np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` computes the full shard size in bytes only when the violating axis is the last one; for other axes the user may need a different minimum. Also `max(1, itemsize)` masks the zero-itemsize edge case rather than handling it; itemsize is never 0 for real dtypes, so this is misleading.",
+        "file": "dask/array/core.py",
+        "lines": "3906-3908",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-axis check only inspects `dw[0]`, ignoring non-uniform chunk tuples",
+        "detail": "`normalize_chunks` can return a tuple like `(10, 10, 4)` where the last block differs. The check only validates the first chunk size against the shard size, so a trailing remainder chunk that is not shard-aligned could slip through silently (or, conversely, a uniform body that is aligned could be falsely flagged if dw[0] is the remainder in some edge case).",
+        "file": "dask/array/core.py",
+        "lines": "3902-3905",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Region branch no longer uses `_get_zarr_write_chunks` for `old_chunks`; behavior change may affect non-sharded zarr arrays",
+        "detail": "Previously the region branch built `old_chunks = normalize_chunks(write_chunks, z.shape)` from the zarr write chunks. Now it uses `dask_write_chunks` (the auto-chunked target). For non-sharded zarrs or when auto-chunking produces different blockdims, the `new_blockdim` slicing math is computed on a different chunking, which may change region-write tiling behavior. Worth verifying with a non-sharded region test.",
+        "file": "dask/array/core.py",
+        "lines": "3928-3933",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "summary": "The PR has a serious API design issue: a class named `PerformanceWarning` is being `raise`d as an exception (not warned), and the corresponding test asserts `pytest.raises` while its docstring says \"warns\" \u2014 this confused intent is reflected throughout. There is also dead code (`break` after `raise`), a confusing divisibility expression, and a per-axis check that only looks at the first chunk of each tuple. The region-handling branch silently switched the basis for `new_blockdim` from zarr write chunks to dask auto chunks, which deserves explicit verification."
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "task_id": "agents__3909",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "sample_rate is coerced into audio_format string with no validation against the STTAudioFormat literal",
+        "detail": "The constructor does typing.cast(f\"pcm_{sample_rate}\") and bypasses the six-value Literal contract. Passing sample_rate=11025 or 32000 silently produces an invalid \"pcm_*\" that the server rejects. Validate sample_rate against the allowed set at __init__ and raise ValueError, or accept audio_format directly. Don't let the type system lie.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "liskov",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "APIConnectionError raised from _process_stream_event is swallowed by recv_task's broad except",
+        "detail": "Server-side errors (auth_error, quota_exceeded, etc.) raise APIConnectionError, but recv_task wraps the call in `except Exception: logger.exception(...)` and keeps looping on a dead session. Either re-raise APIConnectionError specifically, or separate the control path so _run can shutdown or reconnect cleanly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "207-232, 395-411",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented VAD parameter ranges are not enforced as preconditions",
+        "detail": "Docstring promises vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_*_duration_ms in [50, 2000]. None are checked; out-of-range values are forwarded to the server and surface as opaque WS disconnects. Validate at __init__ with ValueError, or remove the range claim. A spec the code doesn't enforce is worse than no spec.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "76-107",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format on STTOptions duplicates sample_rate, creating two sources of truth that can desync",
+        "detail": "STTOptions exposes both sample_rate and audio_format, but audio_format is derived from sample_rate at construction. Mutating one without the other desynchronizes the dataclass. Drop audio_format from STTOptions and format it at the single use site in _connect_ws, or make it a computed property. One field, one truth.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "42-62, 115-117, 264",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect loop is dead code; transient failures kill the stream",
+        "detail": "The outer `while True` only loops when _reconnect_event is set, but nothing sets it on send_task/recv_task failure. When tasks_group raises, task.result() re-raises and the function exits. A network blip terminates the stream instead of reconnecting. Either wire reconnect on failure or delete the scaffolding.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "243-273",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTv2 duplicates ~95% of STT with no shared base, and recognize() raises NotImplementedError",
+        "detail": "The v1/v2 sibling split copies auth, session, base URL, and capability declaration; only the wire protocol differs. STTv2.recognize raising NotImplementedError also weakens the STT supertype contract (LSP violation). Extract a shared base or helper so v1 and v2 don't drift, and either widen the supertype or have recognize fall back to single-shot stream consumption.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "53-167",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The PR adds a Scribe v2 streaming client in the right shape, but the panel consensus is NEEDS-WORK before merge. Two P0 bugs: sample_rate is silently cast into an audio_format string outside the declared Literal ADT, and server-side APIConnectionErrors raised inside recv_task are swallowed by a broad except that keeps the loop spinning on a dead session. Documented VAD ranges aren't validated, the reconnect scaffolding never fires because nothing sets _reconnect_event on task failure, and STTOptions carries two sources of truth (sample_rate plus derived audio_format). Architecturally, STTv2 duplicates most of STT with no shared base and breaks the STT supertype by raising NotImplementedError from recognize. Fix validation, error propagation, and the reconnect path; tighten the dataclass before v1/v2 calcify."
+  }
+}

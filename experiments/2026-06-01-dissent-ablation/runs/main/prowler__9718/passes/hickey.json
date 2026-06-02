@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "prowler__9718",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Title/check name and CHANGELOG entry disagree with directory and class name",
+        "detail": "The CHANGELOG and directory say `compute_image_not_publicly_shared` but the PR title and description repeatedly call it `compute_image_publicly_shared`. The fact uttered by the code (the check name) and the fact uttered by the prose are different values for what should be one identifier. Pick one name, propagate it, and stop letting the artifact disagree with itself.",
+        "file": "prowler/CHANGELOG.md",
+        "lines": "16",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IAM-policy failure on an image is silently coerced to `publicly_shared=False`",
+        "detail": "In `_get_images`, when `getIamPolicy` raises (e.g., permission denied, as test-image-3 simulates), the code logs and then appends the image with `publicly_shared=False`. That complects two distinct facts \u2014 \"image is private\" and \"we could not determine sharing\" \u2014 into one boolean. A scanner whose job is to surface public exposure should not report PASS when it does not know. Model this as a tri-state (unknown/public/not-public) or carry an `iam_policy_retrieved: bool`, and have the check emit a separate status (or at minimum a distinct status_extended) when the fact is unknown.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "548-575",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`Image.publicly_shared` is a derived fact computed at fetch time, not a value of the world",
+        "detail": "The service layer reduces the IAM policy (a value, a fact about the world at time T) down to a single boolean before the check ever sees it. That is place-oriented thinking dressed as a model: the check can never ask \"which role?\", \"which member exactly?\", \"was the policy retrievable?\". Store the bindings (or the public members list, as the PR description even says it does) as data on the `Image`, and let the check derive the boolean. Keep values; push interpretation to the edge.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert on a synthesized boolean, not on the public-exposure behavior end-to-end",
+        "detail": "The check tests construct `Image(publicly_shared=True/False)` directly and verify the check echoes that boolean back. That is testing the test infrastructure: there is no test that drives the full path from an IAM binding containing `allAuthenticatedUsers` through `_get_images` to a FAIL. The service test covers the fetch, the check test covers the echo, but the seam between them is the actual logic that matters. Add at least one test where the check runs against an `Image` whose `public_members` (or bindings) include `allAuthenticatedUsers` and the check derives FAIL itself.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": "60-168",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Per-image `getIamPolicy` call inside the listing loop entangles two time concerns",
+        "detail": "Listing images and fetching each image's IAM policy happen in the same loop, in sequence, on the main service-init path \u2014 a service that already uses `__threading_call__` for other resources. This complects \"enumerate images\" with \"resolve sharing for each image\" and pays a per-image round-trip latency in projects with many images. Decompose: collect images first as values, then resolve IAM policies (threaded, as the rest of the service does), then attach. Time and IO become explicit instead of hidden in a nested for-loop.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-575",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The check does what it says, but the artifact is COMPLECTED in three ways worth naming. First, the boolean `publicly_shared` collapses three distinct facts \u2014 public, not-public, unknown \u2014 into two, so an IAM-policy error reports PASS; that is EASY-NOT-SIMPLE and a real correctness issue for a security scanner. Second, the service layer interprets the IAM policy before storing it, so the `Image` value loses the actual fact about the world (the bindings) and keeps only a derived opinion; the check then has nothing to reason about. Third, the tests largely round-trip the derived boolean instead of exercising the binding-to-FAIL path, which is TDD-AS-DESIGN showing through. Fix the name-disagreement between CHANGELOG/directory and PR prose, model unknown explicitly, and let the check derive the boolean from data on the `Image`."
+  },
+  "raw": ""
+}

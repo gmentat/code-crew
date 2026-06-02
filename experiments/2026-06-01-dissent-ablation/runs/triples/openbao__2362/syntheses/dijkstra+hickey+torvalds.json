@@ -1,0 +1,80 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub always returns false while security-sensitive callers already depend on it",
+        "detail": "Core.NamespaceSealed unconditionally returns false with a TODO, yet ListAllNamespaces, root-token paths, and the new ErrNamespaceSealed handling are wired to trust it. A stub that lies about seal state is a security regression masquerading as a hook. Either ship SealManager in the same patch, return ErrNotImplemented, or fail closed until the predicate is honest.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ErrNamespaceSealed dispatch uses substring matching on error text instead of errors.Is on the sentinel",
+        "detail": "AdjustErrorStatusCode uses errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) \u2014 any wrapped error whose message contains 'namespace is sealed' is coerced to 503, and translated/rewrapped variants will miss. Treat errors as values: use errors.Is on the sentinel. The refactor to a switch was the moment to fix this, not propagate it.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Root ACL ancestry check hinges on unspecified HasParent semantics with thin test coverage",
+        "detail": "AllowOperation gates root authority on !ns.HasParent(a.root), but reflexivity, root-namespace behavior, and Path canonicalization are nowhere stated. A root token in ns A now grants root across all descendants of A. testACLRoot only checks self-ns allow and root-context deny \u2014 sibling, cousin, deep-descendant, and root-of-root cases are untested. This is the authorization boundary; cover the full matrix.",
+        "file": "vault/acl.go",
+        "lines": "351-361",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation silently returns empty deny on namespace.FromContext error with no diagnostic",
+        "detail": "The reordered fast-path does `ns, err := namespace.FromContext(ctx); if err != nil { return ret }` \u2014 an empty ACLResults indistinguishable from a normal deny, with no log. Missing namespace in context now silently denies every operation. Log it, or distinguish 'no namespace' from 'denied' \u2014 silent failures here bite at 3am.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL.root *namespace.Namespace overloads one pointer to encode both is-root and owning-namespace, widening trust without stated invariant",
+        "detail": "The removed root-namespace guard in NewACL means any ctx-supplied namespace becomes the root-policy scope, and nil-vs-non-nil pointer encodes a (bool, owner) pair. The precondition on NewACL callers is unstated; any caller induced to construct with attacker-influenced ns self-authorizes that subtree. Separate the concerns with an explicit RootScope value and document the construction invariant.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 103-109",
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength uses `\".\"[1]` indexing trick instead of a named separator constant",
+        "detail": "Encoding the '.' separator's length as the indexed byte of a string literal costs reader-seconds for no gain. Use a named const Separator = \".\" with len(Separator), or just write TokenLen + 1 + NSIDLen. Gratuitously opaque arithmetic in a length expression.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel refuses this PR as it stands. The ACL change is a security-critical semantic shift \u2014 root tokens now grant authority across descendant namespaces via an unspecified HasParent predicate \u2014 bundled with a NamespaceSealed stub that always returns false while production callers already trust it, and a sealed-error dispatch that string-matches on message text instead of using errors.Is on the sentinel. The patch also overloads ACL.root to encode both is-root and owning-namespace in one pointer, removing the prior root-namespace construction guard without stating the new invariant. Split the ACL change into its own commit with an exhaustive ancestry permission matrix (self, sibling, cousin, deep-descendant, root-of-root), replace the lying stub with explicit ErrNotImplemented or ship SealManager alongside, and switch sealed-error detection to errors.Is."
+  }
+}

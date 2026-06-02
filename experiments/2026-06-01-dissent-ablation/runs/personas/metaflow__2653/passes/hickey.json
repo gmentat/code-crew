@@ -1,0 +1,60 @@
+{
+  "name": "hickey",
+  "task_id": "metaflow__2653",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking read after mode switch can hang forever if writer never closes the FIFO",
+        "detail": "The new inner while-True loop calls blocking os.read() with no timeout and no poll. The original code had two safety nets (poll timeout, check_process_exited) precisely because writer-never-closes is a real failure. Switching to blocking mode trades one race for an unbounded hang. The timeout/process-exit checks should still gate the loop.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "130-150",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two read loops with different semantics complect the read protocol",
+        "detail": "The function now has a non-blocking outer loop AND a blocking inner loop, each with its own EOF logic. That is two state machines for one job. The value flowing through is just bytes-until-EOF; the identity is one file descriptor; the time model is one stream. Decompose into: wait-for-first-byte, then drain-to-EOF as separate named functions.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "127-160",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "has_blocking_error variable is now dead but likely still declared above the diff",
+        "detail": "The BlockingIOError branch no longer sets or uses has_blocking_error. If the variable is still initialized earlier in the function, it is incidental noise from the previous design. Remove it so the remaining code reflects the current protocol, not the historical one.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The real fix is on the writer side; this patches the reader",
+        "detail": "The root cause stated is that the writer subprocess does not flush before exit. The simple fix is to make the writer flush and close deterministically (or framed length-prefixed messages). Patching the reader to tolerate an underspecified protocol is easy, not simple. Worth naming the writer-side fix even if this reader change ships.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "FIFO + JSON + non-blocking + process-liveness is an ad-hoc IPC protocol",
+        "detail": "What this code is about: one process sends one JSON value to another. That is a length-prefixed message or a closed stream. The current design complects transport (FIFO), framing (none), liveness (poll the process), and parsing (JSON). Consider a framed write (length header or newline-delimited) so EOF detection is not load-bearing.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "What this code is actually about: read one JSON value from a child process over a FIFO. The fix correctly identifies a real POSIX race (non-blocking read sees zero before kernel buffers drain) and uses a valid technique (switch to blocking once data arrives). But it complects two read loops with different EOF semantics, and removes the timeout/process-exit safety net in the blocking path, trading a truncation race for a potential hang. The deeper issue is incidental: the IPC has no framing, so EOF detection has to be load-bearing. The question that should have been asked first is whether the writer can flush-and-frame deterministically, which makes the reader trivial."
+  }
+}

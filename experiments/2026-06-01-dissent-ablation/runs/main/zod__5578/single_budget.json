@@ -1,0 +1,187 @@
+{
+  "task_id": "zod__5578",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "play.ts changed to import from local source path; appears to be a debugging artifact that should not be committed",
+        "detail": "The diff changes play.ts from `import * as z from \"zod/v4\"` to `import * as z from \"./packages/zod/src/index.js\"` and replaces a minimal smoke test with verbose console.log debugging of a metadata ordering case. This file looks like a developer scratch pad used during debugging; checking it in pollutes the repo and the local-path import will break for anyone running it from a fresh checkout if the path or build artifacts differ. It should be reverted or excluded from the PR.",
+        "file": "play.ts",
+        "lines": "1-19",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "override callback is now invoked for parent (wrapper) schemas, which changes a documented contract (`override: do not run on references`)",
+        "detail": "Previously `finalize` skipped `ctx.override({...})` when `seen.isParent` was true; the new code calls override unconditionally. The accompanying test `override: do not run on references` was updated from `expect(overrideCount).toBe(6)` to `toBe(12)` \u2014 i.e., overrides now fire roughly twice as often. This is a behavioral/API change: user override hooks that previously ran only on leaf schemas will now also run on every extracted parent wrapper. The test name `do not run on references` and any user code/documentation that relied on that semantics is now inconsistent with the implementation. Needs an explicit decision (and changelog note) about whether this is intentional, plus updating or renaming the test to reflect the new contract.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "~441-449 (finalize override call)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Recursion ordering in `flattenRef` may revisit a schema whose `seen.ref` was already set to null",
+        "detail": "`flattenRef` sets `seen.ref = null` early to guard against infinite recursion, then later calls `flattenRef(seen.parent)` from the same invocation if `seen.parent !== ref`. Because the same schema's `seen.ref` has already been nulled, a parent that points back through a cycle (e.g. self-referential or mutually recursive schemas with shared parents) could now be skipped or, conversely, the new branch could re-enter via `seen.parent` before the outer iteration in `finalize` completes. The interaction between `seen.ref = null` and the new `seen.parent` traversal is non-trivial; add a focused test for recursive/lazy schemas that also use `.meta({id})` on a wrapper.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "flattenRef body (approx 367-430)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "De-duplication uses `JSON.stringify` deep-equality, which is fragile for key ordering, undefined, NaN, and large schemas",
+        "detail": "Two new blocks compare `schema[key]` against `parentSeen.def[key]` (and `refSeen.def[key]`) via `JSON.stringify(...) === JSON.stringify(...)`. This is order-sensitive (`{a:1,b:2}` vs `{b:2,a:1}` won't match), silently drops `undefined`, throws on cycles, and is O(n) in serialized size per key. Given that JSON Schema objects nested under `properties`, `anyOf`, etc. can be large and that key insertion order is influenced by `Object.assign` sequence, this may yield false negatives (failing to dedupe) or, in pathological cases, false positives. Prefer a structural deep-equal helper, or compare only primitive-valued keys.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "two `JSON.stringify(...) === JSON.stringify(...)` comparisons",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fileProcessor now hoists shared props above `anyOf`, which changes the public JSON Schema output shape for multi-MIME files",
+        "detail": "Previously each branch of `anyOf` was a fully-formed `StringSchema` (with `type`, `contentEncoding`, `format`, `minLength`, `maxLength`). The new shape hoists those keys to the parent object and leaves each `anyOf` entry with only `contentMediaType`. Semantically the resulting JSON Schema validates equivalently in 2020-12 (parent keywords AND one of the branches), but tools that introspect `anyOf` entries as standalone schemas (codegen, doc generators) will see incomplete branches missing `type: string`. This is a breaking output-shape change for downstream consumers; ensure it's intentional and documented in the changelog, and consider keeping the previous shape under older drafts where keyword combination rules differ.",
+        "file": "packages/zod/src/v4/core/json-schema-processors.ts",
+        "lines": "234-241",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ZodType.check (classic) now passes `{ parent: true }` to `clone` \u2014 a behavior change with no test exercising the classic-side parent linkage directly",
+        "detail": "`packages/zod/src/v4/classic/schemas.ts` adds `{ parent: true }` to the `core.clone(...)` call inside `inst.check`. The mini variant uncomments the same option. Together these establish a parent chain on every `.check()`/`.refine()` call, which feeds the new `seen.parent` plumbing in `to-json-schema.ts`. This is load-bearing for the new `flattenRef` parent branch but there is no direct unit test asserting that `inst.check(...)._zod.parent` is set, and no test for non-JSON-schema consumers of `_zod.parent` to confirm they aren't affected (e.g. issue paths, error formatting, `safeParse` traversal). Add at least one targeted test for the parent linkage, and audit other callers of `_zod.parent` to ensure none assumed it was unset for `.check()` clones.",
+        "file": "packages/zod/src/v4/classic/schemas.ts, packages/zod/src/v4/mini/schemas.ts",
+        "lines": "classic 174-180; mini 65-69",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "New test `describe with id on wrapper` is narrow and does not cover the negative cases the comment claims to test",
+        "detail": "The test exercises `z.string().readonly().meta({id})` plus `.describe()` twice, asserting that `$ref` resolves and `description` survives. It does not assert that other wrapper combinations (`.nullable()`, `.optional()`, `.default()`, `.transform()`, `.brand()`) propagate `$ref` correctly, nor that ordering variations (`.meta({id}).readonly().describe()`, `.describe().meta({id}).readonly()`) all behave consistently. Given the fix is described as a general parent/child metadata propagation change, broader matrix coverage would prevent regression.",
+        "file": "packages/zod/src/v4/classic/tests/to-json-schema.test.ts",
+        "lines": "2023-2063",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment-only documentation of the new `parent` vs `ref` distinction is thin given the subtlety",
+        "detail": "The `Seen` interface gains a `parent` field separate from `ref`, and `flattenRef` has a non-trivial precedence rule: \"set ref if processor didn't\", then later \"if parent !== ref, also flow $ref from parent\". This dual-channel design is easy to misread on a future change. The JSDoc on `ref`/`parent` is helpful but the `process()` function and `flattenRef()` would benefit from a short block comment explaining the invariant (processor owns inheritance, parent owns extraction/$ref propagation) and what happens when they coincide vs differ.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "75-83 and 175-200",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`as any` cast used to read `_zod.parent` inside flattenRef",
+        "detail": "`const isParentRef = (zodSchema as any)._zod.parent === ref;` bypasses the type system. Since `Seen.parent` already tracks this, prefer `seen.parent === ref` to avoid the cast and a second property access path.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "isParentRef line in flattenRef",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Type widening: `ref?: $ZodType | undefined | null` -> `$ZodType | null` drops the explicit `undefined`",
+        "detail": "In `Seen`, `ref` was `$ZodType | undefined | null` and is now `$ZodType | null` (still optional via `?:`). Functionally equivalent under `strictNullChecks` because optional fields admit `undefined` regardless, but worth confirming all readers handle `seen.ref === undefined` vs `=== null` distinctly \u2014 particularly the `if (seen.ref === null) return;` short-circuit, which now must be reached only via explicit assignment in the same function.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "75-83",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead/commented code removed from mini but no symmetrical comment added in classic",
+        "detail": "Mini previously had `// { parent: true }` commented out; this PR uncomments it. The classic side adds `{ parent: true }` fresh. Consider a one-line comment in both spots explaining why `.check()` clones need the parent linkage (for JSON Schema metadata propagation), to prevent a future cleanup from reverting it.",
+        "file": "packages/zod/src/v4/classic/schemas.ts, packages/zod/src/v4/mini/schemas.ts",
+        "lines": "classic 174-180; mini 65-69",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Performance: `flattenRef` may now traverse the same nodes more times due to dual `ref`/`parent` recursion",
+        "detail": "Each `flattenRef(zodSchema)` may call `flattenRef(ref)` and then `flattenRef(seen.parent)`. Although `seen.ref === null` short-circuits the second pass on already-flattened nodes, the new key-by-key `JSON.stringify` deep comparisons run in two separate loops per node. For large schemas with many wrappers (readonly/optional/nullable chains), this changes constant factors from O(keys) to O(keys * serialized-subtree-size). Likely fine for typical schemas but worth a benchmark on a large schema corpus.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "flattenRef",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether running override callbacks on parent/wrapper schemas is a bug fix or a breaking change",
+        "positions": [
+          {
+            "persona": "pragmatic-shippability",
+            "position": "Override should fire on every schema the user can address, including wrappers \u2014 the previous skip-on-parent rule caused exactly the silent-loss bugs this PR fixes. Updating the test to 12 documents intent."
+          },
+          {
+            "persona": "abstraction-discipline / API-compat",
+            "position": "The existing test was literally named `override: do not run on references`, and downstream override handlers may rely on the leaf-only invariant for idempotency. Doubling invocation counts changes semantics; this needs a major-version note or a flag, not just a test number flip."
+          }
+        ]
+      },
+      {
+        "topic": "fileProcessor reshape (shared props hoisted, anyOf branches reduced to contentMediaType)",
+        "positions": [
+          {
+            "persona": "data-structure-soundness",
+            "position": "Hoisting shared keywords is semantically cleaner and avoids duplicating `type`, `contentEncoding`, etc. across every MIME branch \u2014 DRY at the schema level."
+          },
+          {
+            "persona": "formal-correctness/interop",
+            "position": "Each `anyOf` branch in JSON Schema is conventionally self-contained; tooling that walks branches expecting `type: string` will break. Backward-compatible would be to keep the duplicated branches and accept the redundancy."
+          }
+        ]
+      },
+      {
+        "topic": "Using JSON.stringify equality for de-duplication",
+        "positions": [
+          {
+            "persona": "pragmatic",
+            "position": "It's a one-liner, works for the shapes Zod actually emits (plain JSON), and is fast enough in practice."
+          },
+          {
+            "persona": "correctness",
+            "position": "Order-sensitive, undefined-dropping, cycle-throwing \u2014 replace with a proper deep-equal to avoid subtle dedupe misses on schemas with conditionally added keys."
+          }
+        ]
+      },
+      {
+        "topic": "play.ts changes",
+        "positions": [
+          {
+            "persona": "shippability",
+            "position": "play.ts is a scratch file; harmless to leave updated."
+          },
+          {
+            "persona": "repo hygiene",
+            "position": "Changing imports to a local source path and adding console.log debugging is a debugging artifact; revert before merge."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR addresses a real metadata-propagation bug in `toJSONSchema` by splitting `Seen.ref` into two channels (`ref` for processor-driven inheritance, `parent` for clone-chain $ref propagation) and wiring `.check()` clones in both classic and mini to set `parent: true`. The core idea is sound and the new wrapper-with-id test demonstrates the targeted fix. However the change also (1) removes the `!seen.isParent` guard so user `override` callbacks now run on parent/wrapper schemas \u2014 a behavior change that contradicts the existing test's name and is captured only by flipping `6` to `12`; (2) reshapes `fileProcessor`'s multi-MIME output in a way that downstream consumers of `anyOf` branches may notice; and (3) relies on `JSON.stringify` deep equality for de-duplication, which is fragile. The `play.ts` changes look like a debugging scratch file that shouldn't ship. Recommend: revert play.ts, decide and document the override semantic change (rename or add a feature note), expand test coverage to a wrapper-combination matrix and recursive schemas, and replace JSON.stringify equality with a structural deep-equal helper."
+  },
+  "raw": ""
+}

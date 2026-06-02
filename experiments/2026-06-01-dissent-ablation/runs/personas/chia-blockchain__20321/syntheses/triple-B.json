@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests substitute a zero-amount, zero-puzzle-hash placeholder addition where `additions=[]` used to suffice, bending tests to fit the new code path.",
+        "detail": "Tests changed `additions=[]` to `[Addition(amount=0, puzzle_hash=bytes32.zeros)]`. A zero-amount addition to the zero puzzle hash is not equivalent to no additions \u2014 either the new path requires a sentinel (a defect/leak) or the test no longer exercises the original case. The author edited the test to fit the code rather than the reverse.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "CreateSignedTransaction's `additions >= 1` precondition is satisfied by synthetic sentinel additions \u2014 an LSP violation papered over with placeholder coins.",
+        "detail": "send_transaction/cat_spend forward to create_signed_transaction whose `__post_init__` requires `len(additions) >= 1`, but their real outputs come from extra_delta/cat_discrepancy. Callers synthesize zero-amount Additions purely to satisfy the stronger precondition. Either relax the precondition when cat_discrepancy is present, or honestly model the substitution rather than smuggle sentinel coins past the invariant.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction has become a junk drawer of optional CAT- and decorator-specific fields duplicated across two request types.",
+        "detail": "extra_delta, tail_reveal, tail_solution, and puzzle_decorator now live on both CATSpend and CreateSignedTransaction, kept in sync by a free `cat_discrepancy_validation` function rather than owned by a shared abstract type. Extract a CatDiscrepancy value object that captures the triple's invariant once and is embedded in both dataclasses.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1916-1962",
+        "flagged_by": [
+          "pike",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction discards `get_wallet`'s return value purely for its side effect of raising, annotated only by a comment.",
+        "detail": "The `# opportunity to raise` pattern smuggles a precondition check past structure: the call exists only to throw, the return is thrown away, and create_signed_transaction will redo the lookup. Introduce a named `validate_wallet_type(...)` helper so the contract is enforced by a guard whose name states its purpose, not by folklore.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1513, 2012-2014",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction serializes to JSON and re-parses to invoke a sibling RPC method, routing an in-process call through the transport layer.",
+        "detail": "json_serialize_for_transport followed by an internal create_signed_transaction call is a framework-shaped solution to what should be a library call. Extract the transaction-building core as a plain function over a clean data structure (additions, fee, decorator, optional CatDiscrepancy) and let all three RPC entry points call it directly.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction silently drops the `puzzle_decorator[0]`-only slicing and cat_spend drops the per-addition MAX_COIN_AMOUNT check.",
+        "detail": "The original code passed only the first puzzle_decorator; the new path forwards the whole list and `_generate_signed_transaction` iterates all of them. Separately, the explicit per-addition `MAX_COIN_AMOUNT` guard is gone, assumed redundant via create_signed_transaction. Both are observable behavior changes that need an explicit equivalence claim before merge.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1507-1534, 2009-2044",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the deduplication is directionally right but executed in a way that weakens contracts and bends tests to fit code. Two P0 concerns dominate: tests now pass a zero-amount, zero-puzhash sentinel Addition where `[]` used to suffice, and callers synthesize the same sentinel to satisfy CreateSignedTransaction's `additions >= 1` precondition \u2014 an LSP violation hidden by placeholder coins. The CAT-discrepancy triple (extra_delta/tail_reveal/tail_solution) should be a shared value object, not three optional fields duplicated across two request types kept in sync by a free function. Smaller smells \u2014 discarded `get_wallet` calls as smuggled precondition checks, a JSON round-trip for an in-process sibling call, and silently changed slicing/amount-cap semantics \u2014 should be cleaned up before merge."
+  }
+}

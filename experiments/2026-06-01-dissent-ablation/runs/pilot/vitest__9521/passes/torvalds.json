@@ -1,0 +1,94 @@
+{
+  "persona": "torvalds",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "isIncluded() caches results before changedFiles is populated, poisoning the cache",
+        "detail": "isIncluded() writes into this.globCache *before* onTestRunStart() runs in some code paths. The fix in onTestRunStart() clears the cache after populating changedFiles, which works \u2014 but only because the author noticed. The real issue: isIncluded() now has two distinct meanings (does it match include globs vs does it match include globs AND is changed) and a single shared cache. Any future caller that hits isIncluded() before onTestRunStart fires will get a wrong-for-this-run cached answer. Either split the cache, or compute the changed-files membership outside the glob cache lookup. As written this is a latent footgun for anyone adding a new entry point.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-181",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook added in three places with copy-paste \u2014 looks like it wants to be one place",
+        "detail": "core.ts now has three separate `await this.coverageProvider?.onTestRunStart?.()` calls bolted next to three separate `_testRun.start(...)` calls. That's the shape of a wrapper, not three independent call sites. If a fourth code path is added that forgets the hook, coverage.changed silently misbehaves. Either fold the hook into _testRun.start, or wrap both in a single helper. Three patches pretending to be one.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-885",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent fallback to no filtering when git lookup fails",
+        "detail": "In onTestRunStart, `await vitestGit.findChangedFiles(...)` can return null (no git repo, bad ref, etc), and the code assigns `changedFiles = changedFiles ?? undefined`. That means: user asks for `coverage.changed: 'origin/main'`, ref doesn't exist, and vitest happily reports coverage for *all* files as if nothing happened. The user gets the wrong answer with no warning. CI passes that should fail, or vice versa. Either throw with a clear message, or at minimum log a warning that the changed filter was disabled.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-340",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles comparison uses raw filename without normalizing for absolute vs relative paths",
+        "detail": "isIncluded() does `this.changedFiles.includes(filename)` where filename is slash(cleanUrl(_filename)) \u2014 which may be absolute. VitestGit.findChangedFiles returns whatever git returns (typically repo-relative paths) or resolved paths depending on implementation. There's no normalization step shown. If the two sides disagree on absolute-vs-relative or on case (Windows/macOS), every file silently fails the membership test and the user gets empty coverage. Needs an explicit normalization and a test that exercises a non-cwd root.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "173-176",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform accepts boolean inputs that yargs/cac will never produce",
+        "detail": "The transform checks `value === true` and `value === false` as well as the strings. The CLI parser hands you strings. The dead branches add noise. Either trust the parser or document why both are needed. Pick one.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl() added to isIncluded() with no test for the query-param path through this function",
+        "detail": "The diff adds `cleanUrl()` to strip query params from filenames in isIncluded(). The new query-param-transforms test exercises the changed-filter path end-to-end, which is good. But isIncluded() is called from getCoverageFilesForProvider too, and there's no targeted unit test that a path with `?vue&type=script` correctly resolves. This is the kind of change that breaks six months later when someone removes the cleanUrl thinking it's redundant. A one-line unit test pins it down.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Docs claim `changed: true` means staged+unstaged but code path for `true` isn't obvious",
+        "detail": "The docs say `When set to true, it uses staged and unstaged changes`. Looking at onTestRunStart, `this.options.changed` is truthy for `true`, so it calls `findChangedFiles({ changedSince: true })`. Whether VitestGit handles `true` correctly is not verified in the diff. If it doesn't, the documented behavior is a lie. Add a test for `coverage.changed: true`.",
+        "file": "docs/config/coverage.md",
+        "lines": "408-416",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "File mode changed from 644 to 755 on test file",
+        "detail": "`test/coverage-test/test/changed.test.ts` has its mode bit flipped to executable in the diff. Test files aren't executables. Either it was 755 by accident before and this is fine, or this is gratuitous noise in the diff. Either way: drop the chmod.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch solves a real problem (run full suite, report coverage for changed files only) and the shape is roughly correct: a new option, a new lifecycle hook, default inheritance from test.changed. Tests cover the happy paths reasonably well. But the implementation has the maintainer-six-years-from-now smell. The onTestRunStart hook is copy-pasted into three call sites in core.ts when it wants to be one wrapper \u2014 classic three-patches-as-one. The shared globCache now answers two different questions (does it match includes; does it match includes AND is changed) and depends on call ordering to stay correct. Silent fallback when git returns null means users can get wrong-but-plausible coverage reports with no warning, which is the worst failure mode for a CI-targeted feature. Path normalization between git output and the slash(cleanUrl(...)) filenames is not shown to be sound. NEEDS-WORK: collapse the three core.ts hook sites into one wrapper, fail loudly (or warn loudly) on git lookup failure, and prove the path normalization is correct on Windows and non-cwd roots. Then it lands."
+  },
+  "raw": ""
+}

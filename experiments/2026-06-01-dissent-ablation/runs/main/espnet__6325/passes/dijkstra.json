@@ -1,0 +1,114 @@
+{
+  "persona": "dijkstra",
+  "task_id": "espnet__6325",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "db.sh declares TAL_ZH_ADULT_TEACH twice \u2014 once in the central template and once via symlink \u2014 with no stated precondition on which wins",
+        "detail": "The diff adds TAL_ZH_ADULT_TEACH=downloads to egs2/TEMPLATE/asr1/db.sh AND creates egs2/tal_zh_adult_teach/asr1/db.sh as a symlink to that same file. That is fine. But local/data.sh sources ./db.sh and then immediately does TAL_ZH_ADULT_TEACH=$(cd \"${TAL_ZH_ADULT_TEACH}\"; pwd). There is no precondition that 'downloads' exists. If the user has not yet created the downloads directory (which is the entire point of download_and_untar.sh that runs *after* this cd), the cd fails under set -e and the script dies before it can download anything. The author has not reasoned about the order of operations: the precondition of cd is the postcondition of mkdir, and mkdir has not run yet. TESTED-NOT-PROVED.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "32-34",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "download_and_untar.sh warns 'unzip is not installed' and then proceeds anyway with set -e",
+        "detail": "Lines 9-11: if ! command -v unzip; then echo 'unzip is not installed.' fi. No exit. The script then unconditionally proceeds to call unzip on the next branch. The author wrote a guard but forgot the guard's purpose. The postcondition of the guard block is supposed to be 'unzip exists,' but the implementation only prints a sentence and continues. This is DEFENSIVE-AS-SUBSTITUTE: a check that performs the social function of caring about errors without performing the logical function of preventing them. Either exit non-zero or do not write the check at all.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-11",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Usage block in download_and_untar.sh prints help but does not exit, so bad invocations proceed",
+        "detail": "Lines 13-22: if [ $# -lt 1 ] || [ $# -gt 2 ]; then cat <<EOF ... EOF fi. No exit after the heredoc. With $# = 0, $1 is unset, set -u then kills realpath $1 with a confusing error rather than the helpful usage message just printed. The control flow says 'print help and then crash anyway.' UNREASONED. The precondition of the script (exactly one or two positional arguments) is not enforced \u2014 it is merely documented and then violated.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "13-22",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Sentinel files are touched inside directories that the unzip step is assumed to have created \u2014 no proof it did",
+        "detail": "touch \"$extract_dir/aisolution_data/.complete\" (and CH, MA) runs immediately after unzip. If TAL_ASR-1.zip does NOT in fact extract a top-level directory named aisolution_data (perhaps it extracts to a differently-named folder, or unzips at the archive root), touch fails under set -e and the user is told nothing useful. There is no postcondition check on unzip's output \u2014 only an assumed directory layout. The invariant 'after extracting archive N, directory X exists' is asserted rather than verified. TESTED-NOT-PROVED at best; UNREASONED in the general case.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "32-34, 43-45, 54-56",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh assumes train_2 (CH) and train_3 (MA) contain only .wav files but never validates the count",
+        "detail": "The heredoc in data.sh asserts num_wav for train_1/dev/test but the prepare_kaldi loop counts wav.flist via find. For CH and MA, num_wav (29386 and 38924) is asserted, but the loop body counts text lines, not wav files, against num_wav. If the trans file lacks rows for some wavs (or has rows for wavs absent on disk), filter_scp prunes them and the count check fires \u2014 but the error message accuses 'utterances in text' of mismatching expected, when the actual root cause may be the wav side. The invariant being checked is not the invariant the author thinks they are checking. The diagnostic is misleading; correctness reasoning is sloppy.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "55-58, 73-79",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sed pipeline normalizing Chinese punctuation is a smuggled goto \u2014 a chain of textual rewrites with no stated invariant",
+        "detail": "Lines 49-52 of data.sh: sed 's/\uff21/A/g' | sed 's/#//g' | sed 's/=//g' | sed 's/\u3001//g' | sed 's/\uff0c//g' | sed 's/\uff1f//g' | sed 's/\u3002//g' | sed 's/[ ][ ]*$//g'. Six character classes, one whitespace strip, no comment explaining what set of characters defines 'a transcript we accept' (the postcondition). Why these characters and not their half/full-width siblings? Why # and = (those are not Chinese punctuation)? The author cannot state the postcondition of normalization, only enumerate samples of inputs they remembered. UNREASONED. Combine into one tr/sed with a documented character class, or define a Unicode-category-based normalizer.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "49-52",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "self_attention_dropout_rate: 0. and src_attention_dropout_rate: 0. \u2014 bare-dot YAML floats",
+        "detail": "In train_asr_branchformer_e24_amp.yaml lines 30-31 and time_mask_width_ratio_range starts with - 0. \u2014 YAML accepts these, PyYAML parses them as 0.0, but this is exactly the kind of careless surface form that catches a future reader who runs the file through a stricter parser or a linter. Write 0.0. Elegance is not optional; ambiguity at the syntactic surface is correctness debt waiting to compound.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "30-31, 81-83",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "README.md ASR config link is wrong",
+        "detail": "README states 'ASR config: [./conf/train_asr_branchformer_e24_amp.yaml](./conf/train/train_asr_branchformer_e24_amp.yaml)'. The display text and the link target disagree \u2014 the link points to conf/train/... which does not exist in the diff; the actual file is at conf/train_asr_branchformer_e24_amp.yaml. A documentation invariant 'link target equals shown path' is violated. Trivial to fix; symptomatic of code that was not reread before submission.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "16",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symlinks committed without trailing newline ('\\ No newline at end of file')",
+        "detail": "Multiple symlinks (asr.sh, db.sh, path.sh, pyscripts, scripts, steps, utils) are recorded with no trailing newline. Cosmetic, conventional in this repo for symlinks, but worth noting as the kind of small inconsistency that signals the diff was assembled rather than authored. Not a refusal; an observation.",
+        "file": "egs2/tal_zh_adult_teach/asr1/",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Author cannot state termination function for the data-preparation loop's filter chain",
+        "detail": "prepare_kaldi processes records through several sorted joins and filter_scp; the invariant 'utt.list always shrinks or stays the same under each filter' is not stated. The author probably knows it informally. State it. The competent programmer is fully aware of the limited size of his own skull \u2014 write the invariants down in a comment block above the function so the next maintainer is not forced to reconstruct them.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "37-67",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "Verdict: REFUSED, pending repair. The recipe almost certainly produces the reported CER \u2014 the author has tested it \u2014 but TESTED-NOT-PROVED is the verdict on the surrounding shell. Two P0 control-flow bugs in download_and_untar.sh (missing exit after 'unzip not installed' guard; missing exit after usage block) are textbook DEFENSIVE-AS-SUBSTITUTE: guards written for their social comfort, not their logical effect. data.sh resolves $TAL_ZH_ADULT_TEACH via cd before the directory is guaranteed to exist, and asserts post-extraction directory layouts (aisolution_data, CH, MA) without verifying unzip produced them. The Chinese-punctuation sed chain is a smuggled goto \u2014 six rewrites with no stated postcondition. Fix the guards (add exits), state the precondition that $TAL_ZH_ADULT_TEACH exists, verify rather than assume extracted directory names, and write down the normalization invariant. Then this is REASONED and mergeable."
+  },
+  "raw": ""
+}

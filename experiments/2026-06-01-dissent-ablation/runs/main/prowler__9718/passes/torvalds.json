@@ -1,0 +1,74 @@
+{
+  "persona": "torvalds",
+  "task_id": "prowler__9718",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "IAM policy fetch failure is silently treated as 'not publicly shared'",
+        "detail": "In _get_images(), if images().getIamPolicy() raises (permission denied, transient API error, anything), the except block logs and falls through with publicly_shared=False. The image is still appended and the check reports PASS. That is the worst possible failure mode for a security scanner: you get a green light because you couldn't see. Either skip the image entirely on policy fetch failure, or surface the unknown state (e.g. a third state / UNKNOWN status) so the check doesn't lie. The test fixture explicitly exercises this path (test-image-3 raises and gets asserted as not publicly_shared), which means the bad behavior is being canonized by the test.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public-detection logic ignores the role on the binding",
+        "detail": "The loop sets publicly_shared=True the moment any binding contains allAuthenticatedUsers, regardless of role. A role like roles/compute.imageUser is the actual risk; some other role might be informational or audit-related. More importantly, the model stores a single bool and discards which role was granted, so downstream remediation can't tell the operator what to remove. Store the role(s) and members, decide in the check. Doing the policy decision inside the service layer is the wrong shape anyway -- service collects facts, check interprets them.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "551-562",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Changelog entry name doesn't match the check directory or class name",
+        "detail": "CHANGELOG says compute_image_not_publicly_shared and the directory/class are compute_image_not_publicly_shared, but the PR description and metadata title repeatedly call this compute_image_publicly_shared. The PR description says 'New Check (compute_image_publicly_shared/)' which doesn't exist. Minor on its own, but indicates the PR was renamed mid-flight and not all references caught up. Maintainer six years from now grepping for either name will be annoyed. Pick one name everywhere.",
+        "file": "prowler/CHANGELOG.md",
+        "lines": "16",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model is anemic -- only carries a precomputed bool",
+        "detail": "The Image BaseModel has name, id, project_id, publicly_shared. No location, no self_link, no family, no source project, no list of offending members or roles. Other models in this file (Disk, Instance, etc.) carry richer state. When the next check needs image data (e.g. 'image not encrypted with CMEK', 'image family deprecated'), this model will get bolted onto. Better shape now: store the raw IAM bindings (or at minimum the offending members/roles) on Image and have the check derive publicly_shared. Same logic, separates collection from policy.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts type via __class__.__name__ string comparison",
+        "detail": "compute_service_test.py uses assert compute_client.images[0].id.__class__.__name__ == 'str'. This is isinstance(x, str) written the long way around, and it's already done elsewhere in the same test for other fields presumably -- match the existing style. Style nit, but it propagates: people copy what's nearby.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "263-277",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Exception logging uses error.__traceback__.tb_lineno without None check",
+        "detail": "Existing pattern in the file, so this matches surrounding style and isn't a refusal -- but error.__traceback__ can be None in some edge cases (re-raised exceptions, certain async paths) and will AttributeError inside the except handler. If the codebase already accepts this pattern everywhere, fine, leave it. Flagging because it's a latent footgun that's now duplicated in another place.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "570-572, 581-583",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch does one thing and the diff is scoped and matches the surrounding voice -- it's the right shape as a Prowler check addition. The shape problem is that policy interpretation (is this image 'publicly shared'?) is done in the service layer and squashed into a single bool on the model, throwing away the role and the members. That's a taste issue: the service collects, the check decides. The fix-or-die issue is the silent IAM-fetch failure path that produces PASS for images you literally could not see -- a security scanner that returns green on access denied is worse than no scanner. NEEDS-WORK: fix the unknown-on-error behavior, store the offending bindings on the model and decide in the check, reconcile the naming. Then it lands."
+  },
+  "raw": ""
+}

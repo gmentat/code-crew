@@ -1,0 +1,131 @@
+{
+  "task_id": "kale__601",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Where should the file content come from?",
+        "positions": [
+          {
+            "persona": "Pragmatic shipper",
+            "position": "Reading the script content on the backend and embedding it in the RPC response is the smallest change that works. It ships the feature with minimal surface area and avoids new endpoints."
+          },
+          {
+            "persona": "Abstraction/architecture",
+            "position": "The compiler already writes the file to disk and returns pipeline_package_path. A proper download should be served via a dedicated file-serving endpoint (or reuse the existing path) rather than base64/UTF-8 embedding the entire script into every compile response. This couples compile latency and memory to script size and conflates 'compile result metadata' with 'file payload'."
+          }
+        ]
+      },
+      {
+        "topic": "Download target: script vs compiled artifact",
+        "positions": [
+          {
+            "persona": "User-intent reader",
+            "position": "The PR title says 'compiled pipeline file' and the description says '.kale.py file'. The download delivers script_content (the generated Python script at script_path), which matches '.kale.py' but NOT the compiled pipeline package (package_path, typically a .yaml/.tar.gz produced by kfputils.compile_pipeline). Users expecting to download the deployable pipeline artifact will be confused."
+          },
+          {
+            "persona": "Implementation reader",
+            "position": "The filename fallback in DeployProgress.tsx derives from compiledPath which currently points to the pipeline package (e.g., pipeline.yaml), but the bytes downloaded are the .py script. The mismatch between filename and content is a real bug, not just a naming nit."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Filename and file content are mismatched: downloads .yaml/.tar.gz filename with .py contents",
+        "detail": "In DeployProgress.tsx, fileName is derived from props.compiledPath.split('/').pop(), and compiledPath comes from Commands.ts using package_path (the kfp-compiled artifact, e.g. pipeline.yaml). But the blob bytes are script_content read from script_path (the generated .kale.py). Users will get a file named pipeline.yaml whose contents are Python source. Either send script_path's basename as the filename, or download the actual compiled package.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-182",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Feature does not deliver what title/description promises (compiled pipeline file)",
+        "detail": "The PR description says it downloads the 'compiled .kale.py file', but kfputils.compile_pipeline(script_path, ...) returns package_path \u2014 the kfp-compiled pipeline artifact (YAML/tar.gz), which is the deployable output. The diff only returns the intermediate Python script, never the compiled package. If the intent is to let users grab the deployable pipeline, this implementation downloads the wrong artifact entirely.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-125",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Entire script content embedded in every compile RPC response, even when never downloaded",
+        "detail": "compile_notebook now reads the full generated script into memory and returns it in the RPC payload unconditionally. For large notebooks/pipelines this bloats every compile response, increases serialization cost, and may cross RPC size limits. A dedicated 'fetch compiled file' endpoint (or reading the file lazily on button click) would be cleaner and bounded.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-125",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "File read has no encoding specified and no error handling",
+        "detail": "open(script_path) relies on locale default encoding, which is non-portable (Windows cp1252 vs Linux utf-8) and can corrupt non-ASCII characters in generated code or comments. It also has no try/except \u2014 a read failure will surface as an unhandled exception rather than the structured error path already present in compile_notebook. Use open(script_path, 'r', encoding='utf-8') and integrate with the existing error handling.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-120",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Download icon is rendered without semantic button affordance/keyboard support",
+        "detail": "GetAppIcon is rendered as an svg with onClick. It is not focusable, has no role='button', no keyboard handler, and no hover state for non-pointer users. The adjacent existing affordance is an <a> tag. Wrap the icon in a <button> or IconButton with aria-label, tabIndex, and keyboard activation to match a11y expectations and the surrounding pattern.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "235-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Object URL revoked synchronously after click may race in some browsers",
+        "detail": "URL.revokeObjectURL(url) is called immediately after a.click() inside the same tick. In most browsers this is fine because the download has been initiated, but defensively scheduling revoke via setTimeout(..., 0) or requestIdleCallback is the conventional pattern and avoids edge-case aborted downloads.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "178-182",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Fallback filename 'pipeline.kale.py' is hardcoded and may diverge from real naming",
+        "detail": "If compiledPath is empty, the code falls back to 'pipeline.kale.py'. The actual generated script uses pipeline.config.pipeline_name. Consider passing the script basename from the backend explicitly so the filename is always correct rather than reconstructed on the client.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "171-172",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Blob MIME type 'text/plain' is fine but 'text/x-python' would be more accurate",
+        "detail": "Minor: setting type to 'text/x-python' (or 'application/x-python-code') better reflects the payload and gives the OS a hint when the user saves it. Not blocking.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "174",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "compiledContent typed as optional string with no size or undefined guard beyond truthy check",
+        "detail": "DeployProgressState.compiledContent is optional. The handler guards with if (props.compiledPath && props.compiledContent), which is fine, but the button is rendered unconditionally in the success branch. If compiledContent is missing for any reason (older backend, partial response), clicking the icon silently does nothing. Either hide/disable the button when compiledContent is absent, or show a tooltip explaining unavailability.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "168-182, 235-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The PR adds a working download affordance, but ships two correctness problems: the downloaded filename is derived from the kfp-compiled package path (e.g. pipeline.yaml) while the bytes are the generated Python script, producing a misnamed file; and the feature description claims a 'compiled pipeline file' but the diff actually returns the intermediate .kale.py script, not the kfp package_path artifact. Decide which artifact users actually want and align filename, content, and copy. Architecturally, embedding full script contents in every compile RPC response is wasteful and unbounded \u2014 a dedicated file-fetch endpoint (or lazy read on click) is cleaner. Smaller issues: missing utf-8 encoding and error handling on the file read, no accessible button semantics on the icon, and a hardcoded fallback filename. Address the filename/content mismatch and the artifact-intent question before merge."
+  },
+  "raw": ""
+}

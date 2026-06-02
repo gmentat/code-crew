@@ -1,0 +1,154 @@
+{
+  "task_id": "prowler__9718",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Check name vs attribute mismatch (`publicly_shared` vs `public_members`)",
+        "positions": [
+          {
+            "persona": "PR description fidelity",
+            "position": "The PR description states the model has a `public_members` field, but the implementation uses a boolean `publicly_shared`. This is a documentation/spec drift worth fixing in the description, but the code itself is internally consistent."
+          },
+          {
+            "persona": "Code shippability",
+            "position": "Boolean is simpler and sufficient for the current check. The description is just out of date; do not block on this."
+          }
+        ]
+      },
+      {
+        "topic": "Filtering custom images vs all images",
+        "positions": [
+          {
+            "persona": "Correctness",
+            "position": "`images().list(project=...)` returns custom images owned by the project, so no extra filter is needed \u2014 public/Google-managed images live in separate projects (debian-cloud, etc.). Behavior is correct."
+          },
+          {
+            "persona": "Defensive engineering",
+            "position": "Some custom images may include deprecated/obsolete entries. Filtering by `status` or `deprecated.state` could reduce noise, but is not required for correctness."
+          }
+        ]
+      },
+      {
+        "topic": "Per-image IAM call cost vs batching",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "Sequential IAM lookups per image are slow but match the pattern used elsewhere in this service; acceptable to ship and optimize later."
+          },
+          {
+            "persona": "Performance discipline",
+            "position": "Other resources in `compute_service.py` use `__threading_call__`. `_get_images` is purely sequential, inconsistent with the established concurrency pattern, and N IAM round-trips per project will be noticeable on large estates."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check filename/class is `compute_image_not_publicly_shared` but check folder/metadata `CheckID` must match exactly \u2014 verify directory name",
+        "detail": "The diff creates `compute_image_not_publicly_shared/` with `compute_image_not_publicly_shared.metadata.json` and class `compute_image_not_publicly_shared`. The PR title and description, however, refer to `compute_image_publicly_shared` in places ('New Check (compute_image_publicly_shared/)'). The actual code is consistent (`_not_publicly_shared` throughout), so this is a description bug, not a code bug \u2014 but the PR description checklist should be reconciled before merge to avoid downstream confusion in docs and changelog tooling.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`_get_images` is not threaded, unlike every other resource collector in this service",
+        "detail": "All other collectors in `compute_service.py` (`_get_disks`, `_get_instances`, `_get_regional_instance_groups`, etc.) are dispatched via `self.__threading_call__(...)`. `_get_images` iterates `self.project_ids` sequentially and issues one `getIamPolicy` call per image serially. For accounts with many projects/images this turns into O(projects x images) sequential round-trips and will materially slow service initialization. Wrap project iteration in `__threading_call__` (and ideally parallelize the per-image IAM fetch as well).",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-581",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "On `getIamPolicy` exception the image is recorded as `publicly_shared=False`, silently passing the check",
+        "detail": "Inside `_get_images`, when `getIamPolicy` throws (e.g., permission denied \u2014 which is exactly what the test fixture for `test-image-3` exercises), the code logs and falls through with `publicly_shared = False`. The resulting Image is appended and the check will report PASS for an image whose IAM state is actually unknown. This is a false-negative pattern: a misconfigured permissions setup will hide real exposure. Either skip the image, surface MANUAL/UNKNOWN status, or model `publicly_shared` as `Optional[bool]` and have the check report accordingly.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "545-571",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Required IAM permission (`compute.images.getIamPolicy`) not surfaced in PR checklist / permissions docs",
+        "detail": "The PR description's checklist asks 'do we need to update permissions for the provider?' and leaves it unanswered. `images().getIamPolicy` requires `compute.images.getIamPolicy`, which is not part of the default `roles/viewer` set used by many Prowler GCP scans. Without documenting/adding it, the new check will silently degrade for many users (see also the swallowed-exception issue above). Confirm and update the GCP IAM/permissions doc and changelog note.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`Image` model lacks `self_link`/`uri` and family/source metadata typical of other resource models",
+        "detail": "Other models in this file (e.g., `Disk`, `Instance`, MIGs) carry richer fields useful for resource_arn/resource_uid construction and downstream reporting (mute filters, allowlists, dashboards). `Image` only has `name`, `id`, `project_id`, `publicly_shared`. At minimum capturing the image `selfLink` would let consumers uniquely identify the resource across projects. Not blocking, but worth a follow-up.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mock test for `test-image-3` (IAM exception path) only asserts `publicly_shared` is False \u2014 does not assert the error was logged or that behavior is intentional",
+        "detail": "`tests/providers/gcp/services/compute/compute_service_test.py` (lines 274-276) asserts `not compute_client.images[2].publicly_shared` for the image whose `getIamPolicy` raised. This locks in the silent-false behavior flagged above. If the error-path semantics change to UNKNOWN/skip, this test must change too. Add an explicit comment or, better, change the contract.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "274-277",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`error.__traceback__.tb_lineno` can be `None` and will raise inside the logger format string",
+        "detail": "Both `except Exception as error:` blocks format `error.__traceback__.tb_lineno`. If `error.__traceback__` is None (rare but possible for re-raised/synthetic exceptions), `.tb_lineno` will AttributeError, masking the original error. This mirrors a pattern used elsewhere in the file, so consistency argues for leaving it, but a small helper or `getattr(error.__traceback__, 'tb_lineno', '?')` is safer.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "567-581",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pagination contract: `request = self.client.images().list_next(...)` runs unconditionally even after errors mid-page",
+        "detail": "If `iam_policy` retrieval raises for one image, the loop continues, but if the outer `request.execute()` raises mid-pagination the outer `except` swallows the whole project's pagination loop. Behavior is consistent with other collectors but worth noting \u2014 partial pages will be lost without an indication, which can affect compliance reports.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "540-581",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Metadata `Severity` is `medium`; consider whether `high` is appropriate for `allAuthenticatedUsers` exposure of disk images",
+        "detail": "Disk images can contain secrets, source code, and full filesystem state. Other Prowler checks that expose data to `allAuthenticatedUsers` (e.g., GCS buckets) are typically `high`. Worth a deliberate severity decision with a one-line rationale in the PR thread; not a blocker.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "9",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Check tests do not exercise the `compute_service` integration end-to-end with the fixture",
+        "detail": "The check tests in `compute_image_not_publicly_shared_test.py` construct `Image` objects manually and bypass `compute_service`. The fixture-driven integration test lives in `compute_service_test.py` and only asserts attribute values, not check outcomes. Adding one test that boots the service via `mock_api_client` and runs the check would catch wiring regressions (e.g., the silent-PASS-on-permission-denied issue).",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The PR adds a straightforward GCP check that flags Compute Engine custom images shared with `allAuthenticatedUsers`. The check logic, metadata, and unit tests are clean and follow existing Prowler patterns. Three substantive concerns warrant attention before merge: (1) `getIamPolicy` exceptions are silently treated as \"not publicly shared\", producing false PASS results when the caller lacks `compute.images.getIamPolicy` \u2014 exactly the most common real-world failure mode; (2) `_get_images` runs serially while every other collector in `compute_service.py` uses `__threading_call__`, adding meaningful latency on multi-project estates; (3) the PR description does not confirm permissions doc updates for `compute.images.getIamPolicy`, which is required for the new code path. Smaller cleanups: richer `Image` model fields, severity reconsideration, and one end-to-end test through the fixture."
+  },
+  "raw": ""
+}

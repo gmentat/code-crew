@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Per-invocation client creation inside process_frame is wasteful and hides connection lifecycle.",
+        "detail": "The async with self._aws_session.client(...) opens a fresh bedrock-agentcore client on every LLMContextFrame. Boto/aioboto session+client setup is non-trivial; the right data is a long-lived client owned by the processor, started in setup and closed in cleanup. Keep the data structure (one client per processor), and the control flow becomes obvious.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "204-210",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout-based bookend state machine is the wrong data structure for response framing.",
+        "detail": "_output_response_open plus a 1s sleep task to emit LLMFullResponseEndFrame races with the final explicit close at the end of process_frame and adds three pieces of mutable state. The data is simpler than this: one invocation produces a bounded stream of parts. Emit Start once before the loop, End once after, drop the timer entirely. Data dominates; the algorithm follows.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "171-201, 247-252",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SSE parsing is hand-rolled and brittle; should be a small filter, not inline string surgery.",
+        "detail": "split('\\n'), startswith('data: '), slice [6:] mixes transport parsing with business logic inside process_frame. Make it a tiny generator: bytes-in, response-line-out. Then process_frame just consumes lines and calls the response transformer. Composition over a 40-line conditional block. Also: line[6:] assumes exactly one space after 'data:', which SSE does not guarantee.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "218-246",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "agentArn parameter name violates PEP 8 and the rest of the file's snake_case.",
+        "detail": "Every other arg is snake_case (aws_access_key, aws_region) but agentArn is camelCase, presumably mirroring the AWS API field. Public Python API should be agent_arn; translate to agentRuntimeArn at the call site. Small thing, but it's the signature users will type.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104, 137",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "response_to_output_transformer can raise JSONDecodeError and crash the processor.",
+        "detail": "default_response_to_output_transformer calls json.loads with no try/except. A malformed SSE line or non-JSON single-part response will propagate out of process_frame. Either document that transformers must be total, or wrap the call site and log+skip. Prefer the latter: a transform that yields None on bad input composes cleanly.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78-80, 240-246",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Default context transformer concatenates content parts with no separator discipline and ignores non-text parts silently.",
+        "detail": "' '.join([part.get('text', '') for part in content]) emits empty strings for image/tool parts, producing leading/trailing/double spaces. Filter then join, or document that only text parts are supported. Tiny data-shape decision; the resulting code is one line shorter and obviously correct.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "57-61",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The processor does a reasonable job wrapping AgentCore, but the framing state machine is over-engineered for what is really a bounded stream: one invocation, N parts, then done. A timer task plus an open-flag plus a final explicit close is three representations of the same fact. Strip the timer, emit Start/End around the loop, and the code shrinks and stops racing with itself. Two other small Unix-shaped wins: hoist the boto client out of the per-frame path, and pull SSE parsing into a tiny generator so process_frame reads as transform-and-push rather than transport plumbing."
+  }
+}

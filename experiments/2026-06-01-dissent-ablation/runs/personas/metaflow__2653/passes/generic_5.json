@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking read can deadlock if writer never closes the FIFO",
+        "detail": "After switching to blocking mode and entering the inner `while True` loop, the code loses its ability to time out or detect a hung subprocess. The previous non-blocking path with poll() handled timeouts and exit detection; now if the writer stalls without closing the fd, the parent blocks indefinitely. Consider keeping poll() in the blocking phase with a timeout.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-146",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removed `has_blocking_error` handling without confirming it's dead code",
+        "detail": "The original code set `has_blocking_error = True` and broke on content. That variable was likely used by code outside the diff (return value or post-loop check). The diff removes the assignment but doesn't show what happens to downstream consumers of `has_blocking_error`. Verify nothing else in the function depends on it.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Lost the macOS EOF-detection fallback via check_process_exited",
+        "detail": "The removed branch handled a documented macOS case where EOF is not signaled after the writer closes. The new design assumes the first non-empty read always happens before that condition triggers, but if the writer closes without ever producing data the poll-only loop now silently spins forever (the `else: pass` does nothing). Original safeguard should be retained for the no-data case.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "150-157",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl flag toggle has no error handling or restoration",
+        "detail": "If `fcntl.fcntl` raises (rare but possible on closed fd), the exception propagates without cleanup and the outer caller may see an inconsistent fd state. Also, the fd state change isn't reverted on early exit \u2014 minor concern since the fd is closed soon after, but worth a comment.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "136-138",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Outer `while` loop becomes effectively single-iteration after first data",
+        "detail": "Once the inner blocking loop runs, the `break` exits the outer loop. This makes the surrounding poll/select scaffolding only relevant for the very first chunk. The structure would be clearer as a two-phase function (wait-for-first-byte, then drain) rather than nested loops with a break.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "130-146",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test added for the race condition fix",
+        "detail": "The PR fixes an intermittent JSONDecodeError but adds no regression test simulating the FIFO race (e.g., a writer that closes quickly with buffered data). Without a test, future refactors of `read_from_fifo_when_ready` could silently re-introduce the truncation bug.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies a real POSIX race between non-blocking reads and writer close, and switching to blocking mode after first data is a sound approach. However the new code removes timeout/hang-detection once blocking mode engages, drops the macOS-specific EOF fallback via `check_process_exited` when no data has arrived, and silently turns timeouts into a no-op pass that could spin. The removal of `has_blocking_error` should also be verified against the rest of the function (not shown in diff). A regression test for the truncation case would significantly strengthen the change."
+  }
+}

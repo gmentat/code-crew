@@ -1,0 +1,75 @@
+{
+  "task_id": "agents__3909",
+  "triple_key": "knuth+hickey+dijkstra",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Reconnect loop swallows exceptions, uses an unset event, and has no stated termination condition.",
+        "detail": "_run calls tasks_group.exception() purely to mark the error retrieved, discarding real send/recv failures. _reconnect_event is declared but never set, so the wait_reconnect branch is dead and the loop has no precondition, backoff, or termination function. Either remove the reconnect scaffolding or wire it with a stated invariant.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "208-270",
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_speaking flag is a smuggled state machine across coroutine boundaries with no invariant.",
+        "detail": "self._speaking is mutated from _process_stream_event with no documented rule for when it must be true or false, what happens if committed_transcript arrives before any partial, or on reconnect. The flag survives reconnects unchanged, so END_OF_SPEECH may never fire. Make the segment an explicit value with a pure transition function, or state and enforce the invariant.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "330-394",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format is derived by string interpolation from an unvalidated sample_rate and cast to STTAudioFormat.",
+        "detail": "f\"pcm_{sample_rate}\" with typing.cast suppresses type checking; sample_rate=11025 silently produces pcm_11025, which the Literal forbids and the server rejects. Validate sample_rate against the documented set at construction, or map through a dict so failure is local. Two fields (audio_format and sample_rate) encode one fact.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "82-116",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Fatal protocol errors are raised from inside recv_task and immediately swallowed by its loop.",
+        "detail": "On auth_error or quota_exceeded, _process_stream_event raises APIConnectionError from within recv_task's try/except, which logs and continues the while-True. The error is both raised and suppressed, leaving no stated postcondition on receipt of a fatal message. Route fatal errors out of the task group instead of raising into a swallowing handler.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-188, 396-412",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented parameter ranges are not enforced at construction.",
+        "detail": "vad_silence_threshold_secs [0.3, 3.0], vad_threshold [0.1, 0.9], and duration fields [50, 2000] are asserted in the docstring but __init__ performs no validation. Out-of-range values fail opaquely on the server after WS connect. Validate at construction so the precondition is checked where it is stated.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "78-95",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Protocol dispatch is a stringly-typed if/elif ladder and STTOptions duplicates __init__ defaults.",
+        "detail": "_process_stream_event hand-rolls dispatch on message_type, mixing handled, ignored, error, and unknown branches; committed_transcript_with_timestamps is effectively dead. STTOptions also restates defaults already in __init__, and query-string construction mutates a list across nine conditionals. Replace with a dict-dispatch, a single source of defaults, and urlencode over a dict of non-None options.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "40-115, 275-410",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a streaming WebSocket client that works in the happy path but lacks stated invariants and validated preconditions at every critical seam. The reconnect loop swallows exceptions and references an event that is never set; the _speaking flag is a smuggled state machine that survives reconnects; fatal errors are raised into a context that suppresses them; and sample_rate is cast to a Literal without validation. Documented parameter ranges are not enforced, and the dispatch and options scaffolding carry incidental complexity. Land only after the protocol state machine and reconnect termination condition are written down and the input contracts are enforced at construction."
+  }
+}

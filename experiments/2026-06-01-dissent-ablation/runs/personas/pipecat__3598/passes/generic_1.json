@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "pipecat__3598",
+  "review": {
+    "summary": "This PR refactors Sarvam STT/TTS to support v3 models using config dataclasses, which is a good structural improvement. However, there are several concrete bugs and regressions: a documentation-vs-code mismatch on the v3-beta default speaker, silent removal of the `input_audio_codec` parameter from the STT websocket connection, spurious warnings when Optional parameters are explicitly None, and missing validation that a chosen voice_id is actually valid for the selected model. The clamping behavior also silently mutates user input rather than raising.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "v3-beta default speaker mismatches documentation (code says 'shubh', docs say 'aditya')",
+        "detail": "In TTS_MODEL_CONFIGS['bulbul:v3-beta'], default_speaker='shubh', but the module docstring, PR description, class docstring, and SarvamTTSSpeakerV3 enum all advertise 'aditya' as the default. Users relying on default behavior will get a different voice than documented, which is a silent behavioral surprise that's hard to debug.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "TTS_MODEL_CONFIGS bulbul:v3-beta block",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "input_audio_codec silently removed from STT websocket connect_kwargs",
+        "detail": "Previously connect_kwargs included 'input_audio_codec': self._input_audio_codec. The new code drops this key entirely while still accepting input_audio_codec in __init__ and storing it. If the SDK was using this to decode incoming audio, this is a regression that may break non-default codecs without any deprecation notice.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "_connect() connect_kwargs construction",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Spurious 'ignored' warnings when v3 user explicitly passes None for pitch/loudness",
+        "detail": "Checks like 'elif params.pitch != 0.0: logger.warning(...)' compare an Optional[float] against 0.0. If a user passes pitch=None (valid since the field is Optional), None != 0.0 is True and a misleading 'pitch parameter is ignored' warning fires even though the user did not set a value. Should check against the field default or use 'is not None and != default'.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "__init__ param-support warnings block",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "voice_id is not validated against the model's allowed speaker list",
+        "detail": "SarvamTTSSpeakerV2/V3 enums and TTSModelConfig.speakers exist but __init__ accepts any voice_id string and never checks membership. Passing a v2 speaker name with bulbul:v3-beta (or a typo) will silently reach the API and likely fail at request time with an opaque error. Validate voice_id against self._config.speakers and raise ValueError with the allowed list.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "SarvamHttpTTSService.__init__ after default voice resolution",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pace is silently clamped instead of raising or surfacing the clamped value",
+        "detail": "When pace is outside the model's range, the code logs a warning and clamps. This mutates user intent silently \u2014 a user asking for pace=2.5 on v3-beta gets 2.0 with only a log line. Pydantic Field validators already constrain pace to 0.3-3.0; clamping further to 0.5-2.0 inside __init__ is inconsistent with the schema and should either be a ValueError or a model-aware Field constraint.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "__init__ pace clamp block",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_speakers_for_model silently falls back to v2 speakers for unknown models",
+        "detail": "For an unknown model name, get_speakers_for_model returns v2 speakers instead of raising or returning an empty list. This makes typos hard to catch \u2014 a caller using 'bulbul:v3' (without -beta) gets the v2 list back, which is misleading. Prefer raising ValueError or returning [] with a clear contract.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "get_speakers_for_model definition",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

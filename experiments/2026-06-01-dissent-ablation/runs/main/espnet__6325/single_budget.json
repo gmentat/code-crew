@@ -1,0 +1,264 @@
+{
+  "task_id": "espnet__6325",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Duplicate db.sh entries",
+        "positions": [
+          {
+            "persona": "Strict reviewer",
+            "position": "The PR both adds TAL_ZH_ADULT_TEACH=downloads to egs2/TEMPLATE/asr1/db.sh AND creates a symlink egs2/tal_zh_adult_teach/asr1/db.sh -> ../../TEMPLATE/asr1/db.sh. This is the correct, idiomatic pattern in ESPnet \u2014 the template is the canonical place to declare dataset paths and the recipe symlinks to it. No issue."
+          },
+          {
+            "persona": "Cautious reviewer",
+            "position": "Worth double-checking that the symlink target path in db.sh (../../TEMPLATE/asr1/db.sh) actually resolves; in ESPnet recipes this is standard but a broken symlink would silently break the recipe."
+          }
+        ]
+      },
+      {
+        "topic": "download_and_untar.sh error handling",
+        "positions": [
+          {
+            "persona": "Pragmatic",
+            "position": "Printing a friendly message when zips are missing and continuing is fine \u2014 the user may have already extracted them; the final script just exits 0."
+          },
+          {
+            "persona": "Defensive",
+            "position": "If all three zips are missing and no extracted folders exist, the script still prints success and exits 0. Downstream local/data.sh will then fail with confusing errors. It should detect 'nothing was prepared at all' and exit non-zero, and the missing-unzip branch should also exit non-zero rather than printing and continuing."
+          }
+        ]
+      },
+      {
+        "topic": "data.sh sourcing semantics",
+        "positions": [
+          {
+            "persona": "Shell purist",
+            "position": "local/data.sh sources local/download_and_untar.sh with '. ./local/download_and_untar.sh ...'. This is wrong: download_and_untar.sh is meant to be executed (it has its own set -euo pipefail and arg parsing), not sourced. Sourcing leaks its variables into the caller and is unusual; the convention in other ESPnet recipes is to execute it."
+          },
+          {
+            "persona": "Convention",
+            "position": "Other ESPnet recipes do sometimes source download_and_untar.sh; behaviour is roughly equivalent here since the script reads $1/$2 and we pass them. Not blocking."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "README links to a non-existent config path",
+        "detail": "The README.md states `ASR config: [./conf/train_asr_branchformer_e24_amp.yaml](./conf/train/train_asr_branchformer_e24_amp.yaml)` \u2014 the visible link text is correct but the actual URL points to `./conf/train/train_asr_branchformer_e24_amp.yaml`, which does not exist (the file lives at `./conf/train_asr_branchformer_e24_amp.yaml`). The hyperlink is broken.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "15",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh continues silently when `unzip` is missing",
+        "detail": "Lines 9-11 check `if ! command -v unzip >/dev/null` and only `echo` a warning, without `exit`. Because `set -euo pipefail` is set but the failing path is the echo branch (which succeeds), execution falls through and the script will then attempt `unzip -q ...` which will fail with a less obvious error, or skip silently if archives are not present and falsely report success. Should `exit 1` after the echo.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-11",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Script reports success even when no data was prepared",
+        "detail": "If none of the three zip files exist and no prior extraction is present, the script prints three 'please download manually' messages and then echoes `TAL ASR dataset is ready under $extract_dir` with exit code 0. local/data.sh then proceeds to `prepare_kaldi` and fails midway with a confusing find/sed error. The script should track whether any partition was actually prepared and exit non-zero if not.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "13-21, 57-61",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Usage block does not exit",
+        "detail": "When argument count is wrong (line 13: `[ $# -lt 1 ] || [ $# -gt 2 ]`), the script prints usage via heredoc but does NOT call `exit 1`. Execution falls through to `realpath $1`, which under `set -u` and with $# == 0 will fail, but with the wrong error. Standard pattern: `cat <<EOF ... EOF; exit 1` inside the if.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "13-21",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unquoted command substitutions in realpath calls",
+        "detail": "`extract_dir=$(realpath $1)` and `zip_dir=$(realpath ${2:-$extract_dir})` are unquoted. If a path contains spaces or globbing characters, this will break. Should be `extract_dir=$(realpath \"$1\")` and `zip_dir=$(realpath \"${2:-$extract_dir}\")`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "23-24",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Train split counts contradict PR description",
+        "detail": "The PR description states the split is 7:1:2 train/val/test, but local/data.sh sets train_1=22467, dev=3208, test=6072, and additionally adds train_2 (CH)=29386 and train_3 (MA)=38924, then combines all three into `data/train` (~90k utterances). Total train \u2248 90,777 vs dev 3,208 / test 6,072, which is closer to 91:3:6, not 7:1:2. Either the PR description is misleading or the splits include data outside the documented aisolution split. Worth a comment in the README clarifying that train combines all three TAL_ASR-* archives while dev/test come only from aisolution_data.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "73-79",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`prepare_kaldi` reads 4 fields from heredoc using only 3 named variables",
+        "detail": "The while-read loop `while read -r name wav_subdir trans num_wav` reads 4 whitespace-separated fields, which matches. However if any path contained spaces (it does not here, but is brittle), `num_wav` would absorb the tail. Lower risk but worth noting; also `local` is used inside `prepare_kaldi` for `name` only via implicit assignment \u2014 variables `name`, `wav_dir`, `trans`, `num_wav`, `dir` are all global, polluting parent scope. Use `local` declarations.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "36-71",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unquoted variables in critical pipeline produce fragile globbing",
+        "detail": "In prepare_kaldi: `wav_dir=$TAL_ZH_ADULT_TEACH/$2`, `trans=$TAL_ZH_ADULT_TEACH/$3`, `find ${wav_dir} -name '*.wav'`, and `paste ... <(awk '{print $2}' \"$dir\"/utt_uttid) \"$dir\"/wav.flist` \u2014 `wav_dir` and `trans` are unquoted in their assignment context (acceptable) but the subsequent `find \"${wav_dir}\"` IS quoted (good). However `$num_wav` later in the if-check is unquoted: `if [ \"$(wc -l < \"$dir/text\")\" -ne \"$num_wav\" ]` \u2014 quoted, good. The issue is more that the entire pipeline relies on filenames having no whitespace and exactly the expected directory depth `$(NF-1)/$NF`. If TAL adds nested subdirectories the speaker-id extraction breaks silently.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "44-55",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Transcript text-cleaning sed chain is incomplete and Mandarin-specific",
+        "detail": "Lines 50-53 strip a handful of full-width punctuation (\uff21\u2192A, #, =, \u3001, \uff0c, \uff1f, \u3002) but leave many other characters that may appear in Chinese transcripts (e.g., \u300c\u300d \u300e\u300f \uff01 \uff1a \uff1b \u2014 \uff0f \uff3f digits, English punctuation, and whitespace anomalies). This is fragile; a single regex pass (`tr` or one `sed -e` invocation) and a documented allowlist would be cleaner. Also the order of pipes spawns 7+ sed processes per file unnecessarily \u2014 combine into one sed.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "49-53",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sort assumptions can silently misalign utt_uttid and transcripts",
+        "detail": "Lines 54-56 paste `sort -u -k 1 utt_uttid | awk '{print $2}'` with `sort -u -k 1 transcripts.txt | awk ...`. This only aligns if both sorts produce identical key ordering AND the set of keys is identical. If any utt is in utt_uttid but missing from transcripts.txt (or vice versa) the rows will silently misalign and the text file will contain wrong transcripts mapped to wrong uttids. The count check on line 60 catches only length mismatches, not misalignment.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "54-56",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speaker ID extraction may collide across the three subsets",
+        "detail": "All three partitions use `TALASR$(NF-1)` as speaker prefix, where `$(NF-1)` is the immediate parent directory of the wav file. If CH/ and MA/ subsets reuse the same parent directory names as aisolution_data subsets, speakers will be incorrectly merged across train/dev/test or across CH/MA. Worth verifying by listing actual directory structures.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "47",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Indentation typo in best_model_criterion",
+        "detail": "In `train_asr_branchformer_e24_amp.yaml` lines 49-52, the YAML block is:\n```\nbest_model_criterion:\n-   - valid\n    - acc\n    - max\n```\nThe `-` at column 0 followed by triple-space then `- valid` is unusual YAML; while valid (it's a list-of-lists), other ESPnet recipes typically write `-   - valid` consistently. Compare with `train_lm_transformer.yaml` which uses the same style. Not actually broken but visually inconsistent; harmless.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "47-52",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "decoder dropout values use trailing-dot floats",
+        "detail": "`self_attention_dropout_rate: 0.` and `src_attention_dropout_rate: 0.` \u2014 YAML accepts `0.` as 0.0, but many style guides prefer `0.0` for clarity and to avoid parser surprises.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "31-32",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Typo in comment",
+        "detail": "`max_epoch: 15  # 15epoch is enougth` \u2014 should be `enough`. Trivial.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_lm_transformer.yaml",
+        "lines": "16",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Files missing trailing newline",
+        "detail": "Several new files (asr.sh symlink, db.sh symlink, path.sh symlink, pyscripts symlink, scripts symlink, steps symlink, utils symlink) are flagged as `\\ No newline at end of file`. For symlinks this is irrelevant (they store a path), but `local/path.sh` contains only `MAIN_ROOT=$PWD/../../..` with no newline \u2014 should end with newline.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/path.sh",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "local/path.sh is unusual \u2014 recipe path.sh already symlinks template",
+        "detail": "The recipe has `path.sh` symlinked to `../../TEMPLATE/asr1/path.sh` AND a separate `local/path.sh` containing only `MAIN_ROOT=$PWD/../../..`. The `local/path.sh` is sourced by `local/data.sh`. Other ESPnet recipes typically only source the top-level `path.sh`. This duplicate is non-standard; verify it's actually needed.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/path.sh",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "run.sh passes --eval_valid_set true and uses dev in both valid_set and test_sets",
+        "detail": "`valid_set=dev` and `test_sets=\"dev test\"`. With `--eval_valid_set true` this evaluates dev twice (once as valid, once as test set). Intentional? Worth a comment. Doesn't break anything but produces redundant decoding work.",
+        "file": "egs2/tal_zh_adult_teach/asr1/run.sh",
+        "lines": "9-11, 36",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "S.Err values of 78.6 / 78.5 are very high",
+        "detail": "The CER results table shows sentence-error rates of 78.6% and 78.5% on test despite CER of 11.4 \u2014 meaning most utterances contain at least one error. This is plausible for long lecture utterances but worth noting in the README that this is expected for long-form lecture audio (otherwise users may interpret it as a broken result).",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "22-25",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "data.sh exit codes inconsistent",
+        "detail": "Line 32 uses `exit 2` for unset TAL_ZH_ADULT_TEACH, but other error paths use `exit 1`. Conventionally a single `exit 1` for config errors is enough; reserve other codes for specific meanings.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "32",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded `--ngpu 4` and `--nj 64` in run.sh",
+        "detail": "These are reasonable defaults for a research cluster but will fail on a smaller machine. Most ESPnet recipes expose these as overridable variables at the top of run.sh; here they are baked into the asr.sh invocation. Users will need to edit the file. Minor convention issue.",
+        "file": "egs2/tal_zh_adult_teach/asr1/run.sh",
+        "lines": "23-25",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing shebang on download_and_untar.sh execute-bit check",
+        "detail": "The file has a shebang `#!/usr/bin/env bash` (good) but the diff shows it was created with `new file mode 100644` (not 100755), so it is not executable. It is sourced from data.sh so this works, but if a user invokes it directly per the usage message, it will fail.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "This is a standard ESPnet recipe addition for a new Mandarin lecture-domain ASR dataset. The structural pieces (config YAMLs, symlinks to TEMPLATE, db.sh registration, run.sh entrypoint) follow conventional ESPnet patterns and look correct. The main concerns are concentrated in the two custom shell scripts: `local/download_and_untar.sh` has multiple error-handling gaps (missing exits when args wrong / unzip missing, false-success when no data was prepared, unquoted realpath args), and `local/data.sh` has fragile transcript cleaning and a sort-and-paste alignment pattern that silently corrupts text-to-uttid mapping if utterance sets diverge between wav.flist and transcripts.txt. The PR description's claimed 7:1:2 split also disagrees with the actual heredoc counts (combined train ~91% of data), which should be clarified in the README. A broken markdown link in README and a few cosmetic YAML/typo issues round out the findings. None are catastrophic \u2014 published HF results suggest the recipe was run end-to-end successfully \u2014 but the data-prep robustness issues should be fixed before merge so future users on slightly different environments don't silently get misaligned text."
+  },
+  "raw": ""
+}

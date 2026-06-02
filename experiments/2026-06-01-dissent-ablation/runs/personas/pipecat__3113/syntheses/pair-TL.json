@@ -1,0 +1,74 @@
+{
+  "task_id": "pipecat__3113",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Default response transformer crashes on non-JSON lines, leaving the response stream unterminated.",
+        "detail": "json.loads in default_response_to_output_transformer has no try/except. A malformed SSE line, error payload, or keepalive raises JSONDecodeError mid-stream, aborts the invocation, and leaves _output_response_open true so Start/End bookends are unbalanced. Catch parse failures and return None like the bad-prefix path does.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "85-87",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AWS bedrock-agentcore client is created and torn down on every LLMContextFrame.",
+        "detail": "Each invocation opens a fresh aioboto3 Session().client(...) inside async with, paying TLS setup, credential resolution, and teardown per turn on the voice-pipeline hot path. Client lifecycle belongs in setup()/cleanup(), not per-frame processing. Open once and reuse.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sleep-based response close races with end-of-stream cleanup and shared state has no lock.",
+        "detail": "_push_text_frame schedules a 1s timer to emit LLMFullResponseEndFrame while process_frame also emits one at end-of-stream. _output_response_open and _close_task are mutable shared state with no serialization, so overlapping invocations or the timer firing late can interleave or drop bookends. Use the deterministic end-of-stream signal and serialize access.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "108-176, 245-249",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter is camelCase in a snake_case codebase and public API.",
+        "detail": "All sibling __init__ args use snake_case (aws_access_key, aws_region). agentArn breaks PEP 8 and the module's uniform configuration contract for Pipecat processors. Rename to agent_arn and translate to agentRuntimeArn only at the boto3 boundary.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "114, 148, 207",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bundled aioboto3/boto3 version bump should be a separate patch.",
+        "detail": "pyproject.toml and uv.lock churn for aioboto3 15.0 to 15.5 plus aiobotocore/boto3/botocore/s3transfer affects every AWS consumer in the repo. It should land as its own commit with justification for whether the new processor actually requires it.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class name AWSAgentCoreProcessor disagrees with PR title AWSBedrockAgentCoreProcessor.",
+        "detail": "The exported class name is part of the public contract; callers import by name. The PR title and implementation should agree across docstring, class, and PR. Pick one canonical name and apply it consistently.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "92",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The processor does a real thing, but four substantive issues recur: an unguarded json.loads that can abort streams mid-response and leave bookends unbalanced, a per-invocation AWS client lifecycle on the voice hot path, a sleep-based End-frame timer racing with end-of-stream cleanup over unserialized mutable state, and a camelCase agentArn parameter in an otherwise snake_case public API. A bundled aioboto3 dependency bump and a class-name/PR-title mismatch round out the cleanup. Fix the four P1s, split the dep bump, and resubmit."
+  }
+}

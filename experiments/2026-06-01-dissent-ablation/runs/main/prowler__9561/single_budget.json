@@ -1,0 +1,184 @@
+{
+  "task_id": "prowler__9561",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Behavior regression in HorizontalBarChart: displayPercentage now always recomputes from value/total, ignoring backend-provided item.percentage in non-empty case",
+        "detail": "Previously the displayed percentage was `item.percentage` directly (e.g. `{isEmpty ? '0' : item.percentage}%`). The new code is `item.percentage ?? (total > 0 ? Math.round((item.value / total) * 100) : 0)`. Because of `??`, if `item.percentage` is provided (the original code path) it is used; if missing it is computed. That part is fine. However the original line `${item.percentage || (item.value / Math.max(...data.map((d) => d.value))) * 100}%` used `||` and divided by the max value (to scale the bar's width to the max bar), while the new `calculatedWidth` uses `??` semantics and the displayPercentage uses `total` (sum) instead of `max`. The two semantics were intentionally different: width is scaled to the longest bar, display percentage is the share. The new code conflates them \u2014 `calculatedWidth` still uses max-based fallback (good), but if `item.percentage` was previously being used as a max-relative width and also as a share-of-total label, both interpretations are now inconsistent. Confirm whether `item.percentage` from the data source represents share-of-total or share-of-max; the displayPercentage fallback formula assumes share-of-total, which may not match upstream.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "61-77, 119-127, 186",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Math.max(...data.map(...)) recomputed inside the render loop is O(n^2)",
+        "detail": "`maxValue` is computed inside the `.map()` over `data`, so for every bar we walk the entire array again. For typical category counts (~14) this is harmless, but it is still gratuitous work on every render and a code-smell. Hoist `maxValue` and `total` (already passed in) above the `.map()` call. The previous code had the same defect inside the inline style expression; this PR was an opportunity to fix it but instead duplicated the pattern.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "62-63",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SEVERITY_ORDER duplicate key value collision: 'Info' and 'Informational' both map to 4",
+        "detail": "Adding `Info: 4` next to `Informational: 4` is presumably intentional to normalize alternative API casing, but any consumer that reverse-maps order -> name (Object.entries/Object.fromEntries inversions, sorting tie-breakers, switch statements) may now see ambiguous behavior. Worse, this is a public-shape object exported from `components/graphs/shared/constants.ts`; adding a new key without documenting that it is an alias is a quiet API change. Either (a) introduce a separate normalization map (`{ Info: 'Informational' }`) applied at the boundary, or (b) document the alias in a JSDoc comment and audit existing consumers.",
+        "file": "ui/components/graphs/shared/constants.ts",
+        "lines": "18-22",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getCategoryLabel lost the curated label dictionary; relies on heuristics that produce wrong outputs",
+        "detail": "The old adapter had an explicit map: `trustboundaries -> 'Trust Boundaries'`, `forensics-ready -> 'Forensics Ready'`, `publicly-accessible -> 'Publicly Accessible'`. The new `lib/categories.ts` removes that dictionary and uses heuristics. `trustboundaries` is a single token (no hyphen), so heuristics produce `'Trustboundaries'`, regressing the label. `e3`/`e5` (length 2, all lowercase) become `'E3'`/`'E5'` which is correct, but any other multi-word single-token IDs will also break. The `SPECIAL_CASES` map is left empty with a TODO comment. At minimum, port the original `trustboundaries` and any other concatenated multi-word IDs into `SPECIAL_CASES` before merging.",
+        "file": "ui/lib/categories.ts",
+        "lines": "5-8, 25-54",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removed 'Category' entry from DEFAULT_FILTER_BADGES, but a new Category filter is being added \u2014 active filter badges for the new filter will not render",
+        "detail": "In `active-filter-badge.tsx` the block for `category__in` (label 'Category', `${count} Categories filtered`) is deleted. Meanwhile `findings-filters.tsx` adds a Category filter as `FilterType.CATEGORY`. Unless `FilterType.CATEGORY` resolves to a key whose badge is registered elsewhere (likely not, given this file is `DEFAULT_FILTER_BADGES`), selecting categories on the Findings page will no longer show an active-filter chip. Verify by selecting 2 categories and checking the active filters row. If this is intentional because badges are now rendered generically from `labelFormatter`, the change still needs a regression check.",
+        "file": "ui/components/filters/active-filter-badge.tsx",
+        "lines": "46-50",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getBadgeLabel is called with displayLabel instead of the raw value",
+        "detail": "In `data-table-filter-custom.tsx` the previous call was `badgeLabel={getBadgeLabel(entity, value)}` and the new call is `badgeLabel={getBadgeLabel(entity, displayLabel)}`. Depending on how `getBadgeLabel` uses its second argument (lookup key vs. display string), this can cause badge selection state to break when `labelFormatter` changes the string (e.g. `iam` -> `IAM`), because internal state may key on the raw value. Confirm `getBadgeLabel` only uses the second argument as a fallback display string, not as an identity. If it uses it as a lookup, the entity for `'IAM'` will be missed.",
+        "file": "ui/components/ui/table/data-table-filter-custom.tsx",
+        "lines": "151-167",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CategorySelector accepts empty string for 'no selection' but Radix Select cannot have an item with value=''",
+        "detail": "`handleValueChange` checks for `value === ''` as a clear-state signal, but Radix Select forbids empty string values and the SelectItem uses `value=\"all\"`. The empty-string branch is dead code. Remove it or change the contract so the component is consistent. Minor, but signals incomplete cleanup.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "22-28",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "handleCategoryChange resets selectedPoint to null when 'All categories' is chosen, losing user's previous radar click selection",
+        "detail": "In `risk-radar-view-client.tsx`, choosing 'All categories' calls `setSelectedPoint(null)`. If the user clicked a point on the radar first (which also sets selectedPoint), then opens the selector and picks 'All', they lose detail-panel state. This may be intentional (clear the selection) but it conflates 'filter view' with 'detail selection'. Consider distinguishing 'highlight category' from 'selected point' as separate state, or document the intent.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/risk-radar-view-client.tsx",
+        "lines": "29-37",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hard-coded width on CategorySelector ('w-[200px]') will overflow on narrow viewports",
+        "detail": "The PR checklist explicitly leaves mobile/tablet/desktop verification unchecked. A 200px fixed-width Select sitting next to an h3 title in the Card header is a typical source of overflow at ~360px breakpoints. Use min-w / max-w or responsive widths.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "33",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename Threat Score -> ThreatScore (single word) is a product-naming change spread across multiple files without a centralized constant",
+        "detail": "Strings like 'Prowler ThreatScore' are duplicated across risk-plot-client.tsx, threat-score.tsx, and tooltips. If product changes the name again, every site must be touched. Consider a single string constant (e.g. `PROWLER_THREAT_SCORE_LABEL`) in a shared constants file. Also verify that 'Threat Score' was not exposed as an i18n key \u2014 if so, translations need updating.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-plot/risk-plot-client.tsx",
+        "lines": "37, 103, 270-272, 290-294, 370",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "index: 5 for the new Category filter may collide with existing filter ordering",
+        "detail": "In `findings-filters.tsx`, the new Category filter is given `index: 5`, while ResourceTypes gets `index: 8`. Other filters not shown in the diff likely occupy 1-4 and 6-7. Confirm there is no existing filter at index 5; if there is, the array sort by `index` becomes non-deterministic for tied indices.",
+        "file": "ui/components/findings/findings-filters.tsx",
+        "lines": "72-78",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "version-pattern regex /^([a-z]+)(v\\d+)$/ will misclassify legitimate words ending in v<digit>",
+        "detail": "Inputs like 'serv1ce' (unlikely) or hypothetical IDs ending with 'v1' that are not acronym+version will be split. Realistic risk is low for the current category set but the heuristic is unguarded \u2014 pair it with the SPECIAL_CASES fallback as a safety valve, or restrict the acronym length to <=5 chars.",
+        "file": "ui/lib/categories.ts",
+        "lines": "40-44",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CHANGELOG and accessibility: no aria-label on CategorySelector trigger; radar dot click target unchanged",
+        "detail": "The CategorySelector SelectTrigger has no aria-label/aria-labelledby. Screen readers will announce only the placeholder. For a filtering control on a security dashboard, add `aria-label='Filter risk radar by category'`. Also confirm the radar CustomDot keyboard accessibility \u2014 onClick exists but no keyboard handler; not regressed by this PR but adjacent to it.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "32-34",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether removing the curated CATEGORY_LABELS dictionary in favor of heuristics is a good trade",
+        "positions": [
+          {
+            "persona": "simplicity_advocate",
+            "position": "Heuristics + SPECIAL_CASES is DRY, future-proof, and avoids hand-maintaining 14+ entries every time the API adds a category. The original dictionary was duplication waiting to drift from the API."
+          },
+          {
+            "persona": "correctness_advocate",
+            "position": "A heuristic that silently regresses 'Trust Boundaries' -> 'Trustboundaries' is worse than duplication. Curated labels are the source of truth; heuristics should only be the fallback. The dictionary should have been preserved in lib/categories.ts, not discarded."
+          }
+        ]
+      },
+      {
+        "topic": "Whether 'Info' alias in SEVERITY_ORDER belongs in the constants object",
+        "positions": [
+          {
+            "persona": "pragmatic_shippability",
+            "position": "Adding `Info: 4` is a one-line fix that handles both API casings without touching every call site. Ship it; document later."
+          },
+          {
+            "persona": "abstraction_discipline",
+            "position": "Shared constants should be canonical. Aliases belong in a normalization function at the API boundary. Mixing canonical names with aliases in the same map invites reverse-lookup bugs and signals that the type for severity is underspecified."
+          }
+        ]
+      },
+      {
+        "topic": "Whether 'Threat Score' -> 'ThreatScore' should be a sweeping string replace or a centralized constant",
+        "positions": [
+          {
+            "persona": "ship_now",
+            "position": "The rename is a brand decision and is straightforward; inline strings are fine for a UI that doesn't have i18n yet."
+          },
+          {
+            "persona": "future_maintainer",
+            "position": "This is the second time the brand name has shifted in this codebase. A single PROWLER_THREATSCORE_LABEL constant prevents a third rename from being a 12-file PR."
+          }
+        ]
+      }
+    ],
+    "summary": "This PR is a sensible UI feature addition (Risk Radar + Category filter) with several correctness and quality concerns that should be addressed before merge. The most material risks are (1) loss of curated category labels \u2014 the heuristic `getCategoryLabel` will mis-render `trustboundaries` and any other single-token multi-word IDs, regressing visible labels; (2) the removed `category__in` entry in `DEFAULT_FILTER_BADGES` may prevent active-filter chips from rendering for the new Category filter; (3) `getBadgeLabel(entity, displayLabel)` may break entity lookups if that argument is used as an identity rather than a fallback string. Secondary issues include `Info`/`Informational` aliasing in a shared severity-order map (better handled as a boundary normalization), inconsistent percentage semantics in `HorizontalBarChart`, an O(n^2) `Math.max` inside the render loop, a hard-coded `w-[200px]` selector that risks overflow on mobile (which the PR's own checklist leaves unverified), and dead code in `CategorySelector`'s empty-string branch. Naming sweeps for 'ThreatScore' should be centralized. None of the P0s are showstoppers, but the label regression and badge regression are user-visible and should be fixed before merge."
+  },
+  "raw": ""
+}

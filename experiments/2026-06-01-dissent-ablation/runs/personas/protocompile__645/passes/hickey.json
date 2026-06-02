@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Zero-value handling is complected with every accessor instead of decomposed once at the boundary",
+        "detail": "The same `if f == nil` / `if t.IsZero()` guard is repeated across ~20 accessors, each constructing a fresh empty slice then handing it to `seq.NewFixedSlice`. That is the incidental complexity: zero-handling is intertwined with data access. A single place \u2014 make `nil`/zero receivers return an empty `seq.Indexer` via one helper, or have `f.types`-style access go through a method that returns `nil` on a nil receiver \u2014 would replace 20 guards with one.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "179-365",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test-driven patching: panics fixed one accessor at a time rather than asking why zero is reachable",
+        "detail": "The PR is TDD-AS-DESIGN: reflection enumerates methods, each panic surfaces, each method gets a guard. The question that should have been asked first is whether a zero `*File` / zero `Type` is a legitimate value of the domain at all, or a programming error that should be caught. If it is legitimate, model it once (an `emptyFile` singleton, or a zero-witness method). If it is not, document and let it panic.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identity and value are complected: `*File` doubles as both reference and absence sentinel",
+        "detail": "`*File` is now used as both an identity (a pointer to a real file) and as the zero/absent value (nil). Every accessor must then disambiguate. Hickey's lens: separate them. Either `File` becomes a value with an `IsZero` method (no nil pointer), or `nil *File` is rejected at the boundary. The current shape forces every reader of the API to remember which one they hold.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-based zero test verifies the scaffolding more than the contract",
+        "detail": "The test walks methods via reflection and checks `Len()==0` or `assert.Zero`. It will pass for any accessor that returns an empty slice, including ones that should arguably error. It proves \"no panic on zero\" \u2014 a weak invariant \u2014 rather than \"zero values are meaningful elements of the domain.\" A handful of explicit table-driven cases would say more with less machinery.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "90-137",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`ValueNodeIndex` returns -1 as in-band sentinel, complecting value with absence",
+        "detail": "`ValueNodeIndex() int` now returns -1 for the zero element. That is place-oriented thinking: one channel carries both a real index and \"no index.\" Callers must now branch on -1 everywhere. `(int, bool)` or an `Optional[int]` keeps presence and value separate \u2014 same code size, one fewer foot-gun.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`imports.Transitive` keeps subtle slice arithmetic inside the zero-guard branch",
+        "detail": "`i.files[:max(0, len(i.files)-1)]` is essential complication (excluding the implicit descriptor.proto) buried inside an incidental zero-guard. Pull the \"transitive view of files\" into a named method on `*imports` that handles nil itself; then `Transitive()` is one line and the slice arithmetic lives with the data, not with the indexer construction.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "230-244",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR fixes real panics, but the shape of the fix is EASY-NOT-SIMPLE: a reflection-driven test enumerates accessors and each one gets its own `if zero` guard. Zero-handling is now COMPLECTED with every accessor across `ir_file.go`, `ir_type.go`, `ir_imports.go`, and `ir_member.go`. The deeper question \u2014 is a zero `*File` a legitimate value of the domain, or a bug that should never reach an accessor? \u2014 was not asked; it was answered by patching symptoms. The decomposition Hickey would prefer: one place that turns nil/zero into an empty indexer, or a domain decision that zero is invalid and the boundary rejects it. Ship it if you must (the panics are real), but the next change in this area will pay the complecting tax again."
+  }
+}

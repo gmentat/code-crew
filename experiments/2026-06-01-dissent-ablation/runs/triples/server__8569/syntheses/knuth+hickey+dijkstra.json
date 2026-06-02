@@ -1,0 +1,78 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "knuth+hickey+dijkstra",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig.is_registered is unsynchronized shared mutable state that races under concurrent requests",
+        "detail": "Two concurrent first-use requests both observe is_registered=False, both send weights, and the flag is flipped before the backend has acknowledged registration. The invariant 'True iff backend has accepted this task_id' is not maintained under concurrency or partial failure. Needs a lock around read-check-send-set, or move registration to load-time.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-244",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_task_id assigned by enumeration order has no documented uniqueness invariant across repos or restarts",
+        "detail": "task_id starts at 1 and increments in iteration order inside _parse_lora_configs, with no relation to LoRA identity. Across multiple model repos, reloads, or restarts the same name can get different ids and different LoRAs can share id 1, colliding with the engine's cached task_id space. Derive task_id from a hash of (model, lora_name) or state the invariant.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "627-705",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare except Exception returns None, conflating malformed config with absence of LoRA support",
+        "detail": "The blanket handler swallows everything and returns None for the whole repo path, so callers cannot distinguish 'no LoRA configured' from 'LoRA configured but broken' from 'unrelated bug'. The added traceback print is not error handling. Name the expected exceptions and let the rest propagate, or return a tagged result.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "707-714",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stray debug prints and traceback.format_exc left in production parse and router paths",
+        "detail": "print(f'backend: {backend}') inside the per-LoRA loop and traceback prints across the parser and FastAPI routers bypass the configured logger, cannot be filtered, and pollute stdout in deployed environments. Remove or route through the existing logger before merge.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "681-714",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Return type annotation of _parse_lora_configs lies about its actual shape",
+        "detail": "Signature declares List[tuple[str, str]] but the function returns Optional[List[TritonLoraConfig]]. The type is the contract; a wrong annotation misleads every reader and defeats static analysis. Update the annotation to match the actual return.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "lora_config_path identifier is rebound inside the loop, shadowing the outer multi_lora.json path",
+        "detail": "The outer scope binds lora_config_path to multi_lora.json, and the inner loop rebinds the same name to model.lora_config.npy. A reader cannot follow which object is meant without simulating control flow. Rename one of the two bindings.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "_parse_lora_configs inner loop",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel converges on one P0: TritonLoraConfig.is_registered is unsynchronized shared mutable state, flipped before backend acknowledgment, and the 'task_id is registered with backend' invariant is not maintained under concurrency or partial failure. All three reviewers also flag lora_task_id allocation as having no uniqueness specification across repos or restarts. Secondary issues: a blanket except Exception that conflates malformed config with absence of LoRA, debug prints left in production paths, a lying return type annotation, and an identifier rebound mid-scope. The feature works on the happy path but the registration state machine needs to be specified and made thread-safe before merge."
+  }
+}

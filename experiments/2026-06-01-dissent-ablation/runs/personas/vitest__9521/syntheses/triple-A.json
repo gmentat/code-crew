@@ -1,0 +1,77 @@
+{
+  "task_id": "vitest__9521",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "globCache key omits changedFiles, so cached verdicts can survive filter changes",
+        "detail": "isIncluded caches a verdict keyed only on filename, but the answer now depends on changedFiles. Clearing the cache in onTestRunStart assumes strict ordering across three new call sites; any isIncluded call before that hook poisons the cache. Either key on (filename, changedFiles identity) or separate the pure glob match from the changed-file filter applied after.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path comparison in isIncluded is not normalized between sources, risking silent empty coverage",
+        "detail": "isIncluded compares slash(cleanUrl(filename)) against changedFiles entries from VitestGit or config.related, with no documented normalization for Windows separators, absolute-vs-relative paths, or query suffixes. If shapes diverge, every file silently mismatches and coverage goes empty. Normalize on entry to changedFiles and add a Windows path test.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-178, 332-347",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles is mutable provider state complecting lifecycle, value, and two distinct sources",
+        "detail": "onTestRunStart mutates this.changedFiles from either options.changed (re-running git) or ctx.config.related, conflating two different facts under one field with implicit time semantics. isIncluded's answer depends on whether the hook already ran. Resolve a single immutable ChangedFilesSet at config-resolve time and pass it explicitly into isIncluded/getUntestedFiles.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-220, 329-348",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "findChangedFiles returning null silently falls through to full coverage",
+        "detail": "When VitestGit returns null (not a git repo, bad ref) onTestRunStart leaves changedFiles undefined and the provider reports coverage for all files instead of failing loudly. A user who asked for changed-only coverage gets the opposite and may not notice. Warn or throw on resolution failure.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three hand-pasted onTestRunStart call sites in core.ts invite drift",
+        "detail": "core.ts now invokes await this.coverageProvider?.onTestRunStart?.() in three places with no shared helper. A future fourth run-start path will silently skip coverage filtering. Fold the notification into _testRun.start or a small private helper so the invariant 'every run-start notifies coverage' is enforceable by reading one function.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-895",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform for `changed` silently accepts non-boolean strings as git refs",
+        "detail": "The transform coerces 'true'/'yes'/'false'/'no' to booleans and passes everything else through as a ref, so typos like 'tru' or accidental flag values become refs and fail later inside VitestGit with confusing errors. The boolean === true/false branches are also unreachable from CLI args. Validate the input shape at the boundary and document the grammar.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The feature is small and correct on the happy path, but the changed-files filter layer is fragile: globCache is keyed only on filename despite verdicts depending on changedFiles, path comparison lacks a documented normalization invariant between VitestGit/config.related and the slash+cleanUrl side, and changedFiles is mutable provider state complecting lifecycle with value. Silent fallthrough when git resolution fails inverts user intent. Secondary cleanups: collapse the three hand-pasted onTestRunStart call sites in core.ts, and tighten the CLI boolean-or-ref grammar at the boundary."
+  }
+}

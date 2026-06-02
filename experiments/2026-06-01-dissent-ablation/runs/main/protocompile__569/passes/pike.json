@@ -1,0 +1,64 @@
+{
+  "persona": "pike",
+  "task_id": "protocompile__569",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Three states collapsed to two \u2014 lost ability to distinguish 'walking' (children being expanded) from revisit on second pass",
+        "detail": "The original code had unsorted/working/walking/sorted, where working meant 'pushed children, awaiting second visit.' Collapsing working\u2192walking conflates two states and the loop now relies on the implicit fact that state==walking on second visit means 'already expanded.' That works, but the data structure now carries less information than the algorithm needs to express itself clearly. Per Pike's rule 5: if the data structure were right, the algorithm would be self-evident; here the reader must reason about temporal ordering to understand why walking handles both cases.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "24-29, 85-95",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle-detection semantics changed silently by renaming working\u2192walking in push()",
+        "detail": "In push(), the case that was 'working' (meaning: currently on the DFS stack, children being processed \u2014 i.e., a back edge / cycle) is now 'walking.' The cycle-handling branch using LastIndexFunc to find the prior occurrence is now triggered by the same state used for normal revisits. This is load-bearing behavior change disguised as a rename. The code works only because push() is called before the second-visit pop in the main loop sequence. A comment or distinct state would make this obvious; right now the correctness argument lives in the reader's head.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "113-119",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Cleanup-on-defer is correct but s.stack = s.stack[:0] after clear(s.stack) deserves a comment",
+        "detail": "clear(s.stack) zeroes every element in the backing array up to len, then s.stack = s.stack[:0] resets length. Both are needed for GC of node references plus length reset, so this is actually correct \u2014 but worth a one-line comment explaining why both calls exist, since a future reader will be tempted to delete one. Small composable cleanup, just under-documented.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "71-76",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pre-existing bug fixed quietly: state was being set to sorted even when yield returned false",
+        "detail": "The old code wrote s.state[k] = sorted unconditionally after the yield check, meaning an early-terminated iteration left state in an inconsistent 'sorted' marking. The new code moves the assignment inside the !yield branch's success path. This is a real correctness fix bundled into what the PR calls 'state reuse cleanup.' Worth calling out in the commit message \u2014 bug fixes hiding inside refactors are how regressions get reintroduced later.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "99-104",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typos: 'visisted' and 'if its' should be 'visited' and 'if it's'",
+        "detail": "Minor, but the rewritten comment is the load-bearing explanation of the two-pass DFS now that the state machine is more implicit. Worth spelling correctly.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "86-88",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR does three things at once: collapses a 4-state machine to 3 states, moves cleanup to defer (correct), and silently fixes a pre-existing bug where state[k]=sorted ran even on early termination. The state collapse works but makes the algorithm harder to read \u2014 the data structure now carries less information than the control flow needs, which is exactly the inversion Pike warns against. The defer-based cleanup is the right shape: single exit point, all state cleared in one place. Recommend either keeping the working/walking distinction or adding a comment explaining why one state suffices for both the 'expanding children' and 'revisiting after expansion' cases, since push()'s cycle-detection branch depends on this conflation being safe. Also recommend splitting the bug fix out of the refactor in the commit message."
+  },
+  "raw": ""
+}

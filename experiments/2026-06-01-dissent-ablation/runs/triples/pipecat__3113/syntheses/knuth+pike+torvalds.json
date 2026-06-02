@@ -1,0 +1,80 @@
+{
+  "task_id": "pipecat__3113",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "bedrock-agentcore client is rebuilt per LLMContextFrame, paying TLS+auth setup cost every turn.",
+        "detail": "async with self._aws_session.client(...) opens a fresh client on every invocation, incurring handshake and credential resolution on the voice-pipeline hot path. Create the client once in setup/start and reuse it across turns, closing in cleanup. This is the per-turn latency users feel.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer can raise JSONDecodeError on non-JSON lines and abort the stream.",
+        "detail": "json.loads is called with no try/except. A malformed SSE line, keepalive comment, or error payload propagates out of process_frame, leaving _output_response_open True and the matching LLMFullResponseEndFrame unsent. Wrap and log+skip, or return None on parse failure so the invariant 'every Start has a matching End' holds.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78-87, 224-256",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout-based response close races with the explicit end-of-stream close and is the wrong state machine.",
+        "detail": "_close_output_response_after_timeout flips _output_response_open and emits End on a 1s timer while process_frame also emits End at end-of-stream. The two paths can double-close or interleave Start/End across chunks. Emit Start once before the loop and End once after; drop the timer.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "171-201, 245-252",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SSE parsing is hand-rolled, non-RFC-compliant, and mixed into process_frame.",
+        "detail": "split('\\n') with a hardcoded 6-char 'data: ' slice mishandles \\r\\n transports, ignores id/event/retry/comment fields, and treats every non-data line as a warning. Extract into a small generator that yields response lines so process_frame consumes lines cleanly, and handle SSE field syntax correctly.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "218-247",
+        "flagged_by": [
+          "knuth",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter name violates PEP 8 and the surrounding snake_case API.",
+        "detail": "Every other constructor argument is snake_case (aws_access_key, aws_region) but agentArn is camelCase and stored as self._agentArn. Rename to agent_arn (and _agent_arn) and translate to agentRuntimeArn at the AWS call site. Renaming a public kwarg later is a breaking change, so fix before this ships.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "115, 152, 217",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "default_context_to_payload_transformer silently drops non-text content parts and emits stray spaces.",
+        "detail": "' '.join([part.get('text', '') for part in content]) yields empty strings for image or tool-result parts, producing leading/trailing/double spaces with no warning. Filter to text parts explicitly, or log when non-text parts are dropped so the contract is honest.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "47-61",
+        "flagged_by": [
+          "knuth",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The processor is readable but has a first-cut feel: a per-invocation AWS client on a voice-pipeline hot path, an unguarded json.loads that can break the Start/End frame invariant, and a sleep-based response-close timer racing with the explicit end-of-stream close. Hand-rolled SSE parsing mixed into process_frame is brittle and not RFC-compliant, and agentArn breaks the surrounding snake_case API and should be renamed before shipping. Tighten the framing state machine, harden parsing, hoist the client, and fix the naming."
+  }
+}

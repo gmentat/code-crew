@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "numba__10276",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Indentation bug: registration code sits outside the Math_unary class block but the diff suggests it broke the class-trailing blank line",
+        "detail": "The new `if sys.version_info >= (3, 11):` block is inserted immediately after `cases = [...]` and removes the blank line separating the class from module scope. Visually this is fine, but the contract of `Math_unary` (a ConcreteTemplate registered for many math funcs) is now conditionally extended at import time only on 3.11+. Verify the dedent is correct and the class body actually ends before the `if`.",
+        "file": "numba/core/typing/mathdecl.py",
+        "lines": "40-46",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`sys` is imported in mathdecl.py but not in cpython/mathimpl.py or np/math/mathimpl.py where `sys.version_info` is also used",
+        "detail": "The diff references `sys.version_info` in `numba/cpython/mathimpl.py` and `numba/np/math/mathimpl.py` but shows no `import sys` added to those files. If `sys` is not already imported there, the module will fail to load on all Python versions. The contract \"this module imports cleanly\" is broken silently. Verify imports exist.",
+        "file": "numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "177-178",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Version-gating discipline is inconsistent: typing uses `sys.version_info`, tests use `PYVERSION`",
+        "detail": "The codebase exposes `numba.core.utils.PYVERSION` as the canonical version predicate (used in the test). The new code in `mathdecl.py` and both `mathimpl.py` files bypasses it and uses raw `sys.version_info >= (3, 11)`. The abstract contract \"how this project asks about Python version\" should have one answer. Use `PYVERSION` everywhere for substitutability across future version bumps.",
+        "file": "numba/core/typing/mathdecl.py, numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "multiple",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test inputs include negative values for unsigned integer types, violating the test's own precondition",
+        "detail": "`x_values = [-2, -1, -2, 2, 1, 2, .1, .2]` is run against `uint16, uint32, uint64`. The contract of an unsigned type forbids negative inputs; this either silently wraps or is filtered by `run_unary`. Either way, the test specification is unclear. Copying this pattern from `test_exp` propagates the same latent issue. State the input domain explicitly per type.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": "267-273",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Release note file missing trailing newline and uses a redundant body",
+        "detail": "`docs/upcoming_changes/10276.new_feature.rst` ends without a newline (`\\ No newline at end of file`) and the body \"Support for ``math.exp2`` is added.\" duplicates the title. Minor, but the contract of the towncrier fragment format expects a trailing newline and a meaningful body.",
+        "file": "docs/upcoming_changes/10276.new_feature.rst",
+        "lines": "1-4",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No explicit test that `math.exp2` raises NotImplementedError (or similar) on Python < 3.11",
+        "detail": "The contract for an unsupported builtin on older Pythons is implicit: the registration simply doesn't happen, so compilation will fail with a generic typing error. A small negative test would pin down the substitution boundary: on 3.10, calling `math.exp2` from `@njit` fails predictably. Without it, the version-gated contract is unspecified.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR adds `math.exp2` by registering an LLVM intrinsic, which is the right shape \u2014 `unary_math_intr(math.exp2, 'llvm.exp2')` is exactly substitutable for the existing `math.exp` pattern, so the ADT contract of \"unary math intrinsic\" is preserved. The main concerns are contract-discipline, not correctness: version-gating uses two different idioms (`sys.version_info` vs `PYVERSION`) across files, `sys` may not be imported in the two `mathimpl.py` files, and the indentation around the new `if` block in `mathdecl.py` is suspicious enough to warrant a careful read. Tests reuse a copy-paste input set that includes negatives for unsigned types, propagating an existing latent spec issue. Overall a clean small feature that needs only contract-cleanup before merge."
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "audio_format is derived from sample_rate but never validated against the supported set",
+        "detail": "STTAudioFormat is a Literal of six specific pcm_* values, but the constructor builds `f\"pcm_{sample_rate}\"` and casts it through typing.cast with no check. Pass sample_rate=11025 (or any other int) and you silently build an invalid format string that the type system was supposed to prevent. The value `sample_rate` is being conflated with the value `audio_format` \u2014 two facts the API treats as related-but-distinct \u2014 and the cast is hiding the conflation. Either take audio_format as an explicit parameter (the actual value the wire protocol cares about) or validate the derived string against the Literal members and raise on miss.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "108-118",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "self._speaking identity is complected across two message-type handlers with duplicated state-machine logic",
+        "detail": "The fact \"are we currently inside a speech segment\" is one identity, but its transitions are scattered: partial_transcript sets it true, committed_transcript with text sets it true, committed_transcript with empty text sets it false, and there is no path that sets it false on errors or stream end. The same `if not self._speaking: send START_OF_SPEECH; self._speaking = True` block is duplicated verbatim in two branches. This is place-oriented programming masquerading as event handling \u2014 the boolean is being mutated from multiple sites with implicit invariants no single function owns. Pull the transition into one method (e.g. `_ensure_speaking()` and `_end_speech_segment()`) so the identity has exactly one place that mutates it, and the time semantics (when does a segment begin/end) are stated once.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "326-385",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "raising APIConnectionError from inside _process_stream_event silently kills recv_task via log_exceptions",
+        "detail": "_process_stream_event is called from recv_task, which is wrapped in @utils.log_exceptions. When ElevenLabs returns auth_error / quota_exceeded / transcriber_error, the code raises APIConnectionError synchronously inside the json-parse try/except in recv_task \u2014 but the surrounding `try: parsed = json.loads(...); self._process_stream_event(parsed) except Exception: logger.exception(...)` swallows it. The error gets logged and the loop keeps running against a server that has already told us auth is bad. The control flow (\"this error must terminate the stream\") is complected with the parse-error control flow (\"this single message was malformed, keep going\"). Separate the two: catch json.JSONDecodeError narrowly around the parse, let protocol-level errors propagate, and have _process_stream_event return a typed result (e.g. an event or a fatal-error value) rather than raise through a broad except.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "245-258, 396-411",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "manual query-string assembly reinvents urlencode and complects WS-URL transformation with parameter encoding",
+        "detail": "Building the URL by hand with a list of f-strings, joining on '&', then string-replacing https->wss is incidental complexity in three directions at once: encoding (no quoting of values), schema selection (str.replace will substitute mid-URL too), and conditional parameter inclusion. Pass the params dict to aiohttp's ws_connect via params=, or build with urllib.parse.urlencode + urllib.parse.urlsplit/urlunsplit. The value here (a set of query parameters) is being conflated with the rendering (a string), and the rendering is being conflated with the protocol switch.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "281-308",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTv2 is a parallel class that complects \"new feature\" with \"forked implementation\"",
+        "detail": "The PR author asks the right question (\"Is a separate class the right approach?\") and the answer Hickey would give is: only if the old and new are genuinely different values. Looking at the diff, STTv2 shares the option bag concept, the connection lifecycle, the audio chunking, and the event channel pattern with the existing STT \u2014 but inherits none of it. \"v1 vs v2\" is being used as a name for two different concerns: (a) a different wire protocol (real, essential), and (b) a stable public surface for existing users (real, organizational). Decompose: extract the wire-protocol piece as data (URL template, message schema, event-mapping table) and let one STT class dispatch on model. The Deepgram precedent does not make the duplication simple, only familiar.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "60-176",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTOptions duplicates every field three times (Options field, NotGivenOr arg, is_given/else None ternary)",
+        "detail": "The same fact \u2014 \"this option was or was not supplied\" \u2014 is represented in three encodings: NotGivenOr at the API boundary, the if/else ternary in __init__, and `Optional[X] = None` on the dataclass. That is three places to keep in sync and three opportunities to drift. A single helper (`_coerce(notgiven_value, default=None)`) or a small `from_kwargs` classmethod on STTOptions would collapse them. Incidental complexity from the sentinel pattern, not from the problem.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "60-138",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "tasks_group.exception() called after gracefully_cancel relies on undocumented ordering",
+        "detail": "After `gracefully_cancel(*tasks, wait_reconnect_task)`, `tasks_group.cancel()` is called and then `tasks_group.exception()` is invoked solely \"to prevent it from being logged.\" The time semantics of when the gather future is actually done vs. cancelled vs. has a result are not obvious from the code, and calling .exception() on a not-yet-done future raises InvalidStateError. The comment names the concern but the mechanism is fragile. Replace with an explicit `try: await tasks_group except (asyncio.CancelledError, Exception): pass` so the intent \u2014 \"drain whatever happened\" \u2014 is stated as a value flow rather than relying on the future's internal state at this exact moment.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "256-272",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "language identity duplicated between STTOptions.language_code and SpeechStreamv2._language",
+        "detail": "The same fact (\"which language\") lives in two places: opts.language_code on the STT, and self._language on the stream (initialized from either the stream() argument or opts.language_code). _process_stream_event then reaches for self._language for the SpeechData but ignores opts.language_code. One identity, two storage places, with an asymmetric read path. Either pass language through opts only, or remove it from opts and pass it explicitly on stream() \u2014 but don't keep both.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "129-131, 196-198, 318-323",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR ships a working WebSocket client, but it is COMPLECTED in the places that matter: sample_rate and audio_format are conflated and pushed through a typing.cast that defeats the Literal; the `_speaking` boolean is a piece of PLACE-ORIENTED state mutated from multiple handlers with implicit invariants; and protocol-level errors are raised through a broad except in recv_task that swallows them \u2014 three concerns (parse errors, message dispatch, fatal protocol errors) intertwined in one try block. The STTv2-as-parallel-class decision is EASY-NOT-SIMPLE: the Deepgram precedent makes it familiar, not decomposed; the actual values that differ (wire protocol, message schema, event mapping) are not extracted as data. The URL assembly, the triple-encoding of optional fields via NotGivenOr/ternary/Optional, and the two-place language identity are INCIDENTAL-COMPLEXITY worth cleaning up. The question that should have been asked first: what are the values flowing through this stream (audio chunks in, transcript events out, session-state transitions), and which of them deserve to be data rather than control flow?"
+  },
+  "raw": ""
+}

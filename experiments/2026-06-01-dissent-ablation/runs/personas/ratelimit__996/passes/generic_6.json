@@ -1,0 +1,70 @@
+{
+  "name": "generic_6",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Comparison against rateLimit.FullKey is unreliable since FullKey is not set in the non-detailed path",
+        "detail": "The new block compares enhancedKey != rateLimit.FullKey, but FullKey is only assigned in the detailed_metric branch. For normal (non-detailed) rate limits, FullKey is likely the zero value, so the comparison always 'differs' and forces an unnecessary stats override even when value_to_metric is false everywhere. This causes extra stats allocations for every existing config.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stats are created twice unnecessarily when value_to_metric overrides apply",
+        "detail": "Inside the override branch, NewRateLimit is invoked (creating one Stats with rateLimit.FullKey), and then Stats is immediately reassigned with NewStats(enhancedKey). The intermediate Stats object is wasted and may register an unwanted counter in the stats store. Just construct once with the enhanced key.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-428",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "value_to_metric path is built even when no descriptor enables it, replacing default stats on every lookup",
+        "detail": "valueToMetricFullKey is constructed unconditionally for every GetLimit call. When no descriptor sets ValueToMetric, the enhanced key still differs from rateLimit.FullKey (empty), triggering the override and replacing Stats with a freshly created NewStats. This is a regression in hot-path allocation and metric identity for all existing users.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rateLimitDescriptor positional struct literal is fragile across the codebase",
+        "detail": "The constructor at line 188 and line 265 uses positional struct initialization with four fields now. Any future addition to rateLimitDescriptor will silently misalign fields without compile error if order changes. Use named fields ({descriptors: ..., limit: ..., wildcardKeys: nil, valueToMetric: ...}) for safety and readability.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valueToMetric flag is read from the matched child but combined with the parent's wildcard logic in a confusing way",
+        "detail": "When matched via wildcard, the code checks nextDescriptor.valueToMetric (the matched child's flag) to decide whether to include the runtime value. But for default-key matches it also checks nextDescriptor.valueToMetric. The semantics \u2014 whether the flag belongs to the descriptor whose value is being emitted or to its parent \u2014 is ambiguous and not documented in code. Tests pass but logic is hard to reason about; consider clarifying with comments and a single code path.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-386",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unused matchedUsingValue/matchedViaWildcard branches collapse to the same behavior",
+        "detail": "In the wildcard branch and the default-key branch, when valueToMetric is true, the body is identical (write key, then optional _value). The non-flagged branches also produce identical output. This can be simplified to: append key; if valueToMetric && entry.Value != \"\" then append _value. Less code, fewer branches to test.",
+        "file": "src/config/config_impl.go",
+        "lines": "346-386",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The feature adds a useful knob for selective metric cardinality, and the tests are thorough. The main concerns are in src/config/config_impl.go: the override logic relies on rateLimit.FullKey which is only populated in the detailed_metric path, so the comparison enhancedKey != rateLimit.FullKey is meaningless and effectively forces a Stats replacement on every GetLimit call \u2014 a perf and metric-identity regression for existing users. The double Stats creation inside the override block wastes work and may pollute the stats registry. The branching logic for value emission also has redundant arms that can be collapsed, and positional struct literals make rateLimitDescriptor fragile to future field additions."
+  }
+}

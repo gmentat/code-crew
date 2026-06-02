@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "prowler__9718",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check filename/CHANGELOG name mismatches metadata CheckID convention (positive vs. negative naming)",
+        "detail": "The CheckID is `compute_image_not_publicly_shared` (negation-form), but the CheckTitle is `Compute Engine disk image is not publicly shared` and the class docstring says the check ensures images are not publicly shared. Meanwhile the PR description calls it `compute_image_publicly_shared`. Pick one convention for the contract \u2014 either the CheckID asserts the desired state (PASS when name holds) or it names the violation. Mixing the two across CheckID/title/PR description/docs is a SPEC-MISSING smell: callers and report consumers can't predict whether `compute_image_not_publicly_shared` returning FAIL means 'the not-publicly-shared property failed' or 'the image is publicly shared'. State the naming rule once for the GCP check family and apply it.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "2-4",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent failure on getIamPolicy violates the Image ADT's invariant: publicly_shared=False can mean 'not public' OR 'unknown'",
+        "detail": "`_get_images` catches every exception from `getIamPolicy` and still appends an Image with `publicly_shared=False`. The check then reports PASS for that image. Two materially different states \u2014 'we verified no public binding' and 'we could not determine the policy' \u2014 collapse to the same boolean. This is a classic LSP/contract problem: the postcondition of `_get_images` is supposed to be 'for every image in self.images, publicly_shared accurately reflects its IAM policy', and the implementation silently weakens it to 'or we gave up'. For a security check this is the wrong default: a permission-denied or transient API error becomes a silent PASS finding. Either represent the unknown state explicitly (e.g., `publicly_shared: Optional[bool]` or a `policy_retrieved: bool` field) and surface it as MANUAL/ERROR in the check, or skip appending the image when the policy lookup fails. The current contract is unsafe by default.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-575",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image model's contract is under-specified: missing public_members, location, and self-link that the PR description and metadata imply",
+        "detail": "The PR description states the Image model has a `public_members` field, and the metadata declares `ResourceType: compute.googleapis.com/Image` with global location. The actual model only carries name/id/project_id/publicly_shared. The lost information is exactly what a remediator needs: which member(s) are public, and a stable resource URI. A downstream check that wants to say `image X is shared with allAuthenticatedUsers via role roles/compute.imageUser` cannot \u2014 the abstraction has hidden the only data that makes the finding actionable. Strengthen the ADT: capture `public_members: list[str]` (and optionally the offending roles) at extraction time, and let the check decide how to present them. This also gives you a clean substitution boundary if a future check wants to flag other risky principals (e.g., domain bindings).",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Service-level frame violation: _get_images iterates project_ids but is not threaded like sibling collectors",
+        "detail": "Every other late-stage collector in `__init__` uses `self.__threading_call__(...)`. `_get_images` is invoked as a single synchronous call that internally loops project_ids and then per-image issues a getIamPolicy round-trip. For accounts with many projects/images this is a substantial latency cliff that breaks the implicit contract callers have come to expect (parallel collection across projects). Either thread per project_id like the MIG/disk collectors, or document why images are intentionally serial. Right now the module boundary is consistent in shape but inconsistent in behavior.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "38, 538-580",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test for image3 (Permission denied) asserts the silent-PASS behavior, locking in the unsafe contract",
+        "detail": "`compute_service_test.py` asserts `compute_client.images[2].publicly_shared is False` for the image whose getIamPolicy raises 'Permission denied'. This codifies the weakened postcondition flagged above. If you fix the unknown-vs-not-public conflation, this test must change. Worth calling out so the fix isn't accidentally reverted to satisfy the existing assertion.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "275-277",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Check has no test for the explicit publicly_shared substitution path through the real service collector",
+        "detail": "The check tests mock `compute_client.images` with hand-built `Image` instances and assert on string output. There is no test that drives the check through the real `_get_images` extraction (i.e., the contract from API response -> Image -> check finding). That's the substitution the security check actually depends on. The bindings-with-allAuthenticatedUsers path is exercised at the model level in `compute_service_test.py` but never wired to a check finding end-to-end. A single integration-style test would lock down the contract across the module boundary.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The Image ADT here is under-specified and its collector silently weakens a security-critical postcondition. The biggest issue is that `_get_images` swallows getIamPolicy failures and still emits `publicly_shared=False`, conflating 'verified not public' with 'could not determine' \u2014 and the service test pins that behavior in place. The Image model also drops `public_members` (which the PR description promised), removing the data a remediator needs. Naming is inconsistent across CheckID, CheckTitle, and the PR description, which is a SPEC-MISSING signal at the check-family level. The check logic itself is small and clean; the contract around it is what needs strengthening before merge."
+  },
+  "raw": ""
+}

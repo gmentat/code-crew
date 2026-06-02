@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "prowler__9702",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Contract mismatch between metadata (PASS/FAIL only) and check (adds MANUAL state)",
+        "detail": "The PR description and metadata.json specify a two-valued postcondition: PASS for single NIC, FAIL for multiple. The implementation adds a third outcome, MANUAL, for GKE instances. The spec and the code disagree. Either update metadata/description to document MANUAL as part of the contract, or move GKE handling to a muted/allowlist convention rather than inventing a status.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "26-34",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection by name prefix is a leaky, fragile heuristic embedded in the check",
+        "detail": "Identifying GKE-managed instances via `name.startswith(\"gke-\")` leaks an implementation detail of GKE node naming into a check contract. Users can name instances `gke-*` and the label `goog-gke-node` is the authoritative signal. Add an `is_gke_managed` field to the Instance ADT (derived from labels/metadata in the service) and have the check consume that boolean.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "28-33",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Check name and CHANGELOG drift from PR title and stated intent",
+        "detail": "PR title and feature describe detecting VMs with multiple NICs, but the check, directory, metadata CheckID, and CHANGELOG entry are all `compute_instance_single_network_interface`. The contract should name the predicate it asserts. Pick one (`_multiple_network_interfaces` or `_single_network_interface`) and align CheckID, file paths, class name, and changelog so the spec name matches the check semantics.",
+        "file": "prowler/CHANGELOG.md",
+        "lines": "16",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`network_interfaces` mutable default on Instance model risks shared-state invariant violation",
+        "detail": "`network_interfaces: list[NetworkInterface] = []` uses a mutable default at the class level. Pydantic v1 copies this safely, but the idiomatic and contract-preserving form is `Field(default_factory=list)`. Stating the invariant explicitly (each Instance owns its own list) prevents accidental aliasing if the model migrates or is subclassed.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "638",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No-NIC branch silently emits PASS with informational message, weakening postcondition",
+        "detail": "When `interface_count == 0`, the code sets `status_extended` but leaves `status = \"PASS\"`. The contract for PASS is \"single network interface,\" so zero interfaces violates the stated postcondition. Either treat zero as MANUAL/INFO with an explicit decision, or document that zero-NIC is impossible per the GCP API and assert it.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "35-39",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface ADT under-specifies what callers may rely on",
+        "detail": "`NetworkInterface` exposes `name`, `network`, `subnetwork` as bare strings with empty-string defaults and silently truncates URLs via `split(\"/\")[-1]`. The invariant (\"network is the short name, never the self-link\") lives only in `_get_instances`. Document it on the model, or make the helper explicit so future callers and subtypes preserve the same postcondition.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "606-610",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The check's contract is under-specified and inconsistent with its implementation: metadata promises PASS/FAIL but code emits a third state (MANUAL) for GKE, and the artifact's own name drifts between \"single\" and \"multiple\" across PR title, CheckID, and changelog. The GKE carve-out is a leaky abstraction (name-prefix sniffing inside the check) that belongs in the Instance ADT as a derived attribute. The NetworkInterface ADT silently transforms URL self-links and uses a mutable default on Instance, both of which should be stated as invariants rather than implied. Tests cover the happy paths cleanly but never exercise the no-NIC branch, where the postcondition is currently violated."
+  }
+}

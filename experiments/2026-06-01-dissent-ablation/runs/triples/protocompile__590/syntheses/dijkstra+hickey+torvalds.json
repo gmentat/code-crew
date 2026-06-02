@@ -1,0 +1,79 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() on leader-panic swallows the failure and breaks the caller contract",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. Every other path returns a non-nil *result and callers deref it. This relocates the nil hazard from the channel read into every caller. Either run() should never return nil (store a Fatal-marked *result on panic) or the contract must be stated and every caller updated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race is patched at one site but t.result's lifecycle invariant is never stated, leaving the other Load path equally exposed",
+        "detail": "The pending-output branch still does output := t.result.Load() and hands it onward without the same guard. The leader-panic-clears-to-nil protocol is reasoned by vibes: no documented state machine for t.result (pending/done/cleared) and no memory-ordering note. Two call sites handle the same race inconsistently. Fix the model, not one symptom.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Encoding leader-panic as sentinel-nil on t.result complects identity, value, and state",
+        "detail": "t.result is one atomic slot encoding three distinct facts (pending, done, leader-panicked-cleanup) via mutation to nil. Storing an explicit failure *result with Fatal set on panic would close the race by construction, let waitUntilDone always operate on a value, and remove the need for the new guard entirely. Worth surfacing before declaring the fix complete.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for the panic-while-waiting race",
+        "detail": "A concurrency bug that produced a nil deref is being closed with zero tests. This needs a deterministic reproducer: inject a panic in the leader, have N waiters, assert they all receive a sensible failure rather than nil or panic. Without it the fix rests on inspection of code whose invariants are unstated and will regress.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code and reads as a typo for 'did not see'",
+        "detail": "The branch handles the case where Load returned nil, yet the comment claims a result was seen. Either the comment is wrong or the code is. Comments that contradict code are worse than no comments and obscure the actual interleaving (leader CAS'd, ran, panicked, cleared, all before our Load) that the reader needs to understand.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR mixes a pure refactor (checkCycle extraction) with a behavior-changing race fix",
+        "detail": "Extracting checkCycle is fine in isolation but bundling it with the nil-guard change makes the actual fix harder to bisect and review. Split into one zero-behavior refactor patch and one minimal race-fix patch. The extraction also moves the precondition (t.result.Load() != nil) away from its call site, hurting local readability.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is NEEDS-WORK. It addresses one nil-deref symptom of a leader-panic race but introduces a new failure mode by returning bare nil from run(), which relocates the hazard into every caller. The underlying design smell \u2014 encoding leader-panic as sentinel-nil on the t.result atomic \u2014 is left unchallenged; storing an explicit failure *result on panic would close the race by construction. The checkCycle extraction is a fine cleanup but should be split from the race fix, and the change ships without a deterministic regression test or a stated invariant for t.result's lifecycle."
+  }
+}

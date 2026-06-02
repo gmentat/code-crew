@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning violates the documented contract of to_zarr's behavior on misalignment",
+        "detail": "The supertype contract of to_zarr is: 'write the dask array to the zarr array.' The new code raises an exception under a global-config condition the caller did not set in this call site. This strengthens the precondition (caller must now ensure array.chunk-size config is large enough) without documenting it. LSP-VIOLATION at the API surface.",
+        "file": "dask/array/core.py",
+        "lines": "3889-3930",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "PerformanceWarning is raised as an exception, conflating warning and error contracts",
+        "detail": "PerformanceWarning is, by name and convention, a warning type \u2014 callers reasonably expect it via warnings.warn, not raise. Raising a *Warning subclass as a hard exception breaks the implicit contract that warnings are advisory. Either rename to a proper Error subclass or call warnings.warn and let the caller decide. LEAKY-ABSTRACTION between two distinct contracts.",
+        "file": "dask/array/core.py",
+        "lines": "3911-3917",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unreachable `break` after `raise` indicates the loop-exit contract was not thought through",
+        "detail": "The `break` after `raise PerformanceWarning(msg)` is dead code. More importantly, it signals the author was unsure whether to report all misaligned axes or fail on the first. The contract should state: 'fail-fast on first misalignment' or 'aggregate all misalignments.' Pick one and document it.",
+        "file": "dask/array/core.py",
+        "lines": "3916-3917",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "safe_chunk_size computation leaks implementation details and may be wrong for non-uniform shards",
+        "detail": "`np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` treats zarr_write_chunks as a shape tuple, but `_get_zarr_write_chunks` likely returns a normalized chunks structure (tuple of tuples). The error message exposes an internal computation to the user as a recommended config value \u2014 a leaky abstraction. Verify the unit and shape; itemsize fallback to 1 hides a real precondition violation (zero-itemsize dtype should not occur).",
+        "file": "dask/array/core.py",
+        "lines": "3905-3910",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary: to_zarr now owns global-config policy decisions it should delegate",
+        "detail": "to_zarr's responsibility is 'write dask array to zarr.' Deciding what to do when array.chunk-size config conflicts with shard shape is a policy question that belongs at a higher boundary (or in a dedicated alignment helper). Embedding the policy inline \u2014 and as a raise \u2014 means the boundary now leaks config-resolution semantics. WRONG-BOUNDARY: extract a `_resolve_write_chunks(z, config)` helper with a stated contract.",
+        "file": "dask/array/core.py",
+        "lines": "3889-3917",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Subtype audit incomplete: region path bypasses the alignment check",
+        "detail": "The misalignment check runs before the `if region is None` branch, so it applies to both paths. But the region path constructs `chunks` from `new_blockdim(s, c, r)`, which may produce chunks that violate the just-verified invariant. State and verify the postcondition: 'all chunks passed to rechunk are multiples of zarr_write_chunks along every axis,' including after `new_blockdim`.",
+        "file": "dask/array/core.py",
+        "lines": "3925-3932",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The change improves chunk sizing for to_zarr but introduces two contract-level problems. First, raising a PerformanceWarning as a hard exception conflates the warning and error contracts and strengthens to_zarr's precondition based on global config \u2014 an LSP violation at the API surface. Second, the misalignment policy belongs at a different module boundary; embedding it inline mixes write-mechanism with config-resolution policy. The dead `break` after `raise` and the `safe_chunk_size` computation suggest the contract for the failure path was not fully specified. Recommend: extract `_resolve_write_chunks`, decide warn-vs-raise explicitly, and verify the region-path postcondition."
+  }
+}

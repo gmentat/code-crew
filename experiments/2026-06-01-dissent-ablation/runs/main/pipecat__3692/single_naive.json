@@ -1,0 +1,134 @@
+{
+  "task_id": "pipecat__3692",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Forward reference `\"FrameProcessor\"` in dataclass field will fail at runtime if used for any introspection or comparison context that resolves types",
+        "detail": "`ServiceSwitcherRequestMetadataFrame.service: \"FrameProcessor\"` uses a forward-reference string but the dataclass module in `frames.py` does not appear to import `FrameProcessor` (there is no new import in the diff). While forward-ref strings work at annotation-time, any code that calls `dataclasses.fields()` and tries to evaluate the type, or runs `from __future__ import annotations` introspection, will fail. More importantly the frame now holds a strong reference to a `FrameProcessor`, creating a tight coupling between `frames.py` and `processors.frame_processor` that the codebase has historically tried to avoid (frames are data, processors are pipeline nodes). Consider using a service name/ID string instead of a processor reference.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1724-1736",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality check `frame.service == self.strategy.active_service` relies on dataclass-generated `__eq__` which will recursively compare FrameProcessor objects",
+        "detail": "Because `ServiceSwitcherRequestMetadataFrame` is a `@dataclass`, Python auto-generates `__eq__` over its fields including `service`. But the comparison in `push_frame` is `frame.service == self.strategy.active_service` \u2014 this is on the field directly, not the frame, so it uses `FrameProcessor.__eq__`. If FrameProcessor doesn't override `__eq__`, identity comparison works. If it does override `__eq__` (e.g., compares by name), two different service instances with the same name would falsely match. Using `is` would be safer and clearer about intent.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-235",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Dataclass with mutable non-default `service` field placed after the inherited fields may break dataclass field ordering if `ControlFrame` has defaulted fields",
+        "detail": "`ServiceSwitcherRequestMetadataFrame` now adds a required field `service` with no default. If any ancestor in the `ControlFrame` -> `Frame` chain declares a field with a default value, Python will raise `TypeError: non-default argument 'service' follows default argument` at class definition time. The previous version (`pass`) avoided this entirely. The diff doesn't show whether ancestor frames have defaults, but this is a common pitfall in pipecat's frame hierarchy \u2014 worth verifying.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frame is now pushed downstream after handling \u2014 may leak to processors that don't expect it",
+        "detail": "Previously the `RequestMetadataFrame` was internal: STTService consumed it and the switcher dropped it. Now STTService pushes it downstream, and the switcher only consumes it when `frame.service == active_service`. This means: (1) if a non-active service ever forwards the frame (it currently doesn't since only the targeted service gets it queued, but the contract is fragile), it could escape; (2) any processor between the service and the switcher that is not the switcher itself will see this internal control frame. Downstream of the switcher, processors should never see it. The single-suppression-point design is more brittle than the previous always-suppress design.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inconsistent ordering: STT pushes metadata then the request frame; on StartFrame it pushes StartFrame then metadata",
+        "detail": "In the StartFrame branch, the original frame is pushed first, then metadata. In the new `ServiceSwitcherRequestMetadataFrame` branch, metadata is pushed first, then the request frame. The reasoning may be that downstream should see the metadata before the request frame is consumed/observed, but the asymmetry is undocumented and inconsistent with the adjacent code pattern.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-269",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Naming: `ServiceSwitcherRequestMetadataFrame` is verbose; the `service` field name shadows the concept",
+        "detail": "The new name accurately scopes the frame to ServiceSwitcher usage, which is good. However the field name `service` is generic \u2014 `target_service` or `target` would more clearly express intent (\"who should respond to this request\") and avoid confusion with `ServiceMetadataFrame.service` or similar accessors elsewhere.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changelog entry is technically accurate but a breaking rename should be marked as such",
+        "detail": "`changelog/3692.changed.md` describes a rename of a public-looking symbol (`RequestMetadataFrame` was exported from `frames.py`). External code importing the old name will break. The changelog should explicitly call this out as a breaking change or provide a deprecation alias re-exporting the old name. Pipecat's convention for breaking changes is worth checking (e.g., a `.breaking.md` or `.removed.md` suffix).",
+        "file": "changelog/3692.changed.md",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage gap: no test verifies the new `service` targeting behavior when multiple services exist",
+        "detail": "The updated test `test_metadata_emitted_on_service_switch` only counts that one `ServiceSwitcherRequestMetadataFrame` reached service2. It does not assert that `frame.service is service2`, nor that service1 (inactive) does NOT receive the frame, nor that the frame is correctly suppressed by the switcher after the active service handles it. Given the whole point of this PR is per-service targeting, that path should have explicit coverage.",
+        "file": "tests/test_service_switcher.py",
+        "lines": "472-482",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Should the frame carry a FrameProcessor reference or a service identifier?",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "A direct processor reference is the most expressive and avoids string-based identifier registries; the equality check is already against `self.strategy.active_service` which is also a processor, so types align."
+          },
+          {
+            "persona": "Abstraction discipline",
+            "position": "Frames should be pure data and not hold references to live pipeline nodes. Coupling `frames.py` to `FrameProcessor` (even via forward ref) inverts the dependency. A service name/ID string keeps frames serializable and decoupled."
+          }
+        ]
+      },
+      {
+        "topic": "Should `RequestMetadataFrame` be pushed downstream by services or stay fully internal?",
+        "positions": [
+          {
+            "persona": "Single-suppression-point (new design)",
+            "position": "Having services push the frame downstream and letting the switcher decide centralizes the consumption rule and makes the service's handling uniform (every frame either flows or is explicitly handled)."
+          },
+          {
+            "persona": "Internal-frame purist (old design)",
+            "position": "An internal control frame should never escape the originating subsystem. Services should consume it silently as before; the new design risks leaks if the topology changes or if a service is used outside a ServiceSwitcher."
+          }
+        ]
+      },
+      {
+        "topic": "Equality semantics for `frame.service == self.strategy.active_service`",
+        "positions": [
+          {
+            "persona": "Identity-based",
+            "position": "Use `is` \u2014 there is exactly one active service instance in the pipeline; identity is the correct relation and avoids surprises from overridden `__eq__`."
+          },
+          {
+            "persona": "Value-based",
+            "position": "`==` allows for wrapper/proxy implementations where two objects logically represent the same service; current code chose `==` deliberately."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR cleanly renames `RequestMetadataFrame` to `ServiceSwitcherRequestMetadataFrame` and adds per-service targeting, with passing tests and a changelog entry. The main concerns are design-level rather than correctness-blocking: the frame now holds a `FrameProcessor` reference (coupling frames to processors), uses `==` instead of `is` for service comparison, and changes the previously-internal frame into one that flows downstream \u2014 making the suppression contract more fragile. Naming and changelog framing could be tighter (breaking rename, generic `service` field name). No P0 issues; recommend addressing the FrameProcessor coupling and equality semantics, plus tightening test coverage for the targeting behavior before merge."
+  },
+  "raw": ""
+}

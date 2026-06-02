@@ -1,0 +1,78 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig.is_registered is mutated on a shared object without synchronization, racing under concurrent requests.",
+        "detail": "_get_lora_config returns the same shared TritonLoraConfig instance and _create_trtllm_generate_request flips is_registered=True before the backend confirms caching. Concurrent first-requests both see False and race; a losing request may send lora_task_id without weights. Worse, a failed inference or model reload leaves a lying flag. Needs a per-LoRA lock and a real backend-confirmed registration signal, not an in-process boolean.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-243",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "lora_task_id assignment is non-deterministic and not unique across model repos or restarts.",
+        "detail": "task_id starts at 1 and increments by iteration order across all repos, with no invariant that the same name maps to the same id across restarts or that ids do not collide with TRT-LLM's cached task table. Collision means the wrong adapter is served. Derive task_id deterministically from a hash of (model, lora_name) or reserve a documented id space.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "625-712",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "_get_lora_config has a lying return type and dereferences model_metadata without a None guard.",
+        "detail": "The signature claims -> TritonLoraConfig but the function returns None for missing lora_name or lora_configs, and accesses model_metadata.lora_configs after a .get() that may return None, raising AttributeError on unknown models. Narrow the type to Optional[TritonLoraConfig] and guard the metadata lookup explicitly.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1089-1098",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TritonLoraConfig collapses two distinct ADTs (vLLM vs TRT-LLM) into one all-Optional dataclass, violating LSP.",
+        "detail": "vLLM only needs name; TRT-LLM requires task_id, path, and registration state. Call sites index task_id and path without precondition checks, and the vLLM subtype never sets them. Split into a sealed hierarchy or tagged union (VllmLoraConfig, TrtllmLoraConfig) so required fields are non-Optional and substitution is total.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs return-type annotation is stale (declares List[tuple[str,str]] but returns List[TritonLoraConfig]).",
+        "detail": "The signature is part of the contract; the wrong annotation misleads type checkers and future maintainers. Update to Optional[List[TritonLoraConfig]] or, better, return a typed LoraCatalog value object that also carries the backend kind so downstream callers stop re-deriving it.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stray debug print() and traceback.format_exc() calls leak into production paths instead of using structured logging.",
+        "detail": "print(f'backend: {backend}') inside the parser loop plus print(traceback.format_exc()) sprinkled across the parser's except block and four router files are debug aids, not production code. They spam stdout, are not operator-gated, and a silent-return-after-print pattern hides real startup failures. Route through the logger or remove.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "681, 707-714",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel reaches strong consensus that this PR has two P0 correctness bugs: the unsynchronized is_registered mutation on a shared TritonLoraConfig races under concurrent load and can lie about backend cache state, and lora_task_id assignment is non-deterministic across restarts and repos, risking serving the wrong adapter. The dataclass design collapses vLLM and TRT-LLM into one all-Optional type (LSP violation), and _get_lora_config plus _parse_lora_configs ship stale/lying type annotations with an unguarded None-deref. Debug prints and bare traceback calls leaked into production paths across the parser and routers. NEEDS-WORK: fix concurrency and task_id determinism, split the ADT, correct annotations, and strip debug prints before landing."
+  }
+}

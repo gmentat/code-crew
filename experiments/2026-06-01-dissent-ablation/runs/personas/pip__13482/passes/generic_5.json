@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "pip__13482",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer marks requirements as prepared, breaking install flow for non-PEP-658 paths",
+        "detail": "The resolver previously set req.prepared=True and req.needs_more_preparation=False after preparing. Removing this block means downstream code that checks req.prepared may incorrectly re-process or skip requirements. The install command now calls prepare_linked_requirements_more, but req.prepared is never set to True anywhere in the new flow, which may cause repeated preparation or assertion failures.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "install --dry-run still calls prepare_linked_requirements_more, defeating the entire purpose of the PR",
+        "detail": "The install command unconditionally calls preparer.prepare_linked_requirements_more before the dry-run check at line ~414. If this code runs before the dry-run early-return, full wheels will still be downloaded in dry-run mode. The placement of this call relative to the dry-run SUCCESS return needs verification \u2014 the diff shows it added without guarding on options.dry_run.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-420",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "direct_url_from_link called with source_dir that may be None for metadata-only fetches",
+        "detail": "When PEP-658 metadata is fetched, req.source_dir is typically not yet populated since no archive was downloaded/unpacked. Calling direct_url_from_link(req.link, req.source_dir) with None may produce incorrect DirectUrl info or raise. Verify source_dir is valid at this point in the metadata-only branch.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-538",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cached _distribution may become stale after full download replaces metadata-only dist",
+        "detail": "set_dist() stores the metadata-only BaseDistribution. After prepare_linked_requirements_more downloads the full wheel, get_dist() still returns the cached metadata-only distribution because the _distribution check comes first. Consumers expecting the full distribution (with RECORD, files, etc.) will get incomplete data. set_dist needs to be cleared or updated post-download.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-619",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download command behavior change: prepare_more now runs before save_linked_requirement on all reqs",
+        "detail": "Previously save_linked_requirement ran first, then prepare_more on all. Now prepare_more runs on all requirements (including already-satisfied ones), then save_linked_requirement iterates. For requirements where satisfied_by is not None, this may trigger unnecessary downloads or change error ordering vs. the prior behavior.",
+        "file": "src/pip/_internal/commands/download.py",
+        "lines": "130-140",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist/get_dist asymmetry \u2014 setter is trivial but getter has fallback chain; no docstring explains precedence",
+        "detail": "set_dist unconditionally overwrites _distribution and get_dist prefers _distribution over metadata_directory and local wheel. This precedence is load-bearing but undocumented. Add a comment explaining why cached _distribution wins, and whether callers should ever invalidate it.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-619",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR's intent is sound \u2014 defer full wheel downloads until after dry-run validation \u2014 but the implementation has correctness gaps. The biggest concern is that removing the resolver's req.prepared=True / needs_more_preparation=False finalization leaves requirements in an inconsistent state for downstream consumers, with no replacement bookkeeping. The install command's new prepare_more call must be verified to sit after the dry-run early return, otherwise the fix is a no-op for the headline use case. The set_dist/get_dist caching also risks returning stale metadata-only distributions after a subsequent full download. Worth a careful trace of req state through each command path before merge."
+  }
+}

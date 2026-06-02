@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getSourceMap contract is unspecified \u2014 return type, error semantics, and frame are implicit",
+        "detail": "The new getSourceMap callback is introduced as a hook on parseErrorStacktrace, but no contract is stated at the call site or in the helper. What must a conforming implementation return for (a) module that is bundled/inlined, (b) external module with no map, (c) external module with broken/unreadable map, (d) module whose sourcesContent is missing? Currently it can return undefined or a SourceMap, throws are unhandled, and callers cannot tell the three failure modes apart. For a long-lived plugin-style hook crossing the utils/node boundary, the precondition/postcondition/frame should be written down (JSDoc on the option type) so future subtypes \u2014 coverage, browser mode, workers \u2014 substitute correctly.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "173-187",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary leak: node-layer fs/path/convert-source-map logic lives in test-run.ts rather than in a source-map abstraction",
+        "detail": "extractSourcemapFromFile and createConvertSourceMapReadMap are general-purpose source-map extraction primitives that have nothing to do with TestRun's responsibility (orchestrating a test run lifecycle). Placing them as free functions at the bottom of test-run.ts draws the module boundary around a file rather than a responsibility. The right home is packages/utils/src/source-map.ts (or a sibling node-only module), where DecodedMap and parseErrorStacktrace already live \u2014 that is the module whose contract is 'resolve source maps.' As written, any future caller (coverage reporter, browser-mode reporter, snapshot diff) that needs the same behavior will either duplicate it or reach into test-run.ts, which is a classic wrong-boundary smell.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "316-343",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolvedSources change in DecodedMap silently alters a public-ish postcondition without a spec",
+        "detail": "The one-line fix changes resolve(s || '', from) to resolve(from, '..', s || '') inside DecodedMap. This is a semantic change to the postcondition of DecodedMap.resolvedSources: previously, an absolute source path s would win (path.resolve discards earlier segments when a later one is absolute); now the behavior for relative s is rebased against from's parent directory, which is the intended fix, but the invariant 'resolvedSources[i] is an absolute path that identifies the i-th original source' is nowhere written down. DecodedMap is exported from packages/utils and is a stable ADT used by parseErrorStacktrace and potentially by external consumers. A contract change of this kind needs (a) a stated invariant in a comment or type, (b) a unit test pinning the new postcondition for both relative and absolute s, and (c) confirmation that no caller depended on the old (buggy) behavior. The snapshot update in stacktraces.test.ts is evidence the change works for one path but is not a substitute for a spec.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "extractSourcemapFromFile silently swallows malformed maps via '{}' fallback",
+        "detail": "createConvertSourceMapReadMap returns '{}' when the referenced map file does not exist. This is reasonable defensiveness but it conflates 'no map' with 'broken map' at the abstraction boundary \u2014 the caller (getSourceMap) cannot distinguish a missing external map from a corrupted one, so a user with a misconfigured build will get a silently-unmapped stack trace rather than a diagnostic. Either document that this hook is best-effort (precondition: callers must tolerate undefined/empty results without diagnostics) or surface a debug log when the fallback fires.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "336-342",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Synchronous fs reads inside a stack-trace hook are unbounded and uncached",
+        "detail": "getSourceMap is invoked per frame during error reporting; for each external frame it does an existsSync + readFileSync of the source file, then convert-source-map may readFileSync the .map file. For a deep stack across many external modules, this is O(frames) sync IO with no memoization. The contract should either state 'this hook is called rarely and may do sync IO' (and accept the perf), or introduce a per-run cache keyed by file path. Not a correctness bug; a frame/performance-discipline note.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance-style coupling to Vite's moduleGraph as the 'is this external?' oracle",
+        "detail": "The heuristic 'mod?.transformResult is empty therefore the module is external' uses Vite's internal module-graph shape as a proxy for an abstract predicate (isExternalModule(file)). This couples test-run to a Vite invariant that is not part of Vite's documented contract and could shift across Vite versions. Consider extracting a named predicate with a stated contract (precondition: file has been seen by the fetch pipeline; postcondition: true iff the module's transformed code is not available in-process), so the coupling is visible and replaceable.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "178-184",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The fix is directionally correct \u2014 both the resolvedSources rebase and the external-module getSourceMap hook address real bugs \u2014 but the changes weaken the discipline around two abstract data types without restating their contracts. DecodedMap's resolvedSources invariant is silently altered with no spec or unit test pinning the new postcondition. The new getSourceMap hook is introduced without a stated contract for its return value and failure modes, and its implementation (extractSourcemapFromFile, createConvertSourceMapReadMap) is placed inside test-run.ts rather than in the source-map module where the responsibility actually lives \u2014 a wrong-boundary smell that will invite duplication. Recommended: write the contracts down on both surfaces, move the extraction helpers next to DecodedMap/parseErrorStacktrace, and add a unit test that pins resolvedSources behavior for absolute, relative, and empty source entries. ADT-SOUND on intent; SPEC-MISSING and WRONG-BOUNDARY on execution."
+  },
+  "raw": ""
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "openbao__2362",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "HasParent ancestor check for root ACL may permit child-namespace root tokens to escalate to parent or sibling namespaces",
+        "detail": "In vault/acl.go AllowOperation, the fast-path now allows when ns.HasParent(a.root). If HasParent returns true only when a.root is an ancestor of the request ns, the logic is correct, but the test only verifies root-ns vs request-ns ordering. There is no test for sibling/cousin namespaces, and no test that a child-namespace root token is denied when targeting the root namespace. Given that previously root tokens were strictly root-namespace-only, this widening must be guarded explicitly.",
+        "file": "vault/acl.go",
+        "lines": "342-361",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed always returns false, but ListAllNamespaces and downstream callers are documented to rely on it",
+        "detail": "vault/core.go NamespaceSealed is a stub returning false. The PR description states ListAllNamespaces now includes sealed namespaces stubbed via NamespaceSealed. Any code branching on this (e.g., skipping sealed namespaces during metrics/MFA loading) will silently treat all namespaces as unsealed. If a real seal manager is merged later expecting this method, behavior will quietly change. At minimum add a TODO panic-guard or feature flag.",
+        "file": "vault/core.go",
+        "lines": "1399-1402",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ErrNamespaceSealed status mapping via errwrap.Contains substring match is fragile",
+        "detail": "In sdk/logical/response_util.go, the switch uses errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) where the message is 'namespace is sealed'. This substring could match unrelated wrapped errors that happen to contain that phrase. Prefer errors.Is(err, consts.ErrNamespaceSealed) for sentinel matching to avoid false positives and to remain consistent with idiomatic Go error handling.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-167",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Switch refactor changes semantics: previously multiple conditions could apply, now only first match wins",
+        "detail": "The original code in AdjustErrorStatusCode used sequential if statements so an error matching both ErrSealed and being an HTTPCodedError would have status overwritten by the HTTPCoded path. The new switch returns after the first matching case, so an HTTPCoded error wrapping ErrSealed now gets 503 instead of the coded status. This is a subtle behavioral regression for any wrapper that combines sealed semantics with a specific code.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace fast-path in expiration views may change storage layout for root namespace",
+        "detail": "In vault/expiration.go, leaseView and tokenIndexView previously used core.systemBarrierView.SubView for root namespace and namespaceMountEntryView only for non-root. Unifying via NamespaceView(c.barrier, ns).SubView must produce the identical prefix for the root namespace, otherwise existing on-disk leases become unreadable after upgrade. Needs explicit verification that NamespaceView(root) yields the same path prefix as systemBarrierView.",
+        "file": "vault/expiration.go",
+        "lines": "450-456",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test for child-namespace root token only constructs a Namespace with Path but no ID",
+        "detail": "In vault/acl_test.go testACLRoot is invoked with &namespace.Namespace{Path: \"ns1\"} which leaves ID empty. The subsequent assertion that root context is denied relies on ns.ID != namespace.RootNamespaceID, but the stored a.root namespace also has empty ID. This may pass for the wrong reason and does not test realistic child namespace scenarios with proper IDs and parent relationships.",
+        "file": "vault/acl_test.go",
+        "lines": "161-188",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR lays groundwork for per-namespace root tokens and namespace sealing, but the ACL change in vault/acl.go is the highest risk: it removes the hard restriction that root policy requires root namespace and replaces it with a HasParent ancestor check that is under-tested for sibling/escalation cases. The NamespaceSealed stub silently returns false while other code paths begin depending on it. The response_util switch refactor is functionally similar but changes ordering semantics for errors matching multiple cases, and uses substring matching where errors.Is would be safer. Expiration view unification needs storage-prefix equivalence verification before merge."
+  }
+}

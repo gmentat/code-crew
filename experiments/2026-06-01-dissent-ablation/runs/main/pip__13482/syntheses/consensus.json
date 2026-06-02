@@ -1,0 +1,119 @@
+{
+  "task_id": "pip__13482",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer sets req.prepared / needs_more_preparation; post-resolve invariant silently abandoned",
+        "detail": "The old resolver code set `req.prepared = True` and `req.needs_more_preparation = False` after running `prepare_linked_requirements_more`. The patch deletes that bookkeeping without relocating it into `prepare_linked_requirements_more` or any other owner. Downstream consumers that read these flags now observe stale values, and any caller that forgets to invoke `prepare_linked_requirements_more` (or invokes it on a subset) leaves requirements in a half-prepared state. Fix: either re-establish the invariant inside `prepare_linked_requirements_more` (one site, one truth) or derive the flag from the distribution rather than mutating it separately.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "set_dist/get_dist introduces a third source of truth for the distribution with no documented precedence or cache invalidation",
+        "detail": "`get_dist` now branches across `_distribution`, `metadata_directory`, and `local_file_path`, with `_distribution` cached first. Once `set_dist(metadata_dist)` is called during a metadata-only fetch, every subsequent `get_dist()` returns the metadata-only distribution even after the full wheel is later downloaded and `metadata_directory`/`local_file_path` are populated. There is no documented invariant tying the three sources together, no invalidation when full preparation completes, and no LSP audit of which BaseDistribution operations are safe on a metadata-only subtype. Either invert the priority so `metadata_directory`/`local_file_path` win when present, invalidate `_distribution` in `prepare_linked_requirements_more`, or collapse to one canonical field with a stated invariant.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 608-620",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three command files duplicate the same prepare_linked_requirements_more incantation; lifecycle ownership is now scattered",
+        "detail": "`commands/download.py`, `commands/install.py`, and `commands/wheel.py` each grew an identical `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` call after `resolver.resolve(...)`. The shared invariant that was once centralized in the resolver is now copy-pasted across three sites with no shared helper. A new command (or `pip lock`) will silently forget the call and regress to half-prepared requirements. Fix: introduce a single `finalize_for_install`/`finalize_for_download` operation on the preparer (or a `requirement_set.finalize(preparer)` method) that owns both the call and the invariant update.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-423 (and parallel sites in download.py and wheel.py)",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is synthesized from direct_url_from_link(req.link, req.source_dir) where source_dir is unspecified in metadata-only mode",
+        "detail": "Inside `_fetch_metadata_only`, the patch sets `req.download_info = direct_url_from_link(req.link, req.source_dir)`. In the metadata-only / dry-run path the package has not been unpacked, so `req.source_dir` is typically None or unset. `direct_url_from_link`'s contract with a None source_dir is not stated, and the resulting DirectUrl may be a weaker postcondition than downstream consumers (`pip lock`, `--report`) expect. Either pass None explicitly with a comment, guard with a precondition check, or narrow the field to indicate metadata-only provenance.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "install.py call placement may not actually short-circuit --dry-run / runs between resolve and prepare_more against half-prepared reqs",
+        "detail": "The new `prepare_linked_requirements_more` call in install.py is inserted before the pip-self-update lookup but its position relative to the dry-run early-return is not clearly guarded. If the call runs before the dry-run branch, the headline optimization (no full wheel fetch on `--dry-run`) is defeated. If it runs after, intervening code (dry-run report writer, pip self-update guard) executes against requirements whose preparation state is half-done, so `get_dist()` returns the metadata-only distribution rather than the fully-prepared one. Guard with `if not options.dry_run:` and state the precondition for every consumer between `resolve()` and the new call.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-426",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No tests in the diff for the headline dry-run / no-wheel-download behavior",
+        "detail": "The PR claims that `pip install --dry-run` and `pip lock` no longer download full wheels when PEP-658 metadata is available. This is a verifiable postcondition but no test enforcing it appears in the diff. A regression next month will silently restore the old behavior and no one will notice. Add a test that fails before this patch and passes after.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no validation or invariant; either drop the ceremony or make it load-bearing",
+        "detail": "`def set_dist(self, distribution): self._distribution = distribution` is Java-style ceremony with no precondition, no event, and no laziness. Either expose `_distribution` as a plain attribute, convert to a property, or add a real invariant (e.g., assert `self._distribution is None or equals distribution`, or clear `metadata_directory` when set). As written the getter/setter pair buys nothing and invites silent double-assignment bugs.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info side effect inside _fetch_metadata_only mixes 'fetch metadata' with 'record provenance for reporting'",
+        "detail": "`prepare_linked_requirement`'s metadata-only branch now does two unrelated things: returns a metadata distribution and patches `download_info` onto the requirement so downstream commands (`pip lock`, `--report`) work. This is a filter that grew a side channel and entangles preparation with reporting. Either have the metadata fetcher return a `(dist, download_info)` pair and let the caller assign, or compute `download_info` unconditionally where it's consumed.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR solves a real problem (don't download full wheels when only PEP-658 metadata is needed for `--dry-run` and `pip lock`) and that the high-level direction \u2014 pulling the heavy preparation step out of the resolver \u2014 is correct. But execution is sloppy in load-bearing ways: the resolver's post-condition that requirements end up with `prepared=True` and `needs_more_preparation=False` is silently abandoned with no replacement owner, the new `_distribution` cache becomes a third source of truth with no documented precedence or invalidation against `metadata_directory`/`local_file_path`, and three command files now duplicate the same `prepare_linked_requirements_more` call instead of centralizing it in a `finalize_for_*` helper. Additionally, `download_info` is populated from `req.source_dir` at a lifecycle point where that field's value is unspecified, and the headline dry-run behavior has no accompanying test. Fix: re-establish the prepared/needs_more_preparation invariant in one place, collapse the distribution sources of truth to one canonical field with a documented invariant, centralize the prepare-more call into a single finalize operation, guard or document the `download_info` precondition, and add a regression test for the dry-run no-download claim."
+  },
+  "raw": ""
+}

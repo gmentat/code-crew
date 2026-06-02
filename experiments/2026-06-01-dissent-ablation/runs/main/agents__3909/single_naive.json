@@ -1,0 +1,194 @@
+{
+  "task_id": "agents__3909",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "summary": "This PR adds a new STTv2 class for ElevenLabs Scribe v2 streaming, modeled after existing Deepgram/Cartesia patterns. The implementation is largely correct and follows established conventions, but has several concrete issues: (1) the reconnect loop never sets `closing_ws=False` between iterations and never triggers `_reconnect_event`, so it's effectively single-shot and the named \"reconnect\" machinery is dead code; (2) `_connect_ws` URL substitution will produce malformed URLs if a user passes a custom `base_url` without an http(s) scheme; (3) raising `APIConnectionError` from inside `_process_stream_event` won't propagate cleanly because it's wrapped by `log_exceptions` and only logged, so transcriber/auth errors get logged but the stream keeps running silently; (4) the `audio_format` is derived only from `sample_rate` without validating that the resulting `pcm_<rate>` string is in the allowed `STTAudioFormat` literal \u2014 passing an unsupported rate like 32000 silently casts and is rejected by the server later. Several P2 nits around channel-count assumptions, exception handling breadth, and `aiohttp.ClientError` coverage. Overall direction is fine; needs the reconnect/error-propagation fixes before merge.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Reconnect loop is structurally broken: closing_ws never resets and _reconnect_event is never triggered",
+        "detail": "In `_run`, `closing_ws` is declared once outside the `while True:` reconnect loop and set to True at the end of `send_task`. On a reconnect iteration it would stay True, causing `recv_task` to silently return on any close instead of raising. More importantly, nothing in the class ever calls `self._reconnect_event.set()`, so the `wait_reconnect_task` branch is dead code \u2014 the loop only ever exits via `tasks_group` completing. This means the 'streaming with reconnect' contract advertised by the structure is not actually implemented; either implement reconnect triggers (network errors, server-side closes) or remove the scaffolding to avoid confusion.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "157-225",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "APIConnectionError raised inside _process_stream_event is swallowed by @log_exceptions and never surfaces",
+        "detail": "`recv_task` is decorated with `@utils.log_exceptions`, and its inner loop wraps `self._process_stream_event(parsed)` in a `try/except Exception: logger.exception(...)`. When ElevenLabs returns `auth_error`, `quota_exceeded`, `transcriber_error`, etc., the `raise APIConnectionError(...)` is caught by that broad except and only logged \u2014 the WebSocket stays open, no error propagates to the caller, and the agent silently produces no transcripts. Auth and quota errors in particular must terminate the stream. Either move error-classification out of the try/except, re-raise after logging, or signal via an internal event that the outer loop checks.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "238-244, 396-412",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "audio_format is cast from arbitrary sample_rate without validation against the STTAudioFormat literal",
+        "detail": "`audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")` accepts any int. If a user passes `sample_rate=32000` (a common value), the resulting `pcm_32000` is not in the allowed literal and the server will reject the connection late with an opaque error. Validate `sample_rate` against the supported set (8000, 16000, 22050, 24000, 44100, 48000) at construction time with a clear `ValueError`, matching the docstring claim of '8kHz to 48kHz'.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "100-101",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "base_url scheme replacement is fragile and will silently produce a malformed ws:// URL",
+        "detail": "`base_url.replace('https://', 'wss://').replace('http://', 'ws://')` quietly does nothing if a user passes a base_url like `api.elevenlabs.io/v1` without a scheme \u2014 the resulting `ws_url` will be `api.elevenlabs.io/v1/speech-to-text/realtime?...` and ws_connect will fail with a confusing error. Use `urllib.parse.urlsplit`/`urlunsplit` or explicitly validate that base_url starts with `http(s)://`.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "317-318",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query parameters are constructed by string concatenation without URL-encoding",
+        "detail": "`language_code` and other values flow directly into the query string via f-strings. A language code is unlikely to contain reserved chars in practice, but values like custom base URLs or any future free-form fields would silently break. Use `urllib.parse.urlencode` to construct the query string \u2014 it's a one-line fix and removes a category of subtle bugs.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "296-315",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_connect_ws only catches ClientConnectorError, missing other aiohttp connection errors",
+        "detail": "The except clause catches `aiohttp.ClientConnectorError` and `asyncio.TimeoutError`, but other failure modes during `ws_connect` \u2014 `WSServerHandshakeError` (e.g. 401 auth, 403 quota, 404 wrong path), `ClientError`, DNS failures wrapped differently \u2014 will propagate as raw aiohttp exceptions instead of the framework's `APIConnectionError`/`APIStatusError`. Broaden to `aiohttp.ClientError` (and ideally branch on `WSServerHandshakeError` to map status codes to `APIStatusError`).",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "320-330",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AudioByteStream is hard-coded to num_channels=1; multi-channel input is silently mismatched",
+        "detail": "`audio_bstream = utils.audio.AudioByteStream(..., num_channels=1, ...)`. If the upstream pipeline ever emits stereo `rtc.AudioFrame`s (some VAD/source configurations do), this will produce incorrectly-framed audio without warning. Either pass `data.num_channels` from incoming frames or assert/validate channel count on first frame and raise a clear error.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_recognize_impl raises NotImplementedError but the base STT.recognize() contract isn't gated by capabilities",
+        "detail": "Callers using the generic STT interface (e.g. tests, helper utilities) may call `recognize()` and hit a runtime crash with a fairly opaque error. Consider raising a more specific `APIError` subtype or at minimum documenting on the class that only streaming is supported, and prefer suggesting the v1 `STT` class explicitly in the message (which the text already does \u2014 good \u2014 but a custom exception type would be cleaner).",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "134-142",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTModels Literal has a trailing comma making it a single-element tuple-ish definition",
+        "detail": "`STTModels = Literal[\"scribe_v2_realtime\",]` works (the comma is allowed in a Literal), but it's stylistically odd and suggests the author intended to add more entries. Either drop the trailing comma or add the expected future models so the intent is explicit.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare 'except Exception: return' in keepalive_task hides shutdown vs real failures",
+        "detail": "`keepalive_task` swallows every exception including `CancelledError` semantics on older Python. Prefer catching `asyncio.CancelledError` explicitly and logging unexpected exceptions, so a broken ping (e.g. ws closed) is at least debuggable.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "164-170",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty 'committed_transcript' acting as end-of-speech sentinel is a brittle protocol assumption",
+        "detail": "The handler treats an empty-text `committed_transcript` as 'end of speech segment'. If ElevenLabs ever emits an empty committed_transcript for an unrelated reason (warmup, ack, silence period), the agent will prematurely fire END_OF_SPEECH. Worth confirming with the API contract docs and adding a comment with a link, or matching on a more specific signal (e.g., a dedicated `end_of_segment` message_type).",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "377-390",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "tasks_group.exception() called after gracefully_cancel may itself raise InvalidStateError",
+        "detail": "After `gracefully_cancel`, the gathered future may have been cancelled rather than completed; calling `.exception()` on a cancelled future raises `CancelledError`. The comment says it's to prevent unretrieved-exception warnings, but the call is in a `finally` block \u2014 a raise here would mask the original error. Wrap in `try/except (CancelledError, InvalidStateError): pass`.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "218-220",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Sending sample_rate inside every audio chunk message is wasted bandwidth",
+        "detail": "`sample_rate` is already a connection-time query param. Including it in every 50ms `input_audio_chunk` message inflates payloads needlessly. Confirm with the API whether it's required per-message; if not, drop it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "194-203",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No tests added and existing test suite is acknowledged as broken",
+        "detail": "The PR description notes test_stt.py has been broken since May 2025 and that Deepgram STTv2 also landed without tests. That's an explanation, not a fix. At minimum add a unit test that mocks the ws server and verifies message parsing for each message_type \u2014 this is exactly the kind of state machine that drifts silently. Consider this a non-blocker only because precedent exists.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether the broken reconnect machinery should block merge",
+        "positions": [
+          {
+            "persona": "shipping-pragmatist",
+            "position": "The Deepgram/Cartesia plugins shipped with similar single-shot loops and it works fine in practice \u2014 the reconnect scaffolding can be cleaned up in a follow-up. Don't gate a feature behind code archaeology."
+          },
+          {
+            "persona": "correctness-discipline",
+            "position": "Dead reconnect code is a maintenance trap: future authors will read it as working and rely on it. Either delete it or wire it up. Mismatch between structure and behavior is worse than either extreme."
+          }
+        ]
+      },
+      {
+        "topic": "Error propagation strategy in recv_task",
+        "positions": [
+          {
+            "persona": "fail-fast",
+            "position": "auth_error and quota_exceeded must tear down the stream immediately \u2014 silently logging means a misconfigured deployment produces a broken agent with no observable failure mode."
+          },
+          {
+            "persona": "resilience-first",
+            "position": "Transcriber errors may be transient; logging-and-continuing is reasonable. Only fatal classes (auth, quota) should raise. The current code conflates them, which is the actual bug \u2014 refine, don't blanket-raise."
+          }
+        ]
+      },
+      {
+        "topic": "Sample-rate validation vs trust the type system",
+        "positions": [
+          {
+            "persona": "duck-typer",
+            "position": "Python's Literal is advisory; users who pass invalid rates deserve the server-side error. Adding runtime validation is duplicative."
+          },
+          {
+            "persona": "defensive-api",
+            "position": "Plugin code is a public boundary; users won't see the Literal at runtime and the docstring promises 8kHz\u201348kHz. A clear ValueError at construction is strictly better UX than an opaque ws handshake failure 30 seconds later."
+          }
+        ]
+      }
+    ]
+  },
+  "raw": ""
+}

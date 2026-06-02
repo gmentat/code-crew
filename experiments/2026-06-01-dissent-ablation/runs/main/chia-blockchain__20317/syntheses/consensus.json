@@ -1,0 +1,156 @@
+{
+  "task_id": "chia-blockchain__20317",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Duplicated mode-to-bytes dispatch ladders in sign_message and verify_signature",
+        "detail": "chia/wallet/util/signing.py contains two parallel if/elif chains mapping SigningMode to the bytes that get signed/verified \u2014 once in sign_message() and once in verify_signature(). They have subtle asymmetries (sign_message falls through to CHIP_0002 for unknown modes; verify_signature raises). The central invariant of a signing library is that signed bytes equal verified bytes for every mode. Extract a single message_bytes_for(mode, message) -> bytes helper used by both sides so the invariant is enforced by construction.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-40, 75-85",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum is non-exhaustive \u2014 silently falls through to CHIP_0002 for the fourth (is_hex, safe_mode) case",
+        "detail": "The free function signing_mode_enum() in wallet_request_types.py handles three of four (is_hex, safe_mode) combinations explicitly and returns CHIP_0002 by unguarded fallthrough for the fourth. Replace with a total function over the 2x2 truth table \u2014 a dict keyed by (is_hex, safe_mode) or an explicit final elif \u2014 so all four cases are visible and a future fifth case cannot silently land in CHIP_0002.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum exists three times in the same module \u2014 free function plus @property on two request classes",
+        "detail": "wallet_request_types.py defines a module-level signing_mode_enum(request) function and then a @property signing_mode_enum on both SignMessageByAddress and SignMessageByID that just forwards to the free function. Same name, three definitions, two scopes \u2014 easy to misread and invites future drift. Pick one form (the @property or a single helper keyed on the two booleans) and remove the others.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "convert_secret_key_to_synthetic is a stateless function masquerading as a Wallet method",
+        "detail": "Wallet.convert_secret_key_to_synthetic(self, secret_key) does not touch self \u2014 it is a one-line wrapper around calculate_synthetic_secret_key(secret_key, DEFAULT_HIDDEN_PUZZLE_HASH). Callers reach it via self.service.wallet_state_manager.main_wallet.convert_secret_key_to_synthetic(...), implying per-wallet behavior that does not exist. Move it to chia/wallet/util/signing.py (or alongside calculate_synthetic_secret_key) as a free function or @staticmethod.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "verify_signature is coupled to the RPC wire type VerifySignatureResponse",
+        "detail": "chia/wallet/util/signing.py imports VerifySignatureResponse from chia.wallet.wallet_request_types so it can construct one. The util \u2014 conceptually below the RPC layer \u2014 now depends on the RPC request-types module for its return shape, contradicting the stated goal of making signing reusable by other wallet areas. Return a small internal value (tuple[bool, str | None] or a local dataclass) and let the RPC layer translate it into the wire response.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "13, 17-65",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "verify_signature docstring still references a 'request' parameter that no longer exists",
+        "detail": "The extracted verify_signature() carries ':param request:' / ':return:' from the prior RPC-method shape, even though it now takes five keyword arguments (signing_mode, public_key, message, signature, address). Update the docstring to describe each parameter and the address-binding semantics, or remove it.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "18-26",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable name hex_message is misleading on non-hex code paths",
+        "detail": "In sign_message() the local hex_message holds a tree-hash digest in the CHIP_0002 default branch and a UTF-8 byte string in the BLS UTF-8 branch \u2014 only one of four cases is actually hex. Rename to message_to_sign to mirror message_to_verify in verify_signature() and remove a false invariant from the reader's eye.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "76-85",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test_sign_message_by_address discards the verify_signature result",
+        "detail": "The new RPC test calls rpc_client.verify_signature(...) but never asserts on the return value. VerifySignatureResponse carries an isValid bool and an optional error \u2014 an invalid signature would still return a response object without raising. Add `assert res.isValid is True` so the test actually pins the sign-then-verify postcondition.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "3147-3163",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test_sign_message_by_nft_id does not assert signing_mode or pin the expected pubkey",
+        "detail": "The new test verifies AugSchemeMPL.verify(response.pubkey, expected_bytes, response.signature) \u2014 a tautology for any well-formed (pubkey, signature) pair the implementation returns. It does not assert that response.signing_mode reflects the requested (is_hex, safe_mode) combination, and it does not pin response.pubkey to the expected synthetic-of-inner-p2 key. Add per-case asserts on signing_mode (locking the truth table in signing_mode_enum) and derive the expected synthetic pubkey from the NFT's inner p2 puzzle hash and assert equality.",
+        "file": "chia/_tests/wallet/nft_wallet/test_nft_wallet.py",
+        "lines": "668-783",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SignMessageResponse dataclass adds no value over a 2-tuple",
+        "detail": "chia/wallet/util/signing.py introduces a new frozen kw_only dataclass with exactly two fields (pubkey, signature) that every call site immediately destructures back into the existing SignMessageByAddressResponse / SignMessageByIDResponse. The prior tuple[G1Element, G2Element] return was sufficient and matched the old per-wallet sign_message signatures. Drop the wrapper class and return the tuple, or have callers consume the response types directly.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "62-85",
+        "flagged_by": [
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DID error message reworded without reason in a refactor PR",
+        "detail": "did_wallet.current_p2_puzzle_hash raises 'Invalid DID inner puzzle.' where the original code said 'Invalid inner DID puzzle.' Harmless but a gratuitous prose churn in a refactor \u2014 revert the wording or leave the original alone.",
+        "file": "chia/wallet/did_wallet/did_wallet.py",
+        "lines": "898-906",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the direction is right: extracting sign_message/verify_signature into chia/wallet/util/signing.py and replacing per-wallet sign_message methods with current_p2_puzzle_hash helpers is the correct shape. But the extraction is mechanical rather than decomposed \u2014 the mode-to-bytes dispatch is duplicated as parallel if/elif ladders in sign_message and verify_signature, signing_mode_enum exists three times in the same module with a silent fallthrough over a 2x2 truth table, and verify_signature imports an RPC wire DTO (VerifySignatureResponse), coupling the new \"library\" back to wallet_request_types. Secondary residue includes a stateless convert_secret_key_to_synthetic placed on Wallet as an instance method, a stale ':param request:' docstring, a misleading hex_message variable name, and a gratuitously renamed DID error string. The new tests close a real gap but under-constrain behavior: one discards the verify result, the other asserts a signature against its own returned pubkey (tautological) and never pins signing_mode or the expected synthetic pubkey. Fix the dedup, make signing_mode_enum total, tighten the tests, and the patch lands."
+  },
+  "raw": ""
+}

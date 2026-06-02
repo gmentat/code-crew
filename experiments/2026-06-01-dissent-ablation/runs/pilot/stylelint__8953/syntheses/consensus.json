@@ -1,0 +1,85 @@
+{
+  "task_id": "stylelint__8953",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Normalization only handles ClassName; IDs, attributes, type, and pseudo selectors with escapes still false-negative",
+        "detail": "The bug class is CSS escape equivalence, which applies to every identifier the selector grammar accepts: IDs (`#u-m\\+` vs `#u-m\\00002b`), attribute values (`[data-x=\\+]`), type/tag selectors, and pseudo-class arguments. Gating `normalizeNodeEscaping` on `parser.isClassName(node)` fixes one shape of the data and leaves the rest broken, producing the same false-negative class of bug elsewhere. Either widen the helper to every node kind whose value getter/setter performs the same canonicalization, or narrow the function's name/docstring and explicitly document why ClassName is the only case handled.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "97-105",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Correctness relies on undocumented getter/setter side effect of postcss-selector-parser with no pinning test",
+        "detail": "The mechanism `node.value = node.value` works only because postcss-selector-parser's ClassName setter happens to canonicalize escapes via its escape routine. That behavior is a third-party implementation detail, not part of any published Node contract, and is cited only via a permalinked snapshot. If the library ever refactors the setter into a plain field, this normalization silently becomes a no-op and the bug returns with no test signal. Add a direct unit test on `normalizeNodeEscaping` that pins the assumption (canonical/idempotent across the escape grammar), and state the precondition/postcondition explicitly in JSDoc, ideally pinning the verified parser version.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "88-105",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`node.value = node.value` is load-bearing cleverness; wrap in a named helper and strengthen the comment",
+        "detail": "The self-assignment reads as a no-op to any reader who has not internalized the library's getter/setter contract, and required disabling a linter to permit. Extract a tiny named helper such as `renormalizeEscaping(node)` (or a pure `normalizeEscaping(string) -> string`) so the call site reads as intent rather than a self-assignment lint-bypass. The accompanying comment should also record what canonical form the setter chooses, why the `raws.value` guard is preserved, and the postcss-selector-parser version against which the behavior was verified.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "89-106",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`raws.value` early-return is an unmeasured optimization that couples to undocumented internal state",
+        "detail": "The guard `if (!node.raws?.value) return;` reaches past the typed API (requiring `@ts-expect-error`) into a private field to skip the self-assign. It is load-bearing for correctness reasoning \u2014 it assumes a node with no `raws.value` is already canonical \u2014 and that assumption is asserted by comment rather than test. Either justify the gate with a measurement and pin the invariant with a test (constructing both shapes and asserting canonical equality), or drop the gate and let the setter run unconditionally.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "100-104",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests prove two members of the equivalence class but not the class, and miss non-ClassName identifiers",
+        "detail": "Reject cases cover only `.u-m\\xx` class duplicates. Add: uppercase vs lowercase hex (`\\2B` vs `\\2b`), space-terminated hex (`\\2b ` vs `\\2b`), a non-ASCII codepoint, negative tests confirming `.u-m\\+` and `.u-n\\+` remain distinct, and explicit accept-or-reject cases for ID, attribute, type, and pseudo-argument selectors that document the intended scope. All new tests go through the rule; add at least one direct unit test on `normalizeNodeEscaping` so a regression that doesn't surface in no-duplicate-selectors still fails.",
+        "file": "lib/rules/no-duplicate-selectors/__tests__/index.mjs",
+        "lines": "90-115",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the patch correctly fixes the reported case using a clever, minimal mechanism \u2014 letting postcss-selector-parser's ClassName setter canonicalize escapes via self-assignment \u2014 but considers it under-scoped and under-specified. The dominant concern (unanimous) is that CSS escape equivalence applies to every identifier kind (IDs, attributes, type selectors, pseudo arguments), yet the helper is gated on `isClassName`, leaving the same bug class open elsewhere. Correctness also rests on an undocumented third-party getter/setter behavior with no direct unit test pinning it, and the `raws.value` early-return is an unmeasured optimization reaching past the typed API. Verdict: needs work \u2014 widen the normalization (or narrow the name and document the gap), extract a named helper so the side effect is legible without lint suppression, and add direct unit tests over the escape grammar plus negative and non-ClassName cases."
+  },
+  "raw": ""
+}

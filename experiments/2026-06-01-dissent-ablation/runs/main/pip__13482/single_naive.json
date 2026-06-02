@@ -1,0 +1,111 @@
+{
+  "task_id": "pip__13482",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "download_info hash may be missing for installed/reported wheels when link lacks a hash fragment",
+        "detail": "In prepare.py, the new path sets req.download_info = direct_url_from_link(req.link, req.source_dir) during metadata-only fetch. Later when _prepare_linked_requirement runs (via prepare_linked_requirements_more -> _complete_partial_requirements), the guard `if req.download_info is None` at line 634 prevents the FIXME hash-from-downloaded-file fallback (lines 643-651) from running. Previously, that fallback populated info.hash for wheels whose links had no hash fragment. With PEP-658 indexes the link usually carries a hash, but for indexes that omit it, --report / RECORD / direct_url.json will silently lose the hash field that prior behavior provided.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No new tests added for the dry-run / pip lock no-download behavior",
+        "detail": "The PR closes #12603 and changes when and where downloads occur across install, download, wheel, and lock commands, plus changes the resolver contract (it no longer ensures full preparation). Yet the diff contains zero new or updated tests. A regression test that runs `pip install --dry-run` against a fixture index with PEP-658 metadata and asserts no full wheel is fetched (and the inverse: `pip install` without --dry-run still downloads) is the load-bearing assertion of this change and should not be left to manual verification.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Resolver contract change is undocumented and may affect external callers",
+        "detail": "resolvelib/resolver.py previously guaranteed that after resolve() every requirement had `prepared = True`, `needs_more_preparation = False`, and was fully downloaded. The diff removes this without updating the docstring/contract on BaseResolver.resolve() or noting it in news. Any non-vendored caller (e.g. pip-tools, build, custom internal tools using pip._internal) that relied on the old guarantee will silently get metadata-only requirements with no source/wheel on disk. At minimum the resolver method needs a docstring update describing the new postcondition; ideally a note in the news fragment.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead conditional: req.download_info is always None on the metadata-only branch",
+        "detail": "The new code wraps `req.download_info = direct_url_from_link(...)` in `if req.download_info is None`. Control only reaches this branch when `file_path is None` and `_fetch_metadata_only` succeeded \u2014 neither of those paths sets download_info, and InstallRequirement.__init__ defaults it to None. The guard adds no protection and obscures intent. Either drop the conditional or comment why it exists (e.g. defensive for future caller re-entry).",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "536-539",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "direct_url_from_link receives req.source_dir which is None at this point",
+        "detail": "`_ensure_link_req_src_dir` only runs inside `_prepare_linked_requirement`, so when the metadata-only branch returns early, `req.source_dir` is still None. For PEP-658-capable wheels this is harmless because direct_url_from_link only consults source_dir for VCS and existing-dir links, and PEP-658 metadata is wheel-only. However, the call reads as if it expected a real source_dir; a short comment (`source_dir is unused for wheel links`) or passing None explicitly would prevent a future maintainer from copy-pasting this into a code path where it would assert.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "537-539",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist / get_dist precedence ignores metadata_directory once a dist is cached",
+        "detail": "get_dist now returns `self._distribution` whenever set, even if metadata_directory was later populated by a real build. In current callers this is fine because nothing populates both, but the new precedence is implicit. A one-line docstring on set_dist/get_dist (`set_dist takes precedence over metadata_directory and local_file_path`) would make the invariant explicit and prevent confusion when these methods are used elsewhere.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-617",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "News fragment is incomplete relative to scope",
+        "detail": "news/12603.feature.rst only mentions `pip lock` and `pip install --dry-run`. The change actually also moves the download point for `pip install`, `pip download`, and `pip wheel` (from inside the resolver to after it), which is a user-visible reordering of output and error timing. The news entry should at minimum mention that errors that previously surfaced inside the resolver may now surface after resolution.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Is the missing-hash regression real or theoretical",
+        "positions": [
+          {
+            "persona": "formal_correctness",
+            "position": "It is a real semantic change. The previous code guaranteed download_info.info.hash was populated for any non-cached wheel after preparation. The new code does not. Any consumer of the --report output or RECORD that depends on that hash being present is now broken for indexes that omit hash fragments from wheel URLs."
+          },
+          {
+            "persona": "pragmatic_shipper",
+            "position": "All modern PyPI-style indexes that serve PEP-658 metadata also serve hash fragments on the wheel links (that is the whole point of the hash-in-URL convention). In practice the hash is never missing. Ship it and address if a real index reports breakage."
+          }
+        ]
+      },
+      {
+        "topic": "Ordering of prepare_linked_requirements_more in download/wheel commands",
+        "positions": [
+          {
+            "persona": "simplicity",
+            "position": "Moving prepare_linked_requirements_more before the iteration that saves files is correct and necessary \u2014 save_linked_requirement reads req.local_file_path which is only populated by the deferred download. The previous ordering was a latent bug now that the resolver no longer pre-prepares."
+          },
+          {
+            "persona": "abstraction_discipline",
+            "position": "Three commands (install, download, wheel) now each call prepare_linked_requirements_more at slightly different points in slightly different ways. This is the kind of cross-command duplication that the original resolver-side call was hiding. Consider a small helper or a shared step in cmdoptions/req_command to keep the three command flows aligned."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR correctly addresses #12603: by removing the resolver's automatic call to prepare_linked_requirements_more and moving it into each command after the dry-run/report exit, pip install --dry-run and pip lock can now finish using only PEP-658 metadata. The new set_dist/get_dist on InstallRequirement and the synthetic download_info during metadata-only fetch are reasonable mechanisms for keeping --report and pip lock working without forcing downloads. The main concerns are (1) a subtle behavioral regression where download_info may now lack a computed hash for wheels whose links carry no hash fragment, because the new code sets download_info early and short-circuits the FIXME hash-from-file fallback in _prepare_linked_requirement; (2) the absence of any new test for the central claim of the PR (no wheels downloaded during --dry-run / pip lock); and (3) an undocumented contract change on Resolver.resolve(), which no longer guarantees full preparation. Several smaller readability issues (dead conditional, source_dir passed when unused, get_dist precedence) should be cleaned up or commented before merge."
+  },
+  "raw": ""
+}

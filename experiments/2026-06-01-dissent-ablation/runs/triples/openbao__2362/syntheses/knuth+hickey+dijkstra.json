@@ -1,0 +1,78 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "knuth+hickey+dijkstra",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub returning false but is wired into security-sensitive paths",
+        "detail": "Core.NamespaceSealed unconditionally returns false with a TODO, yet callers in ListAllNamespaces, loadLoginMFAConfigs, countActiveTokens, and metrics now rely on it as if it reported truth. A stub that lies is worse than no stub: every caller encodes a falsehood as fact. Return ErrNotImplemented, fail closed, or do not introduce the method until SealManager lands.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Root ACL fast-path depends on unstated HasParent semantics governing the authorization boundary",
+        "detail": "AllowOperation gates RootPrivs on `!ns.HasParent(a.root)` but reflexivity, root-namespace handling, and Path canonicalization are nowhere stated or proved. If HasParent is strict-ancestor, a root-namespace root token is silently demoted. The invariant 'root token authorizes self and descendants' must be written next to the code and exercised by tests covering self, child, grandchild, sibling, and root cases.",
+        "file": "vault/acl.go",
+        "lines": "342-361",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ErrNamespaceSealed dispatch uses substring matching of error text instead of errors.Is",
+        "detail": "AdjustErrorStatusCode calls errwrap.Contains(err, consts.ErrNamespaceSealed.Error()), matching on the literal string 'namespace is sealed'. Any wrapped error whose message embeds that phrase is coerced to 503, and translated or restructured variants are missed. Treat errors as values: use errors.Is against the sentinel.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace guard in NewACL widens trust boundary without stated precondition",
+        "detail": "Previously a root policy could only be constructed in the root namespace; now any namespace on ctx is captured into a.root and the resulting ACL self-authorizes that subtree via the HasParent fast-path. The precondition on NewACL callers is undocumented, shifting an unstated proof obligation to every call site. State the invariant or restore the guard.",
+        "file": "vault/acl.go",
+        "lines": "103-109",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL.root pointer complects 'is root policy' with 'owning namespace' in one overloaded field",
+        "detail": "Using *namespace.Namespace to encode both a boolean (root or not) and an identity (which namespace owns it) is place-oriented and hides the actual value, a (bool, owner) pair. A small struct or explicit RootScope value separates the concerns and makes read sites honest about what they are testing.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 104-108",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength formula `TokenLen + \".\"[1] + nsID` is malformed and obscurantist",
+        "detail": "Indexing `\".\"[1]` is out of bounds for a one-byte string and encodes the separator length via cleverness rather than intent. Use a named constant like SeparatorLen = 1 or len(\".\") and state the formula in words. This is the kind of opaque arithmetic that costs reader-seconds and gains nothing.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a refusal: this PR widens the ACL trust boundary and wires a permanently-false NamespaceSealed stub into security-sensitive list paths without stating the new invariants. The root fast-path hinges on HasParent semantics that are nowhere pinned down, and the sealed-error mapping uses substring matching where errors.Is is the structured form. The NewACL guard removal shifts an undocumented proof obligation to every caller, and ACL.root overloads one pointer with two concerns. Tests were updated to pass but the load-bearing invariants are not established. The NamespaceView().SubView() decomposition is a real win and should be kept; the rest needs invariants written next to the code before merging."
+  }
+}

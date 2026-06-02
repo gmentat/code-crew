@@ -1,0 +1,104 @@
+{
+  "persona": "pike",
+  "task_id": "dask__12106",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning is wrong control flow; warnings should be warned, not raised",
+        "detail": "The code does `raise PerformanceWarning(msg)` which turns a warning class into a hard exception. The test confirms this with `pytest.raises(PerformanceWarning, ...)`. PerformanceWarning is a Warning subclass and the convention (and the rest of dask) is `warnings.warn(msg, PerformanceWarning)`. Raising it breaks the meaning of the type and silently changes the API contract; users with a too-small chunk-size config will get an exception instead of a warning plus a safe write. Pick one: either warn and continue with shard-aligned chunks, or raise a real Exception with a clear name. Don't conflate them.",
+        "file": "dask/array/core.py",
+        "lines": "3909-3923",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unreachable break after raise; dead code reveals confused intent",
+        "detail": "Inside the `if not nominal_dask_chunk_size % zw == 0:` block, `raise PerformanceWarning(msg)` is immediately followed by `break`. The break can never execute. This is a smell that the author was uncertain whether to raise, warn, or just continue, and the data structure of the check (per-axis loop, single global decision) was never nailed down. Decide the shape: is this a per-axis check that aggregates, or a fail-fast on first bad axis? Then write it that way.",
+        "file": "dask/array/core.py",
+        "lines": "3922-3923",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "safe_chunk_size computation uses prod of chunks tuple, not bytes-of-one-shard; likely wrong number in the message",
+        "detail": "`safe_chunk_size = np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)`. `zarr_write_chunks` is a tuple of tuples returned by `_get_zarr_write_chunks` shaped for normalize_chunks (e.g. `((12,), (12,), ...)` style), not a flat shape tuple. np.prod over a tuple-of-tuples will either misbehave or produce a value with the wrong meaning. The number printed to the user as 'at least N bytes' will be incorrect or confusing. Compute it from the actual shard shape (the scalar per-axis values) times itemsize, and add a test that asserts the exact number in the message for a known shape.",
+        "file": "dask/array/core.py",
+        "lines": "3913-3915",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-axis divisibility check uses dw[0] only; assumes uniform chunks, silently wrong on uneven tails",
+        "detail": "`nominal_dask_chunk_size = dw[0]` looks only at the first chunk in the axis. After normalize_chunks with auto, the last chunk on an axis is commonly a smaller remainder. Checking only dw[0] % zw is a half-truth: dw[0] can be aligned while a later element isn't, or vice versa for tiny arrays. The right data structure here is 'is every interior chunk a multiple of zw' or equivalently 'is the nominal/auto chunk a multiple of zw'. Make the predicate match the data shape; right now the code is fighting the tuple.",
+        "file": "dask/array/core.py",
+        "lines": "3908-3911",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The whole block wants to be a small filter: (zarr_write_chunks, dask_write_chunks) -> aligned_chunks_or_error",
+        "detail": "COULD-BE-A-FILTER. The validation/alignment logic is woven into to_zarr inline, with an unreachable break and ambiguous raise-vs-warn semantics. Lift it into a single function `_align_dask_chunks_to_shards(dask_chunks, zarr_write_chunks, dtype) -> tuple[chunks, Optional[Warning]]` (or that raises a named exception). to_zarr then becomes: compute zarr_write_chunks, ask the filter for aligned dask chunks, rechunk. The data flow becomes obvious and the test surface shrinks to one function instead of one end-to-end path per region variant.",
+        "file": "dask/array/core.py",
+        "lines": "3892-3924",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Error message tells user to set chunk-size to shard bytes, but doesn't explain that the global config is the source of the conflict",
+        "detail": "The PR description explicitly notes the misalignment only happens when `array.chunk-size` is smaller than the shard. The message hints at this but buries the lede. Lead with the cause ('Your dask config array.chunk-size of X bytes is smaller than the Zarr shard size of Y bytes'), then the remedy. Right now users will read the message, set the suggested number, and not understand why.",
+        "file": "dask/array/core.py",
+        "lines": "3915-3921",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`if not nominal_dask_chunk_size % zw == 0` reads worse than `if nominal_dask_chunk_size % zw != 0`",
+        "detail": "Operator precedence makes this parse correctly but it forces the reader to think about it. The simpler version is one token shorter and unambiguous. Small thing, but this is a 30-line block doing one job; make every line trivial to read.",
+        "file": "dask/array/core.py",
+        "lines": "3911",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`if len(dw) >= 1` is effectively always true for a non-empty array; dead guard",
+        "detail": "normalize_chunks returns at least one chunk per axis for any non-degenerate shape. The guard either protects nothing or protects a zero-shape case that the rest of the function doesn't handle anyway. Drop it or replace with an explicit precondition.",
+        "file": "dask/array/core.py",
+        "lines": "3909",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts existence of warning behavior via pytest.raises, codifying the wrong contract",
+        "detail": "`test_zarr_risky_shards_warns` uses `pytest.raises(PerformanceWarning, ...)`. If the raise-vs-warn issue (P0 above) is fixed, this test will need to switch to `pytest.warns`. Worth fixing together so the test name ('warns') and assertion ('raises') stop disagreeing.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5208-5213",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The data structures and overall direction are right: use shard shape as previous_chunks, let auto pick a shard-aligned multiple, validate alignment, fall through cleanly for the region path. The new test parametrization is a real improvement. But the validation block is muddled: it raises a class named PerformanceWarning (should be warned, or renamed to a real exception), has an unreachable break after the raise, checks only dw[0] for divisibility, and computes safe_chunk_size from a tuple-of-tuples in a way that probably prints the wrong number. Lift the alignment logic into one small filter function \u2014 (dask_chunks, zarr_write_chunks, dtype) in, (aligned_chunks, optional_warning_or_raise) out \u2014 and the to_zarr call site becomes three obvious lines. Fix the raise/warn contract before merge; the rest is cleanup."
+  },
+  "raw": ""
+}

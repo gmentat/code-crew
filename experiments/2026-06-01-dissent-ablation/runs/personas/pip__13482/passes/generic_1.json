@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "pip__13482",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer marks requirements as prepared, breaking commands that don't call prepare_linked_requirements_more",
+        "detail": "The resolver removed `req.prepared = True` and `req.needs_more_preparation = False`. Only install/download/wheel commands were updated to call `prepare_linked_requirements_more`. Any other caller of `resolver.resolve()` (e.g., `pip lock`, `--report`, third-party use) will get requirements with `prepared=False` and may re-prepare or fail downstream invariants.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`pip install --dry-run` still calls prepare_linked_requirements_more, defeating the stated purpose",
+        "detail": "install.py unconditionally calls `preparer.prepare_linked_requirements_more(...)` before checking dry-run. The PR title says `--dry-run` should avoid downloading full wheels, but this call triggers the very downloads the PR claims to prevent. The call must be guarded by `not options.dry_run` (and the dry-run early-return moved above it).",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-421",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info set from source_dir which is None for metadata-only fetches",
+        "detail": "In `prepare_linked_requirement`, when metadata-only succeeds the requirement has not been unpacked, so `req.source_dir` is typically None. Passing it to `direct_url_from_link(req.link, req.source_dir)` may produce a DirectUrl missing subdirectory/hash info that the full-download path would have included, degrading `--report`/`pip lock` output fidelity.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "533-540",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cached `_distribution` from metadata-only fetch is returned even after full download",
+        "detail": "`set_dist()` is called with the metadata-only distribution. After `prepare_linked_requirements_more` later downloads the real wheel, `get_dist()` still returns the cached metadata-only `BaseDistribution` because the early `if self._distribution is not None` branch wins over `metadata_directory`/`local_file_path`. The cache needs to be invalidated (or refreshed) once full preparation completes.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-619",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No tests added for the new dry-run / metadata-only behavior",
+        "detail": "The PR changes ordering in three commands, mutates resolver behavior, and adds dist caching, but no functional or unit tests are included. A regression test asserting `pip install --dry-run` does not fetch the wheel body (e.g., via the existing PEP 658 test fixtures) is needed to lock in the fix and prevent re-regression.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "News entry mentions `pip lock` and `--dry-run` but not other affected commands",
+        "detail": "The news fragment lists `pip lock` and `pip install --dry-run`, but the resolver change also affects any caller relying on `resolver.resolve()` setting `prepared`. Consider clarifying scope or noting the behavioral change for API consumers, since this is a semi-public surface used by third parties.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR moves `prepare_linked_requirements_more` out of the resolver into individual commands and caches metadata-only distributions to skip full downloads. The core idea is sound, but the dry-run path in install.py still calls `prepare_linked_requirements_more` before the dry-run early return \u2014 directly contradicting the PR's stated goal. The resolver also no longer sets `prepared=True`, silently breaking any code path (including `pip lock` and `--report`) that doesn't call the new preparation step. Distribution caching can also become stale after a later full download, and no tests pin down the new behavior."
+  }
+}

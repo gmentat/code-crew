@@ -1,0 +1,174 @@
+{
+  "task_id": "vitest__9521",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Explicit `coverage.changed: false` is silently overridden by `ctx.config.changed` fallback in `onTestRunStart`",
+        "detail": "In `resolveConfig.ts`, the fallback only runs when `coverage.changed === undefined`, so an explicit `false` is preserved at config time. But in `BaseCoverageProvider.onTestRunStart`, the logic is `if (this.options.changed) { ... } else if (this.ctx.config.changed) { this.changedFiles = this.ctx.config.related }`. When the user sets `coverage.changed: false` to opt out, the `else if` still fires and re-enables filtering by `related` files. This directly contradicts the test `coverage.changed inherits from test.changed but can be overridden` and is a silent semantic bug.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Path-format mismatch between `changedFiles` from git and the `filename` compared in `isIncluded`",
+        "detail": "`VitestGit.findChangedFiles` returns repo-relative (or absolute) paths from git. In `isIncluded`, `filename` is `slash(cleanUrl(_filename))` which is typically absolute when callers pass absolute paths. The membership check `this.changedFiles.includes(filename)` will therefore mismatch in either direction depending on caller, silently producing empty coverage. The same array is also used in `getUntestedFiles` where `includedFiles` are already root-relative \u2014 those two callers cannot both be correct with a single un-normalized array.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-182, 197-202, 332-345",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`onTestRunStart` is not called in every code path that exercises `isIncluded`, leading to stale or wrong filtering",
+        "detail": "The hook is wired into `runFiles`, the no-spec path, and one branch of `core.ts` at line 607, but coverage providers may invoke `isIncluded` during earlier glob/discovery (e.g., reporter setup, untested-files reporting, or watch-mode reruns). Because `globCache` is only cleared inside `onTestRunStart` when `changedFiles` is set, any `isIncluded` call before the hook fires populates the cache with unfiltered results and later filtered calls return stale `true`/`false`. Watch mode also reuses the same provider instance across runs; the cache is not cleared when `changedFiles` is the same reference, so a re-run after a git change keeps stale membership.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`findChangedFiles` returning `null` silently disables the filter instead of erroring",
+        "detail": "`this.changedFiles = changedFiles ?? undefined` means when git fails (not a repo, bad ref, detached worktree), the user's `coverage.changed: 'origin/main'` becomes a no-op and full coverage is reported. CI pipelines relying on this for PR gating will see passing/over-inclusive coverage instead of a clear failure. At minimum this should warn; ideally it should throw when `coverage.changed` was explicitly set.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "334-340",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform accepts only `'true'`/`'false'`/`'yes'`/`'no'` but vitest's standard boolean coercion differs",
+        "detail": "The custom `transform` hardcodes string-to-boolean coercion, but other boolean-or-string options in `cli-config.ts` either use a shared helper or rely on the framework. Inconsistency leads to surprising parses (e.g., `--coverage.changed` with no value becomes the string `'true'` then `true`, but `--no-coverage.changed` is not handled here). Consider mirroring how `--changed` itself is parsed so behavior matches user expectation.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Tests do not cover the `coverage.changed: true` boolean case, which is documented as accepted",
+        "detail": "Docs say `Type: boolean | string` and `true` means staged+unstaged changes. The added tests (`test/coverage-test/test/changed.test.ts`, `test/config/test/public.test.ts`) only exercise string values like `'HEAD'` and `false`. The boolean-`true` path flows differently through `VitestGit.findChangedFiles({ changedSince: true })`, and there is no test asserting that path returns the working tree's modified set.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "71-167",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`globCache` is populated with results that depend on `changedFiles`, but cache key is just `filename`",
+        "detail": "Before this PR, `isIncluded` was a pure function of `(filename, options.include, options.exclude)`. Now its result also depends on `this.changedFiles`. The cache is keyed only by `filename`, so if `changedFiles` changes between runs (watch mode rerun after edits) without `onTestRunStart` being invoked or clearing the cache, stale `true`/`false` values leak. Clearing only inside the `if (this.changedFiles)` branch of `onTestRunStart` means transitions from `changed \u2192 not changed` do not clear it either.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-181, 343-344",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior change in `isIncluded`: `cleanUrl` applied to all callers, not just those passing query params",
+        "detail": "Switching `slash(_filename)` to `slash(cleanUrl(_filename))` is independent of the `coverage.changed` feature and changes filename normalization for every existing caller (`getUntestedFiles`, post-test exclusions, v8/istanbul providers). If any caller was previously relying on the raw filename (e.g., a path that legitimately contains `?` or `#`), this is a silent behavior change. Should be called out in the PR description and ideally split into its own commit with a regression test.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "File mode of `test/coverage-test/test/changed.test.ts` changed from 644 to 755",
+        "detail": "The diff header shows `old mode 100644` \u2192 `new mode 100755` on a `.ts` file with no shebang. This is almost certainly an accidental `chmod +x`. Strip it before merge to keep the tree clean.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`onTestRunStart` is a public method on `CoverageProvider` but has no docs on ordering vs `onAfterSuiteRun`",
+        "detail": "The interface in `types/coverage.ts` adds `onTestRunStart?: () => void | Promise<void>` with the one-line comment 'Callback called when test run starts'. Third-party custom providers (`CustomProviderOptions` now includes `'changed'`) will need to know whether this fires before or after `_testRun.start`, whether it can be awaited safely, and whether it is called in watch reruns. Add ordering guarantees to the interface JSDoc.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "31-33",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test `{ changed: \"v0.0.1\", coverage.changed: \"HEAD\" }` depends on a real external git tag",
+        "detail": "The fixture asserts behavior using `v0.0.1` as 'an actual git tag in Vitest repository'. This couples a unit-ish coverage test to repo history and will break for shallow clones or forks that don't fetch tags. Prefer a tag created in-test or a documented requirement to fetch tags in CI.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "135-167",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`getUntestedFiles` now uses `this.changedFiles` directly instead of `(this.ctx.config.related || [])`",
+        "detail": "Previously the empty-array fallback `|| []` defended against `related` being undefined. The new code does `this.changedFiles.filter(...)` inside `if (this.changedFiles)`, which is safe at the type level, but if `onTestRunStart` ran and `changedFiles` is `[]` (no changes detected), every untested file is filtered out. This is probably the intended semantic but worth an explicit comment because the prior behavior could differ when `related` was `null`/`undefined`.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "200-202",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "How strictly to fail when `coverage.changed` is set but git cannot resolve changes",
+        "positions": [
+          {
+            "persona": "pragmatic-shippability",
+            "position": "Silently falling back to full coverage is safer for diverse CI environments where git may be unavailable; warn-and-continue avoids breaking users."
+          },
+          {
+            "persona": "formal-correctness",
+            "position": "An explicit `coverage.changed: 'origin/main'` is a contract; silently ignoring it changes coverage gates in CI without anyone noticing. Throw or at minimum emit a non-zero exit signal."
+          }
+        ]
+      },
+      {
+        "topic": "Whether `cleanUrl` belongs in `isIncluded`",
+        "positions": [
+          {
+            "persona": "abstraction-discipline",
+            "position": "Normalizing query params in `isIncluded` is a reasonable invariant \u2014 coverage should not depend on transformer query strings. Keep it."
+          },
+          {
+            "persona": "minimal-diff",
+            "position": "This is an orthogonal behavior change bundled into a feature PR. Split it: a separate fix PR with a regression test for query-param-bearing filenames is more reviewable and bisectable."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the `else if (this.ctx.config.changed)` fallback should exist at all in `onTestRunStart`",
+        "positions": [
+          {
+            "persona": "data-structure-soundness",
+            "position": "Remove the runtime fallback entirely. `resolveConfig` already copies `changed` into `coverage.changed`; relying on a single source of truth makes the `false`-override case work correctly."
+          },
+          {
+            "persona": "defensive-coding",
+            "position": "Keep the fallback as belt-and-suspenders in case `resolveConfig` is bypassed (programmatic API users constructing config directly), but gate it on `this.options.changed === undefined` rather than truthiness."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR delivers a genuinely useful feature but ships with three merge-blocking correctness concerns: (1) an explicit `coverage.changed: false` is silently overridden by the `ctx.config.changed` fallback in `onTestRunStart`, directly contradicting the PR's own test intent; (2) `changedFiles` from git is compared against a normalized absolute-ish `filename` without path normalization, risking silent empty coverage; and (3) `onTestRunStart` ordering plus the `globCache` invalidation strategy leaves stale cache entries across watch reruns and early `isIncluded` calls. Several P1 issues \u2014 silent fallback when git fails, ad-hoc CLI boolean coercion, missing `true` test coverage, and an unannounced `cleanUrl` semantics change \u2014 should be resolved before merge but are not blockers. Nits include an accidental 755 file mode, an external-tag dependency in tests, and missing JSDoc on the new public `onTestRunStart` hook. Recommend addressing the P0s, splitting out the `cleanUrl` change, and adding tests for the boolean and git-failure paths."
+  },
+  "raw": ""
+}

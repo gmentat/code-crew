@@ -1,0 +1,141 @@
+{
+  "task_id": "lucene__15223",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Removing @Deprecated annotation when moving to backwards_codecs",
+        "positions": [
+          {
+            "persona": "Deprecation discipline",
+            "position": "The classes had @Deprecated removed when moved to backward_codecs package. This loses the compile-time warning for any remaining downstream users who upgrade and depend on the relocated classes. The @Deprecated should be retained (or replaced with package-level deprecation) since these formats are read-only legacy."
+          },
+          {
+            "persona": "Pragmatic conventions",
+            "position": "Lucene convention treats placement in backward_codecs as the deprecation signal \u2014 the package itself communicates 'legacy, read-only.' The class-level @Deprecated would be redundant noise and the visibility downgrade (public->package-private NAME) plus UnsupportedOperationException on write achieves the same effect."
+          }
+        ]
+      },
+      {
+        "topic": "Visibility downgrade of public API constants and constructor",
+        "positions": [
+          {
+            "persona": "Strict API stability",
+            "position": "Constants like NAME, QUANTIZED_VECTOR_COMPONENT and the Lucene99ScalarQuantizedVectorsReader public constructor were silently downgraded to package-private. Any external users (e.g., Elasticsearch, OpenSearch, custom codec wrappers) that referenced these by qualified name will now fail to compile. This is a binary/source incompatible break that should be called out in CHANGES.txt under 'API Changes' or 'Backwards Incompatible'."
+          },
+          {
+            "persona": "Internal-only realism",
+            "position": "These constants were always implementation details of the format wire identity. Moving them into backward_codecs and locking down visibility is the right cleanup; downstream users coupling to internal format strings was unsupported. CHANGES.txt already calls out the format move."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "fieldsWriter throws UnsupportedOperationException but format remains constructible with full ctor surface",
+        "detail": "Lucene99HnswScalarQuantizedVectorsFormat and Lucene99ScalarQuantizedVectorsFormat keep their full public constructors (including the multi-arg ones taking maxConn, beamWidth, numMergeWorkers, mergeExec, etc.) but fieldsWriter now throws UnsupportedOperationException. This is a runtime-only failure mode: existing user code that constructs the format for writing compiles and runs until it actually tries to index, at which point it fails. Consider deprecating or removing the write-capable constructors (keep only a no-arg/read ctor) or fail-fast in the constructor when used outside read-only contexts. At minimum the javadoc must clearly state this format is read-only.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "126-138",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "@Deprecated annotation removed from legacy formats",
+        "detail": "Both Lucene99HnswScalarQuantizedVectorsFormat and Lucene99ScalarQuantizedVectorsFormat had their @Deprecated annotation removed during the move. Since these are explicitly legacy read-only formats (per the new fieldsWriter exception), they should remain @Deprecated to give downstream users a compile-time signal to migrate to Lucene104HnswScalarQuantizedVectorsFormat. Other classes in backward_codecs typically retain @Deprecated.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "45-47",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Dead fields numMergeWorkers and mergeExec parameters retained in public constructors",
+        "detail": "The Lucene99HnswScalarQuantizedVectorsFormat constructors still accept numMergeWorkers and mergeExec parameters and validate them (throwing IllegalArgumentException when inconsistent), but the corresponding fields were removed and those values are never used since fieldsWriter throws. The parameter validation logic at the top of the constructor remains useful for API consistency, but the dead parameters now silently affect nothing and may confuse callers. Document that they are ignored, or remove these constructors.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "120-132",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public API surface reduced silently (NAME, QUANTIZED_VECTOR_COMPONENT, reader ctor) without CHANGES.txt note",
+        "detail": "Several previously public symbols are downgraded to package-private: NAME and QUANTIZED_VECTOR_COMPONENT constants, calculateDefaultConfidenceInterval, the Lucene99ScalarQuantizedVectorsReader class and its constructor. Downstream code (Elasticsearch, OpenSearch and other Lucene consumers) frequently references Lucene99ScalarQuantizedVectorsReader by name. This is a source/binary incompatible change that warrants an entry under 'Backwards Incompatible' or 'API Changes' in CHANGES.txt, not just under 'New Features'.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsReader.java",
+        "lines": "60-71",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DIRECT_MONOTONIC_BLOCK_SHIFT now duplicated/shadowed across packages",
+        "detail": "Lucene99ScalarQuantizedVectorsFormat (in backward_codecs) now declares its own DIRECT_MONOTONIC_BLOCK_SHIFT=16 instead of referencing Lucene99FlatVectorsFormat.DIRECT_MONOTONIC_BLOCK_SHIFT as before. The writer static import was updated accordingly. If the two constants drift (someone changes one), the legacy reader/writer could produce subtly incompatible files vs the historical wire format. Either keep the reference to the original constant in core, or add a comment binding them together with a static assertion.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsFormat.java",
+        "lines": "39-40",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Protected fields downgraded to package-private may break subclasses",
+        "detail": "OffHeapQuantizedByteVectorValues had its 14 protected fields changed to package-private (default). The class itself is still public abstract and has a public subclass DenseOffHeapVectorValues. Any external code that extended this abstract class to provide a custom quantized vector view will lose access to all the shared state. Since this is in backward_codecs and abstract subclassing was always experimental, this is likely intentional, but worth noting in CHANGES.txt.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/OffHeapQuantizedByteVectorValues.java",
+        "lines": "41-53",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test format Lucene99RWScalarQuantizedVectorsFormat has redundant no-arg constructor",
+        "detail": "The new Lucene99RWScalarQuantizedVectorsFormat declares both a protected no-arg ctor that calls super() and a package-private 3-arg ctor. The no-arg ctor is unused inside this file and adds little value; consider removing or documenting why it's needed for SPI/reflective instantiation.",
+        "file": "lucene/backward-codecs/src/test/org/apache/lucene/backward_codecs/lucene99/Lucene99RWScalarQuantizedVectorsFormat.java",
+        "lines": "23-30",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Lucene99RWV1HnswScalarQuantizationVectorsFormat hardcodes DEFAULT_MAX_CONN/BEAM_WIDTH in fieldsWriter",
+        "detail": "The new V1 test format's fieldsWriter passes Lucene99HnswVectorsFormat.DEFAULT_MAX_CONN and DEFAULT_BEAM_WIDTH instead of the maxConn/beamWidth fields from the superclass. This means tests that construct this with custom maxConn (e.g., the getKnnFormat(int bits) test uses Lucene99HnswVectorsFormat.DEFAULT_MAX_CONN already, so it happens to work, but testQuantizationScoringEdgeCase passes maxConn=16 which would be silently ignored). The hardcoded defaults can mask test intent \u2014 pass the superclass fields instead.",
+        "file": "lucene/backward-codecs/src/test/org/apache/lucene/backward_codecs/lucene99/Lucene99RWV1HnswScalarQuantizationVectorsFormat.java",
+        "lines": "53-60",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CHANGES.txt entry placed under New Features rather than API Changes",
+        "detail": "The combined GITHUB#15169, GITHUB#15223 entry under 'New Features' describes both the new format and the deprecation/move of the old one. The move-to-backward_codecs portion is more naturally an 'API Changes' or 'Backwards Incompatible' entry \u2014 downstream code that imported org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat will break. Consider splitting the entry so users notice the migration requirement.",
+        "file": "lucene/CHANGES.txt",
+        "lines": "143-145",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reader file replaces relative-package static imports with cross-package import that may not match SPI order",
+        "detail": "Lucene99ScalarQuantizedVectorsReader now does `import static org.apache.lucene.backward_codecs.lucene99.Lucene99ScalarQuantizedVectorsFormat.VECTOR_DATA_EXTENSION` while still using `org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readSimilarityFunction` and `.readVectorEncoding`. This couples the backward_codecs reader to current-version code (Lucene99HnswVectorsReader is still in core). If/when Lucene99HnswVectorsReader itself moves to backward_codecs in a later step, this import will break. Worth a TODO comment.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsReader.java",
+        "lines": "18-22",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "This PR moves the legacy Lucene99 scalar-quantized vector formats from core into backward_codecs, making them read-only by having fieldsWriter throw UnsupportedOperationException. The mechanical move is mostly sound, but several concerns warrant attention before merge. Most notably, the @Deprecated annotation was removed from formats that are now strictly read-only legacy code, and the write-capable public constructors plus dead parameters (numMergeWorkers, mergeExec) remain on the API surface despite never being used \u2014 yielding a runtime failure trap rather than a compile-time signal. Visibility of several previously public symbols (NAME, QUANTIZED_VECTOR_COMPONENT, reader class/ctor, calculateDefaultConfidenceInterval) was silently downgraded; this is a source-incompatible change that should be flagged in CHANGES.txt under API Changes rather than only New Features. The test scaffolding (V0/V1 RW formats) is reasonable but the V1 variant hardcodes default HNSW parameters in fieldsWriter, which could mask test intent."
+  },
+  "raw": ""
+}

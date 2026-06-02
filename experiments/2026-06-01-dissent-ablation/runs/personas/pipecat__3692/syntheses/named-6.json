@@ -1,0 +1,89 @@
+{
+  "task_id": "pipecat__3692",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Control frame stores a live FrameProcessor reference instead of a stable identifier",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service holds a mutable FrameProcessor instance, complecting a value-like control frame with runtime identity. This blocks serialization, retains swapped-out services, and forces equality semantics on object identity. Pass a stable service id or name string and resolve at the switcher edge.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting comparison via `==` on FrameProcessor relies on default identity equality and is fragile",
+        "detail": "`frame.service == self.strategy.active_service` depends on FrameProcessor's inherited __eq__. A future override, wrapper, proxy, or re-instantiation silently breaks routing and leaks the control frame downstream. Use `is`, compare by stable id, and state the invariant explicitly.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Handler contract is split and unstated: services re-push, switcher suppresses on match",
+        "detail": "STTService now calls `_push_stt_metadata()` then `push_frame(frame)`, relying on the switcher to swallow it only when service matches active. The postcondition (frame invisible downstream, ordering of metadata-then-marker, behavior outside a switcher) is nowhere documented and creates LSP hazards for subclasses. Centralize re-push or document the contract on the frame and STTService.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inactive-target case is unspecified; frames targeting non-active services leak downstream",
+        "detail": "The suppression branch only fires when `frame.service == active_service`. Behavior for an inactive-target frame reaching push_frame is neither documented, asserted, nor tested. Today the dispatcher prevents it, but the invariant is implicit. State the postcondition for all target/state cases or assert-and-drop.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "233-240",
+        "flagged_by": [
+          "hickey",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference annotation `\"FrameProcessor\"` without a TYPE_CHECKING import in frames.py",
+        "detail": "The dataclass annotates `service: \"FrameProcessor\"` as a string but FrameProcessor isn't imported in frames.py. Runtime works, but `get_type_hints`, schema introspection, pydantic adapters, and IDE tooling will fail to resolve it. Add a TYPE_CHECKING import or weaken the annotation honestly.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public rename lacks a deprecation alias for downstream importers",
+        "detail": "RequestMetadataFrame was an exported symbol; renaming it outright breaks every downstream importer at the next version bump. A one-line alias plus a DeprecationWarning preserves back-compat at trivial cost. The changelog entry alone is insufficient.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the rename clarifies intent and the diff is small and focused, but the implementation reaches for the wrong data shape: a live FrameProcessor instance is embedded in a control frame and compared by default `==`, complecting value with identity and creating brittle targeting semantics. The handler contract is split across STTService (re-push after handle) and the switcher (suppress on match) without being written down, with unspecified behavior for inactive targets and outside-switcher use. Secondary concerns include an unresolved forward-reference annotation and a missing back-compat alias for the renamed public symbol. Recommend narrowing `service` to a stable identifier, documenting the handler contract and ordering invariant, and adding a deprecation alias before landing."
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "task_id": "numba__10276",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Missing `import sys` in `numba/cpython/mathimpl.py` and `numba/np/math/mathimpl.py` where `sys.version_info` is now referenced.",
+        "detail": "Both impl files introduce `if sys.version_info >= (3, 11):` but the diff only adds `import sys` to `mathdecl.py`. Unless `sys` is already imported in those modules, the gated registration NameErrors at import time on every Python version. Verify and add the import where needed.",
+        "file": "numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "177-178",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Suspicious dedent of the version-gated registration block in `mathdecl.py` may place it outside the class scope or rebind `Math_unary` incorrectly.",
+        "detail": "The new `if sys.version_info >= (3, 11):` block sits flush-left immediately after the `cases` list, removing the blank-line separator and rebinding `Math_unary` at module scope via `infer_global`. Confirm the dedent is intended and that re-registering the same ConcreteTemplate has the expected effect; list `math.exp2` alongside the other `@infer_global` entries instead.",
+        "file": "numba/core/typing/mathdecl.py",
+        "lines": "40-46",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Version-gating idiom is inconsistent across files and is the wrong predicate; use `hasattr(math, 'exp2')` or the project's `PYVERSION`.",
+        "detail": "Typing/impl files use raw `sys.version_info`, the test uses `PYVERSION` from `numba.core.utils`, and CPython actually exposes `math.exp2` based on libc/runtime rather than Python version. Pick one canonical check \u2014 preferably `hasattr(math, 'exp2')` \u2014 and apply it at every site so the invariant \"exp2 registered iff available\" rests on one predicate.",
+        "file": "numba/core/typing/mathdecl.py, numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test inputs include negative integers fed through unsigned integer types without stating the intended behavior.",
+        "detail": "`x_values = [-2, -1, -2, 2, 1, 2, .1, .2]` is exercised against `uint16/uint32/uint64`, silently relying on C-style wraparound or filtering inside `run_unary`. Copy-pasting from `test_exp` propagates an unstated precondition. State the input domain per type or remove negatives for unsigned cases.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": "267-273",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Release note file is missing a trailing newline and the body redundantly restates the title.",
+        "detail": "`docs/upcoming_changes/10276.new_feature.rst` ends with no newline and the body \"Support for ``math.exp2`` is added.\" duplicates the title. Add the trailing newline and either trim the body or give it meaningful content per towncrier conventions.",
+        "file": "docs/upcoming_changes/10276.new_feature.rst",
+        "lines": "1-4",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test reuses `exp`'s input vector verbatim and doesn't exercise `exp2`-specific shape, and no negative test exists for unsupported Pythons.",
+        "detail": "`exp2` is `2**x`, not `e**x`; adding a few integer powers (e.g. 0, 10, -53) would cheaply exercise precision and overflow behavior distinct from `exp`. A small negative test confirming predictable failure on Python <3.11 would also pin down the version-gated contract.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": "267-273",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this is a small, well-shaped PR that wires `math.exp2` through typing, two impl modules, docs, and a test following the existing `math.exp` pattern. Two likely import-time defects dominate: `sys` may not be imported in the two `mathimpl.py` files that now reference `sys.version_info`, and the dedented `if` block in `mathdecl.py` rebinds `Math_unary` at module scope in a visually suspicious way. The version gate itself is the wrong data structure \u2014 `hasattr(math, 'exp2')` (or the project's `PYVERSION`) should replace three inconsistent `sys.version_info` checks. Tests copy-paste negative integer inputs onto unsigned types without justification, and the release note needs minor hygiene. Verdict: fix the import and gate issues, unify the version predicate, then ship."
+  }
+}

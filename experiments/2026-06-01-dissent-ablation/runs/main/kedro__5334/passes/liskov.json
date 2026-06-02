@@ -1,0 +1,114 @@
+{
+  "persona": "liskov",
+  "task_id": "kedro__5334",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Preview contract not stated: preconditions, postconditions, and invariants of preview_fn are absent",
+        "detail": "The docs introduce preview_fn as a callable returning a 'preview payload' but never state the contract. What are the preconditions (must it be pure? deterministic? side-effect free? thread-safe?), the postconditions (must it always return a Preview subtype? what happens on exception \u2014 does node.preview() propagate, swallow, or wrap?), and the invariants (is the returned object immutable? is meta a dict of JSON-serializable values only?). Without this written down, every Kedro-Viz consumer and every user implementation will guess differently, and the abstraction will drift. The 'experimental' warning is not a substitute for the spec.",
+        "file": "docs/build/nodes.md",
+        "lines": "347-720",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Preview is an abstract data type with subtypes \u2014 substitutability is never asserted or audited",
+        "detail": "JsonPreview, TablePreview, PlotlyPreview, MermaidPreview, ImagePreview, TextPreview, and CustomPreview are presented as siblings, presumably sharing a supertype (Preview) with a to_dict() operation shown only on one example. The docs must state: every subtype guarantees to_dict() returns a serializable mapping with a known discriminator, content schema is no weaker than the supertype's promise, and meta is treated uniformly. As written, TablePreview narrows content to list[dict] (a stronger precondition than 'any JSON-serializable content') \u2014 that is fine for a subtype only if the supertype never promised arbitrary content. State the supertype contract, then prove each subtype substitutes.",
+        "file": "docs/build/nodes.md",
+        "lines": "395-560",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "meta is overloaded with two distinct responsibilities \u2014 leaky abstraction",
+        "detail": "The 'Adding metadata to previews' section explicitly says meta serves two purposes: (1) general user metadata and (2) rendering configuration consumed by Kedro-Viz (Mermaid config, syntax-highlighting language). These are different contracts with different consumers. Mixing them means a user who puts {'language': 'python'} as 'general metadata' on a TextPreview accidentally triggers renderer behavior, and a renderer config key collision with user metadata is undefined. The right design is two fields (e.g., meta for user data, render_config or options for renderer hints) or a reserved namespace ('_render': {...}). At minimum the doc must state the precedence rule and the reserved keys per subtype.",
+        "file": "docs/build/nodes.md",
+        "lines": "612-640",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "MermaidPreview meta contract leaks Kedro-Viz frontend implementation through the API surface",
+        "detail": "The Mermaid example documents securityLevel, flowchart.wrappingWidth, themeVariables.fontSize, and a non-Mermaid-standard textStyle block. textStyle is not part of the Mermaid config schema linked at the bottom of the section \u2014 it appears to be a Kedro-Viz frontend rendering concern bolted onto the same dict. This conflates 'pass-through Mermaid config' with 'Kedro-Viz CSS hints', leaks the frontend's CSS model into the kedro core API, and binds the public contract to a specific renderer's internals. Either split the two (mermaid_config vs viz_text_style) or document precisely which keys are pass-through to Mermaid and which are interpreted by Kedro-Viz, with stability guarantees for each.",
+        "file": "docs/build/nodes.md",
+        "lines": "486-540",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary unclear: who owns rendering \u2014 kedro core, kedro-viz, or the user?",
+        "detail": "The preview_contract module sits in kedro.pipeline, but the contract being described is dominated by what Kedro-Viz will do with the payload (renderer_key, language highlighting, Mermaid config merging with 'sensible defaults'). This is the wrong boundary \u2014 kedro core should own only the data shape and serialization contract; rendering policy belongs in kedro-viz docs and code. As written, kedro.pipeline.preview_contract effectively documents Kedro-Viz behavior, which couples the two repos at the spec level and makes the kedro contract change every time the viz frontend changes. Draw the line: kedro promises the payload shape; kedro-viz documents how it renders it.",
+        "file": "docs/build/nodes.md",
+        "lines": "347-720",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CustomPreview renderer_key has no contract for registration, collision, or unknown-key handling",
+        "detail": "CustomPreview is the explicit extension point but the docs say only that renderer_key 'identifies which frontend component should handle rendering this preview'. The contract must answer: who owns the key namespace, how is collision avoided with built-in renderers (json, table, plotly, mermaid, image, text), what does a consumer do when it does not recognize the key (ignore, fallback to text, error), and is the content schema validated by kedro or opaque pass-through. Without these answers CustomPreview is an open-ended escape hatch that will fragment across users and break Kedro-Viz forward compatibility.",
+        "file": "docs/build/nodes.md",
+        "lines": "595-610",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "node.preview() return-type and error contract are undocumented",
+        "detail": "The basic-usage example shows preview = training_node.preview() returning the MermaidPreview object, with a follow-on preview.to_dict() call. The doc never states: does preview() always return a Preview, or None when preview_fn is unset; does it call preview_fn each invocation (caching? memoization?); what happens if preview_fn raises; is to_dict() part of the supertype contract (it must be, if frontends rely on it). These are exactly the small omissions that produce divergent client behavior in a multi-team system.",
+        "file": "docs/build/nodes.md",
+        "lines": "395-410",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "'Use closure to capture context' pattern silently violates pure-function expectations",
+        "detail": "The 'Using preview functions with data context' section recommends closures over captured sample data. This is a reasonable workaround but the docs should state the resulting contract: the closure is evaluated at pipeline-construction time, the captured data is pinned for the life of the node, and the preview will not reflect runtime catalog state. Without this note, users will reasonably expect preview() to reflect current data and file bugs against kedro/kedro-viz when it does not. State the temporal contract of the captured context.",
+        "file": "docs/build/nodes.md",
+        "lines": "680-700",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Best practice 5 ('Handle errors: wrap preview logic in try-except if needed') pushes contract responsibility onto callers",
+        "detail": "Telling users to wrap preview logic in try/except is the symptom of a missing contract on the supertype. Either preview_fn is allowed to raise and node.preview() propagates with a documented exception type, or kedro wraps and returns a TextPreview/error payload, or there is a typed ErrorPreview. Pick one and state it. As written, every user invents their own error-handling story and Kedro-Viz cannot rely on any behavior.",
+        "file": "docs/build/nodes.md",
+        "lines": "713-720",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ImagePreview accepts URL or data URI through one untyped 'content' field \u2014 discriminator missing",
+        "detail": "The example shows ImagePreview(content='https://...') and a commented-out ImagePreview(content='data:image/png;base64,...'). Two different transport modes share one string field with no explicit kind discriminator. A consumer must sniff the string prefix to know how to render it, which is a classic leaky abstraction. Either add a kind field (url | data_uri) or document the prefix-sniffing rule as the contract so every renderer behaves identically.",
+        "file": "docs/build/nodes.md",
+        "lines": "549-560",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "This PR documents a new preview_fn extension point but does not document the contract behind it, which is the precise failure mode the abstract-data-type discipline exists to prevent. The Preview type family (Json/Table/Plotly/Mermaid/Image/Text/Custom) is presented as a set of siblings without ever stating the supertype contract, the substitutability requirements, or the exception/return semantics of node.preview(). The meta field is openly overloaded as both user metadata and frontend rendering configuration, and the Mermaid example leaks Kedro-Viz CSS concerns (textStyle) into what is documented as Mermaid pass-through config \u2014 a leaky abstraction at the module boundary between kedro core and kedro-viz. CustomPreview's renderer_key is an open extension point with no namespace, collision, or unknown-key contract. Recommendation: before this graduates from experimental, write the Preview supertype spec, separate user-meta from render-config (or reserve a namespace), redraw the kedro/kedro-viz boundary in the docs, and state the error and temporal contracts for preview() and closure-captured context. Decision label: SPEC-MISSING with LEAKY-ABSTRACTION risk on meta and Mermaid configuration."
+  },
+  "raw": ""
+}

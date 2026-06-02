@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() shifts the nil-deref one frame up instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. Every caller of run() \u2014 including the deferred result handling and parent tasks \u2014 now must handle a nil *result where one was previously guaranteed. The race is real but the fix pushes the invariant violation upstream rather than resolving it. The leader's panic-cleanup path needs a sentinel result with a closed done channel, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment contradicts the code: says we did see a result, returns because we didn't",
+        "detail": "The comment reads \"Leader panicked but we did see a result\" yet the branch fires precisely when output is nil \u2014 i.e. we did NOT see a result. This is the kind of comment that lies to the next maintainer. Either the comment or the logic is wrong; given the PR description, the comment is wrong. Fix the words or fix the code.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The data structure for t.result should encode \"leader failed\" instead of using nil as a tombstone",
+        "detail": "Data dominates. Right now t.result is *atomic[*result] where nil means three different things: not started, in-progress-leader-died, and now also \"caller should bail.\" Overloading nil is why this race surfaced. A sentinel failed-result with a pre-closed done channel and a Fatal error would let waitUntilDone work uniformly and delete the new nil-check branch entirely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is a clean composition win",
+        "detail": "Pulling cycle detection out of run() is exactly the right move \u2014 run() was doing too much, and checkCycle is now a small pure function over caller.path and q. This is the composition audit passing. The nested-walk-then-rewalk is still O(n^2) in path length but n is usually small here, so leave it alone.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Passing output through waitUntilDone parameter is the right shape",
+        "detail": "Threading the *result as an explicit parameter instead of re-loading from t.result inside waitUntilDone removes the time-of-check-to-time-of-use window. The data flows in one direction now: caller obtains the result pointer, hands it to the waiter, waiter selects on it. That's the filter shape. Good.",
+        "file": "experimental/incremental/task.go",
+        "lines": "535-550",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproduces the race; this fix is unverified by the test suite",
+        "detail": "The diff adds no test exercising the leader-panic-then-waiter-reads path. A race fix without a race test is folklore. Measure before you optimize, and verify before you claim a fix. A small test that panics the leader goroutine and asserts the waiter doesn't deref nil would lock this in and document the invariant.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The cycle-check extraction is a clean composition win and passing *result explicitly into waitUntilDone removes the TOCTOU window. But the core fix has a WRONG-DATA-STRUCTURE smell: nil is being overloaded to mean too many things in t.result, and the new branch returns nil from run() instead of producing a well-formed failed *result. That just relocates the nil deref one frame up. The comment also contradicts the code it annotates. No test reproduces the race, so the fix is unverified."
+  }
+}

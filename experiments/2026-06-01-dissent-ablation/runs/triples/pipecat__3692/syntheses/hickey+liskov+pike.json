@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ServiceSwitcherRequestMetadataFrame.service carries a live FrameProcessor reference instead of a stable identifier",
+        "detail": "The frame's targeting field is typed as a full FrameProcessor, which complects a value-in-time control frame with mutable processor identity. This leaks implementation through the frame contract, prevents serialization/logging/comparison, and drags the processor graph into a flat data structure. A stable service id or name would keep the frame a plain value and narrow the ADT.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting uses `==` on FrameProcessor, relying on inherited identity equality",
+        "detail": "`frame.service == self.strategy.active_service` depends on whatever __eq__ FrameProcessor inherits. If the active service is wrapped, proxied, re-instantiated, or gains a custom __eq__, routing silently breaks and the frame leaks downstream. Compare stable ids (or use `is`) so the invariant is explicit and testable.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Consumption contract is split across switcher and services and is not documented",
+        "detail": "Previously the switcher consumed the frame unconditionally; now STTService re-pushes it and the switcher suppresses only on active-service match. The postcondition (frame invisible downstream) silently weakens for non-active or non-switcher contexts, and STTService subclasses overriding process_frame can now violate the new contract. Document the handler protocol on the frame and on STTService, or centralize re-push.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Behavior for non-active-target frames is unspecified and untested",
+        "detail": "The switcher only drops the frame when service matches active_service; otherwise it passes through. Today the dispatcher only sends to the active service, so leakage cannot occur, but the invariant is implicit. Either assert it, drop all RequestMetadataFrames at the boundary, or add an explicit test documenting the contract.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "233-240",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTService and mock duplicate the handle-then-forward pattern with no shared helper",
+        "detail": "Both services call `_push_stt_metadata()` then `push_frame(frame)` for ServiceSwitcherRequestMetadataFrame. Every future service must rediscover this tacit contract. A small base-class helper or mixin would prevent drift and make the protocol explicit.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switcher-internal frame lives in the global frames module with a string forward reference",
+        "detail": "ServiceSwitcherRequestMetadataFrame is explicitly switcher-internal, yet it sits in pipecat.frames.frames typed as the string \"FrameProcessor\" to dodge an import cycle. That signals entanglement the type system is papering over. Move the frame next to service_switcher (or use a string service id so the type is honest).",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The rename clarifies intent and the new forward-after-handle pattern is a useful semantic fix, but the panel agrees the implementation puts a live FrameProcessor on a control frame where a stable id or name would suffice. This complects value with identity, leaks the processor abstraction through the frame contract, and forces brittle `==` comparison that depends on inherited equality. The consumption protocol \u2014 services re-push, switcher suppresses on match \u2014 is split across components and undocumented, creating an LSP hazard for STTService subclasses. Recommended fixes: narrow `service` to a stable identifier, document the handler contract, and consider relocating the switcher-internal frame."
+  }
+}

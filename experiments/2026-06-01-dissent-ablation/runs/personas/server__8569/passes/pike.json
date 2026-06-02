@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "server__8569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Mutating shared TritonLoraConfig.is_registered is a race-prone, wrong-data-structure hack",
+        "detail": "is_registered is flipped on the shared metadata object from a request handler. Concurrent requests for the same LoRA can both see False and double-register, or one can fail mid-register and leave is_registered=True with no weights cached. Registration state belongs in a separate registry keyed by (model, task_id), not mutated on a config dataclass that pretends to be immutable metadata.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "227-242",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LoRA weight .npy files are loaded synchronously inside the async request path",
+        "detail": "np.load on potentially large weights happens in _create_trtllm_generate_request, which runs on the asyncio event loop during chat/completion. First request per LoRA will block the loop. Load once at startup (or lazily in a thread) and keep weights as numpy arrays in the TritonLoraConfig, or feed them through a one-time registration filter.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "231-240",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_parse_lora_configs is now a 70-line branching blob that should be two filters",
+        "detail": "The function does vllm-vs-trtllm dispatch, path normalization, JSON parsing, file existence checks, and task_id assignment in one nested try/except. This is the classic case for two small functions (_parse_vllm_loras, _parse_trtllm_loras) over a shared repo-walking helper. The algorithm is fighting the data because the data shape per backend is different.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print and traceback statements left in production code paths",
+        "detail": "print(f\"backend: {backend}\") inside the parse loop, plus traceback.format_exc() prints in chat/completions/embeddings routers and in _parse_lora_configs. These are debugging scaffolding, not logging. Use the existing logger at appropriate levels or remove. Printing stack traces on every ServerError is noisy and leaks internals to stdout.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "688, 712",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "task_id assignment is positional and silently collides across model repositories",
+        "detail": "lora_task_id starts at 1 and increments per entry across repo_paths, but resets per call to _parse_lora_configs. If two models both have LoRAs, their task IDs overlap. TRT-LLM keys its cache by task_id; collisions can serve wrong weights. Make task_id a stable hash of (model, lora_name) or scope explicitly per model.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "624, 707-710",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable shadowing: lora_config_path reused for two different things",
+        "detail": "lora_config_path is bound to multi_lora.json at line ~658, then reassigned inside the loop to the per-LoRA model.lora_config.npy path. The outer try/except still references lora_config_path in error context (implicitly via the open) which is fine, but the shadowing makes the data flow harder to read. Rename one of them.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "658, 697-699",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "This PR extends LoRA support to the TRT-LLM backend, but the design has overgrown its data structures. TritonLoraConfig is being mutated as a side-channel registration cache from inside an async request handler, which is both a race condition and a layering violation; weights are also np.loaded synchronously on the event loop. The parser function has become a 70-line if-backend-then-else blob that should be two small filters sharing a repo walker. Positional task_id assignment risks cross-model collisions in the TRT-LLM LoRA cache. Strip the debug prints/tracebacks, split registration state from config metadata, and let each backend have its own parser."
+  }
+}

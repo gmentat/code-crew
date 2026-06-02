@@ -1,0 +1,121 @@
+{
+  "task_id": "falcon__2572",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Whether deprecating redirected is worth the churn",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "The utility is a thin wrapper over stdlib; deprecating it reduces surface area and steers users to the canonical contextlib helpers. Low risk, modest cleanup value."
+          },
+          {
+            "persona": "Abstraction discipline / API stability",
+            "position": "Public API removals impose migration cost on downstream users for negligible maintenance savings \u2014 the function is tiny and stable. A simple 'prefer contextlib in new code' doc note might have been sufficient without a deprecation cycle."
+          }
+        ]
+      },
+      {
+        "topic": "Default argument evaluation timing",
+        "positions": [
+          {
+            "persona": "Formal correctness",
+            "position": "Defaults of stdout=sys.stdout, stderr=sys.stderr are bound at function-definition time, so any reassignment of sys.stdout before calling redirected() is ignored. This is a long-standing latent bug in the original code, not introduced here, but a deprecation PR is a reasonable place to call it out."
+          },
+          {
+            "persona": "Scope discipline",
+            "position": "Out of scope \u2014 this PR is about deprecation, not fixing pre-existing semantics. Filing as a separate issue is appropriate; do not block on it."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Deprecation warning text does not match the .. deprecated:: 4.3 directive's claim about stdlib link/typo 'stlib'",
+        "detail": "In falcon/testing/helpers.py the rendered docstring says 'Use the stlib's :func:`contextlib.redirect_stdout`' \u2014 'stlib' is a typo for 'stdlib'. This will render publicly in the API docs at deprecation. Fix to 'stdlib' (or spell it out as 'standard library').",
+        "file": "falcon/testing/helpers.py",
+        "lines": "~1400-1403",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Deprecation test does not assert the warning is emitted exactly once and may be masked by warning filters",
+        "detail": "test_deprecated_redirected only uses pytest.warns(...) with a match regex. It does not assert call count, nor does it verify behavior under warnings.simplefilter('error') or repeated invocation. Given falcon.util.deprecated typically wraps with warnings.warn, also confirm stacklevel points at the caller (the `with` site), not at the decorator internals, otherwise downstream users get unhelpful tracebacks.",
+        "file": "tests/test_testing.py",
+        "lines": "239-248",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "@deprecated decorator applied above @contextlib.contextmanager \u2014 verify warning fires at enter time, not generator-creation time only",
+        "detail": "Order is `@falcon.util.deprecated(...)` then `@contextlib.contextmanager` then `def redirected(...)`. Depending on how falcon.util.deprecated wraps the callable, the warning will fire when the user calls `redirected(...)` (which returns a _GeneratorContextManager), which is the desired moment. However, if falcon.util.deprecated only emits on first call vs. every call, or if it wraps in a way that breaks the contextmanager protocol (e.g. returns the wrapped function's return value rather than the CM), the `with` statement could fail. The added test exercises the happy path but does not assert the type/protocol is preserved. Worth a quick check that `isinstance(testing.redirected(stdout=...), contextlib.AbstractContextManager)` still holds.",
+        "file": "falcon/testing/helpers.py",
+        "lines": "1362-1369",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Newsfragment uses '.misc' but a deprecation typically warrants '.breakingchange' or a dedicated '.deprecation' fragment type",
+        "detail": "docs/_newsfragments/2569.misc.rst is filed as 'misc' but Falcon's towncrier config commonly distinguishes deprecation notices from miscellaneous changes so they surface prominently in the changelog. Check pyproject.toml / towncrier config \u2014 if a deprecation type exists, use it so users actually see the notice. If not, 'misc' is acceptable.",
+        "file": "docs/_newsfragments/2569.misc.rst",
+        "lines": "1-3",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Internal test migration is incomplete \u2014 other call sites and docs/examples not audited",
+        "detail": "Only tests/test_cmd_inspect_app.py was migrated. A grep for `testing.redirected` and `from falcon.testing import redirected` across the rest of the repo, docs/examples, and tutorials should be performed to avoid leaving Falcon's own materials emitting deprecation warnings on its next release. If others exist, migrate them in this same PR to keep CI clean.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mutable/late-binding defaults sys.stdout/sys.stderr captured at definition time",
+        "detail": "`def redirected(stdout: TextIO = sys.stdout, stderr: TextIO = sys.stderr)` binds the defaults at module import. If a user reassigns sys.stdout (e.g. under pytest capsys, IPython) before calling redirected() with no args, the defaults will still point at the original streams. Pre-existing, not introduced by this PR; worth a brief note in the deprecation rationale since it's one more reason to prefer contextlib.",
+        "file": "falcon/testing/helpers.py",
+        "lines": "1370-1372",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Deprecation message could point users at the precise import (one stdlib import vs. nested with-statement)",
+        "detail": "Current message: 'Please use contextlib.redirect_stdout and contextlib.redirect_stderr instead.' A more actionable message shows the replacement pattern, e.g. `with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): ...`, since redirected() handles both streams in one call. Helpful nudge for users mid-migration.",
+        "file": "falcon/testing/helpers.py",
+        "lines": "1364-1367",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NOTE/TODO prefix convention: confirm 'TudorGR' is the contributor's GitHub nick per the PR checklist",
+        "detail": "The checklist requires 'Prefixed code comments with GitHub nick'. The NOTE/TODO use 'TudorGR' \u2014 confirm this matches the author's GitHub handle exactly (case-sensitive), since these markers are grep targets at removal time in 5.0.",
+        "file": "falcon/testing/helpers.py",
+        "lines": "1362-1363",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The PR is small, well-scoped, and correctly follows Falcon's deprecation pattern: warning decorator, docstring `.. deprecated:: 4.3` directive, towncrier fragment, an internal migration, and a test for the warning. Main concerns are minor: a 'stlib' typo in the user-facing docstring, a weak deprecation test that doesn't verify stacklevel/idempotence or that the contextmanager protocol is preserved by the decorator stack, and an unaudited grep across the rest of the repo/docs for stale `redirected` usages. The newsfragment type ('misc') may understate a public-API deprecation depending on the project's towncrier config. Pre-existing latent issue (default args bound at import) is worth mentioning in the rationale but is out of scope for this PR. Net: safe to merge after the typo and test-strengthening fixes."
+  },
+  "raw": ""
+}

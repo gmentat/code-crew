@@ -1,0 +1,107 @@
+{
+  "task_id": "vega__4219",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "coerceNumber silently substitutes 0 for null/undefined/NaN inputs, changing panLinear/zoomLinear semantics",
+        "detail": "The original panLinear/zoomLinear used toNumber directly as lift. toNumber returns null for non-numeric input, which propagated as NaN through arithmetic \u2014 a visible failure mode. The new `coerceNumber: x => toNumber(x) ?? 0` quietly converts null/undefined/unparseable values to 0, producing a plausible-but-wrong domain where the old code produced NaN. This is a real semantic change disguised as a type adapter and directly contradicts the PR's 'same runtime behavior as before' claim. Either preserve NaN propagation, reject non-numeric input at the boundary, or explicitly document and test the 0-coercion as a deliberate behavior change.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "30-32",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Empty-domain throw is a behavior change smuggled into a 'just adding types' PR",
+        "detail": "The PR description claims 'Everything else should have same runtime behavior as before, I just added types,' but the new `isNonEmpty(domain) || error(...)` guards in pan/zoom introduce a runtime throw where empty domains previously returned [NaN, NaN] silently. This is a real, observable breaking change for any downstream caller that depended on the non-throwing path. It is likely the right change, but it must be split out (or at minimum called out explicitly in the PR description and changelog) rather than folded into a typing refactor.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 57",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public signatures accept `number[]` while the contract is non-empty \u2014 type system does no useful work",
+        "detail": "The exported functions declare `domain: number[]` and then runtime-check non-emptiness via `isNonEmpty`. The file already defines `NonEmptyArray<T>` and `peek` has a non-empty overload \u2014 the precondition should be encoded in the public signature (e.g. `NonEmptyArray<number>` or `readonly [number, number, ...number[]]`) and pushed to the caller boundary. As written, callers gain nothing from the types, the runtime guard is pure overhead, and the PR is half-typed: it pays for types yet still relies on runtime checks. Pick one \u2014 either make the public type honest or drop the runtime guard.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 40, 44, 48, 52, 58, 65, 69, 73, 77",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Empty-domain invariant enforced inside helpers, but callers read `domain[0]` first",
+        "detail": "panLog, zoomLog, panPow, zoomPow compute `Math.sign(domain[0])` before delegating to pan/zoom, so on an empty domain they evaluate `Math.sign(undefined) = NaN` and only then hit the internal `isNonEmpty` throw. The error still wins by accident of evaluation order, but the invariant is checked in the wrong layer. Hoist the non-empty check to each public entry point, or \u2014 better \u2014 accept `NonEmptyArray<number>` at the public boundary so internal helpers can trust the precondition.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "47-50, 75-77",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Local `identity` rebinding shadows the shared `identity` from accessors.js",
+        "detail": "The original imported `identity` from `./accessors.js`; the new file defines a local `const identity: TransformFn = x => x` to satisfy the narrower TransformFn type. Either accessors.identity has the wrong signature and should be fixed once where every caller benefits, or this is gratuitous local duplication that will drift. Don't fork the codebase's identity function inside one module because the types didn't line up.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "31-32",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for the new throw covers only panLinear and zoomLinear, not the six other variants",
+        "detail": "Two of eight exported functions exercise the new empty-domain throw. The other six (panLog/zoomLog/panPow/zoomPow/panSymlog/zoomSymlog) share the same code path through the pan/zoom helpers, but the gap should either be closed with a parametrized test that loops the eight exports over `[]`, or made explicit with a comment noting that the helper-level check covers them. As-is the tests imply 'we checked the linear ones' rather than 'we checked the shared helper.'",
+        "file": "packages/vega-util/test/transform-test.js",
+        "lines": "68-77",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "peek overload promises non-undefined return but type narrowing may not flow through to callers",
+        "detail": "The new overload `peek<T>(array: readonly [T, ...T[]]): T` promises T rather than T | undefined, but inside pan/zoom the narrowing from `isNonEmpty(domain)` may not visibly carry through to the `peek(domain)` call \u2014 TS may not re-narrow the parameter binding. If that's the case, the d1 binding is silently `number | undefined` and arithmetic on it is only well-typed by coincidence. Verify the narrowing actually flows, or restructure (assertion / explicit cast / pass narrowed value) so the type safety is visible to the reader. Also, the implementation cannot verify the caller's non-empty claim \u2014 document peek as a trusted precondition.",
+        "file": "packages/vega-util/src/peek.ts",
+        "lines": "4-7",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel converges strongly on two blocking concerns: (1) `coerceNumber` silently maps null/undefined/NaN to 0, a real semantic change in panLinear/zoomLinear masquerading as a type adapter; and (2) the new empty-domain throw is a behavior change that contradicts the PR's 'same runtime behavior' claim and should be split out or explicitly documented. The refactor is also half-typed \u2014 public signatures accept `number[]` while the contract is non-empty, so the type system does no useful work and the runtime guard is duplicated overhead; the fix is to type the public surface as `NonEmptyArray<number>` and push the check to the boundary. Secondary issues include the locally-redefined `identity` (shadowing the shared accessor), thin test coverage of the new throw across only two of eight variants, and a peek overload whose narrowing may not actually flow through to callers. Split the patch into types-only, the empty-domain check, and the coerceNumber semantics change; tighten the public types; restore NaN propagation or document the 0-coercion deliberately."
+  },
+  "raw": ""
+}

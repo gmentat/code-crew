@@ -1,0 +1,141 @@
+{
+  "task_id": "chia-blockchain__20099",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Whether to remove the default_raise() helper and its field(default_factory=default_raise) call sites",
+        "positions": [
+          {
+            "persona": "abstraction-discipline (cleanup-now)",
+            "position": "The PR title is 'Remove python 3.9 support'. default_raise() exists explicitly and only as a < 3.10 hack (its docstring/raise message says so). With all dataclasses now decorated kw_only=True, fields without defaults can legally follow fields with defaults, so field(default_factory=default_raise) can be replaced with bare type annotations across wallet_request_types.py. Leaving the hack in is dead-but-load-bearing code; future readers will assume it's required."
+          },
+          {
+            "persona": "pragmatic-shippability (defer-it)",
+            "position": "default_raise() and its call sites are a separate, mechanical, possibly-large refactor with subtle behavior change (constructing a class with a missing field shifts from raising RuntimeError lazily to TypeError eagerly at __init__). Splitting it into a follow-up keeps this PR focused and reviewable. Untouched call sites still behave correctly."
+          }
+        ]
+      },
+      {
+        "topic": "Adding UP007/UP035/UP045 to ruff ignores instead of converting Union/Optional",
+        "positions": [
+          {
+            "persona": "incremental-shippability",
+            "position": "Converting every Union[A, B] / Optional[A] to A | B / A | None across the entire codebase in the same PR that drops 3.9 would make this an unreviewable mega-diff. The TODO ignore lets the PR land cleanly and the conversion can happen as a follow-up sweep."
+          },
+          {
+            "persona": "do-it-once",
+            "position": "The whole point of dropping 3.9 is that you can finally use PEP 604 unconditionally. Adding TODO ignores to the lint config to defer the work undermines the framing of the PR ('we removed 3.9 so the codebase can move forward') without actually moving the codebase forward, and TODO comments in ruff config historically rot."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "install.sh version check still allows Python 3.7-3.9 even though error message claims >= 3.10",
+        "detail": "The diff updates only the printed error message ('Chia requires Python version >= 3.10 and < 3.13.0') but leaves the actual guard as `[ \"$PYTHON_MINOR_VER\" -lt \"7\" ]`. A user with Python 3.7, 3.8, or 3.9 will pass the check, get past install.sh's gate, and then fail later inside Poetry/pip with a confusing requires-python error. The check should be `-lt \"10\"`.",
+        "file": "install.sh",
+        "lines": "138-139",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_raise() and field(default_factory=default_raise) hack is now dead-but-live and should be removed with 3.9",
+        "detail": "default_raise() is explicitly documented as 'just for < 3.10 compatibility' and exists only because the prior kw_only_dataclass helper had to fall back to dataclass(frozen=True) (no kw_only) on 3.9, which forbade non-default fields after default fields. Now that every site is dataclass(frozen=True, kw_only=True), field(default_factory=default_raise) can be replaced with plain `field_name: T` annotations and default_raise() can be deleted. Leaving it changes the failure mode for missing-kwarg construction from TypeError (eager) to RuntimeError (lazy on json round-trip), which is strictly worse and now gratuitous.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "around the removed kw_only_dataclass and the many `field(default_factory=default_raise)` lines (e.g. 1227-1610)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Amazon Linux and Rocky CI install Python 3.12 unconditionally, so install.sh is never tested against the new minimum 3.10",
+        "detail": "The Prepare Amazon Linux / Prepare Rocky steps hardcode `dnf install git python3.12 -y`. install.sh's find_python picks the highest available version, so on those distros it will always pick 3.12 regardless of any matrix entry. The PR raises the floor to 3.10 but loses coverage that 3.10 actually works on RHEL-family distros. Either parameterize the python package per matrix entry or document that 3.12 is the only supported python on Amazon/Rocky.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "216-221, 256-261",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`dnf search python3.12` left in CI as debug output",
+        "detail": "Both the Amazon Linux and Rocky preparation steps include `dnf search python3.12` immediately before installing. `search` is informational only and produces noisy log output in every CI run. Remove it or replace with a deterministic availability check if intent is to verify the package exists.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "220, 260",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Ruff UP007 / UP035 / UP045 added to ignore list with a TODO instead of doing the conversion",
+        "detail": "The PR description specifically calls out 'Union types ... will soon not be supported through Ruff. Use A | B'. The diff opts out of exactly those rules with a 'TODO: Remove these - it's a lot of errors' comment. This guarantees the legacy spellings keep accumulating in new code merged after this PR. Either land a follow-up codemod PR immediately or run `ruff check --fix --select UP007,UP035,UP045` here. TODO comments in lint config tend to outlive their original authors.",
+        "file": "ruff.toml",
+        "lines": "around the new ignore entries",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stale '< 3.10 compatibility' comment left near TransactionEndpointRequest",
+        "detail": "The comment block 'When inheriting from this class you must set any non default arguments with: field(default_factory=default_raise) ... (this is for < 3.10 compatibility)' is now incorrect documentation: with kw_only=True the workaround is unnecessary. If default_raise is kept for the moment, the comment should at least be updated; ideally removed alongside the pattern.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1346-1348",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stale 'these require Python 3.9 at runtime' workaround in data_layer tests",
+        "detail": "chia/_tests/core/data_layer/util.py has a TYPE_CHECKING gate with the comment 'these require Python 3.9 at runtime' wrapping os.PathLike[str] and subprocess.CompletedProcess[str]. PEP 585 generics on these stdlib types are supported natively from 3.9 and unambiguously fine on 3.10+. This is now incidental complexity that the PR could delete.",
+        "file": "chia/_tests/core/data_layer/util.py",
+        "lines": "23-29",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "urllib3 conditional marker simplification leaves a redundant marker",
+        "detail": "After dropping the 3.9-only urllib3 1.26 line, the remaining urllib3 entry could drop the now-tautological `markers = \"python_version >= \\\"3.10\\\"\"` (which the diff in fact does for the top-level entry but leaves on the boto3 dependency line). Cosmetic, but a lock file refresh would catch it.",
+        "file": "poetry.lock",
+        "lines": "boto3 dependencies block (urllib3 entry)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test-install-scripts asymmetry: Ubuntu uses MINIMUM=3.10 dynamically, Amazon/Rocky pin 3.12",
+        "detail": "Ubuntu's setup faithfully exercises the new floor (`MINIMUM=3.10` + `apt-get satisfy ... python3-venv (>= ${MINIMUM})`), but Amazon and Rocky pin python3.12. The behavior tested across distros is inconsistent, and a regression that broke 3.10 on RHEL-family would not be caught. Consider a `MINIMUM` variable on the dnf path too, or document why 3.12 is the canonical target there.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "216-221, 256-274",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Minor: itertools.pairwise migration is correct but unrelated to 3.9-drop scope",
+        "detail": "Replacing `zip(ordered, ordered[1:])` with `itertools.pairwise(ordered)` is fine on 3.10+ and an idiomatic win, but it's unrelated to dropping 3.9 (pairwise is also 3.10+ so it was unavailable before). Not a bug, just a scope nit; if the maintainers want a tight 'drop 3.9' diff this could be split out, otherwise leave it.",
+        "file": "chia/_tests/util/test_priority_mutex.py",
+        "lines": "384",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "The mechanical parts of the 3.9 drop (CI matrix, pyproject, poetry.lock, Install.ps1, README, removing sys.version_info >= (3, 10) branches in cmd_classes.py, switching ad-hoc kw_only_dataclass to dataclass(kw_only=True)) are clean and correct. Two issues should block merge as written: (1) install.sh updates only the error string while leaving the numeric guard at `-lt 7`, so users on 3.7-3.9 still pass the script and fail confusingly later; (2) the default_raise()/field(default_factory=default_raise) pattern in wallet_request_types.py exists exclusively as a 3.9 workaround and should be deleted with 3.9 itself \u2014 leaving it means new code will be added in the same broken pattern and failure modes are strictly worse than plain kw_only fields. Beyond those, the RHEL-family CI hardcodes Python 3.12 (so 3.10 on those distros is never actually exercised by install.sh tests), ruff UP007/UP035/UP045 are deferred via TODO ignores instead of converted, and several '< 3.10 compatibility' comments are now stale. None of the remaining items are correctness-critical, but they suggest a follow-up sweep is warranted before the next release."
+  },
+  "raw": ""
+}

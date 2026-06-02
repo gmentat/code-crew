@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "openbao__1906",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo silently changes the abstraction's contract without preserving the old promise",
+        "detail": "FetchLeaseTimes had a stated contract: 'returns issue time, expiration time, and last renewed time of a lease entry... with only those values copied over.' The new FetchLeaseInfo is a strictly wider contract (adds Path, RevokeErr, namespace). Callers that relied on the redaction guarantee of the old name now silently receive more state. Per LSP, postconditions may weaken (return more) only if all callers are audited; the rename across the codebase should be accompanied by either (a) keeping FetchLeaseTimes as a thin wrapper that re-redacts to the original projection, or (b) a documented note that every call site has been verified safe with the broader projection. Neither is done here.",
+        "file": "vault/expiration.go",
+        "lines": "1700-1740",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport contract is under-specified; the abstract data type 'redacted lease view' is not defined",
+        "detail": "The doc comment changed from 'lease times... only those values copied over' to 'non sensitive information of a lease entry... only those values copied over.' But 'non sensitive' is not a contract \u2014 it is an aspiration. The PR description itself raises the open question 'Is it safe to display the revoke error?' That uncertainty belongs in the spec, not in a PR comment. The function is now the chokepoint for what is exposed across system/leases lookup, and its contract must state explicitly: which fields are guaranteed safe to surface to a caller with read on sys/leases/lookup, and which fields are deliberately omitted (Auth, ClientToken, Secret.InternalData remain implicit). Without that spec, future contributors will widen the projection again without knowing the rule.",
+        "file": "vault/expiration.go",
+        "lines": "1736-1755",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "RevokeErr exposure expands the trust boundary of the lease-lookup ADT without an explicit threat model",
+        "detail": "The PR author flags this directly: revoke errors can carry sensitive information from downstream secret engines (database driver errors, PKI backend errors, KMS responses). Surfacing RevokeErr through sys/leases/lookup makes any caller with that capability a recipient of arbitrary backend error strings. The abstraction promise of 'lease metadata' is being quietly extended to 'lease metadata plus arbitrary downstream error text.' Either constrain RevokeErr at write time (sanitize before storage in markLeaseIrrevocable) or gate the field behind a separate capability/sudo, or at minimum document that operators with sys/leases/lookup now see backend error payloads. The current diff does none of these.",
+        "file": "vault/logical_system.go",
+        "lines": "2200-2205",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Path field exposes mount-internal routing detail through the leaked lease view",
+        "detail": "The lease Path (e.g. 'certificates/issue/example-dot-com') is a routing-layer concept. Surfacing it through the public lookup endpoint is reasonable for operators, but the ADT boundary should state: Path is the rendered request path at issuance time, not a guarantee of current mount validity (a mount can be unmounted/remounted under the same path). Callers may treat Path as a live handle and be wrong. A one-line spec note on the Path field in logical_system_paths.go ('snapshot of the request path at lease issuance; may not correspond to a currently-mounted backend') would prevent the misuse.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2687-2705",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Renaming the metric label 'expire.fetch-lease-times' would have been a breaking change; keeping it under a renamed function is correct but undocumented",
+        "detail": "The metric key 'expire.fetch-lease-times' is retained even though the function is now FetchLeaseInfo. This is the right call (metric names are an external contract with dashboards and alerts), but it is now a hidden coupling: a future contributor renaming for consistency would silently break observability. A single comment 'metric name preserved for backwards compatibility' at the metrics.MeasureSince call would lock the contract in place.",
+        "file": "vault/expiration.go",
+        "lines": "1707",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage does not exercise the namespace_path or revoke_error response fields",
+        "detail": "TestSystemBackend_leases gained one assertion on path == 'secret/foo' but namespace_path and revoke_error \u2014 the more contract-sensitive additions \u2014 are not asserted anywhere. The LSP-style question 'does the new projection actually expose what the spec says it exposes, under the conditions the spec requires (non-root namespace, lease with revoke error)?' is not answered by the test suite. Add at least one test that markLeaseIrrevocable-then-lookup returns a non-empty revoke_error, and one that a child-namespace lease lookup returns namespace_path.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1225-1232",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The diff is mechanically sound and the user-facing improvement is real, but the abstract data type at the center of this change \u2014 the redacted lease view returned by what was FetchLeaseTimes and is now FetchLeaseInfo \u2014 is being widened without a written contract. The old function promised three time fields; the new function promises 'non sensitive information,' which is aspiration, not specification. The PR author themself raises the unresolved question of whether RevokeErr is safe to surface, and that question belongs in the spec of leaseInfoForExport, not in a PR comment. Recommended changes: state the contract of leaseInfoForExport (enumerate exposed fields and the redaction rule), decide RevokeErr exposure deliberately (sanitize at write, gate behind sudo, or accept and document), and add tests that exercise namespace_path and revoke_error so the contract is enforced by the suite rather than by reviewer attention."
+  },
+  "raw": ""
+}

@@ -1,0 +1,77 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Storing a live FrameProcessor reference on a control frame is the wrong shape",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service holds a full FrameProcessor handle rather than a stable identifier. Control frames should carry value-like identity (name/id), not live runtime objects. This couples the frame to mutable processor state, breaks serialization, retains swapped-out services via GC, and invites identity-vs-equality bugs. Pass a service name or id and resolve at the switcher.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Suppression check relies on default == identity comparison without stating the invariant",
+        "detail": "`frame.service == self.strategy.active_service` falls back to object identity on FrameProcessor. If a subclass overrides __eq__, or the active service is wrapped/proxied/re-instantiated, the switcher silently fails open and the internal control frame leaks downstream. Use `is`, or compare a stable id, and document the invariant explicitly.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Consumption contract for the request frame is unstated and split across components",
+        "detail": "Previously the switcher consumed RequestMetadataFrame unconditionally; now STTService re-pushes it and the switcher suppresses only when service matches active. The postcondition (frame invisible downstream) silently weakens outside a switcher or for subclasses that override process_frame. Document the handler contract on the frame and STTService, or centralize the re-push so subtypes cannot forget.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference annotation \"FrameProcessor\" is unresolved and unimported in frames.py",
+        "detail": "The dataclass field annotation is a string, so construction works, but FrameProcessor is not imported in this module. Any get_type_hints call, pydantic adapter, or schema introspection will fail to resolve it. Either add a TYPE_CHECKING import or weaken the annotation to Any with a docstring contract.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename is a breaking public-API change with no deprecation alias",
+        "detail": "RequestMetadataFrame was an exported symbol; renaming it outright breaks downstream importers on the next version bump. A one-line `RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame` alias with a DeprecationWarning costs nothing and preserves backward compatibility. A changelog entry alone is insufficient.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switcher-internal frame lives in the global frames module without a literate suppression comment",
+        "detail": "The frame is explicitly switcher-internal yet sits alongside public frames in pipecat.frames.frames, blurring the module boundary. The push_frame suppression branch also lacks a one-line comment stating the invariant (\"request frame arrives here only after the targeted active service handled it\"), making the logic hard to audit.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "222-237",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the rename and targeting refinement are structurally sound but flags one dominant taste/design issue: the new control frame embeds a live FrameProcessor reference and relies on default == identity to drive switcher suppression. All three reviewers want a stable identifier instead of a processor handle, and an explicit invariant for the equality check. Secondary concerns cluster around an unstated consumption contract now split between STTService and the switcher, a missing forward-reference import, and the absence of a back-compat alias for the renamed public symbol. Verdict: NEEDS-WORK \u2014 narrow the frame's ADT, document the handler contract, and add a deprecation alias before landing."
+  }
+}

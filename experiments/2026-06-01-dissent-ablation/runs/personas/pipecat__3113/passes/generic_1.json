@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Class name in code (AWSAgentCoreProcessor) does not match PR title (AWSBedrockAgentCoreProcessor) and is exported via wildcard without __all__",
+        "detail": "The PR title promises `AWSBedrockAgentCoreProcessor` but the class is named `AWSAgentCoreProcessor`. The `__init__.py` uses `from .agent_core import *` with no `__all__` defined in `agent_core.py`, so private helpers like `default_context_to_payload_transformer` leak into the public namespace. Decide on the canonical name and define `__all__`.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78, 1-258",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "AWS client is created inside `process_frame`, blocking the pipeline for the entire agent invocation",
+        "detail": "`process_frame` does `async with self._aws_session.client(...)` and then awaits the full streamed response before returning. This blocks the frame processor from handling any other frames (interruption, cancel, etc.) for the duration of the agent call. The invocation should be dispatched to a background task so the processor remains responsive.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "200-249",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`default_response_to_output_transformer` raises on non-JSON lines, crashing the processor",
+        "detail": "`json.loads(response_line)` is unguarded. Any malformed line (or a `data: ` payload that's not JSON, e.g. a final `[DONE]` sentinel) will raise `JSONDecodeError`, propagating out of `process_frame` and tearing down the pipeline. Catch and log, or return None.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "70-72",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public constructor parameter `agentArn` violates PEP 8 / repo Python naming conventions",
+        "detail": "All other kwargs are snake_case (`aws_access_key`, `aws_region`); `agentArn` is camelCase and stored as `self._agentArn`. This is part of the public API and will be painful to change later. Rename to `agent_arn` before merging.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "103, 132-133",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Response-end bookend logic has a race between the timeout task and the final close",
+        "detail": "After streaming completes, the code cancels `_close_task` only if not done and pushes `LLMFullResponseEndFrame`. But the timeout task may have already fired between the last `_push_text_frame` and reaching the final block, pushing an End frame, then the final block pushes another End frame. Use a lock or a single source of truth for closing.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "162-167, 244-249",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Streamed SSE parsing splits on `\\n` only and drops multi-line `data:` events",
+        "detail": "SSE frames can use `\\r\\n` line endings and an event may span multiple `data:` lines that should be concatenated before being passed to a handler. The current `part_string.split(\"\\n\")` + per-line transform will mis-handle both cases. Consider a proper SSE parser or at least handle CRLF.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "222-238",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "summary": "New AWS Bedrock AgentCore processor has solid bones but ships with several issues that should be resolved before merge. Most pressing: the class name disagrees with the PR title and is exposed via a bare `import *` with no `__all__`, and the entire agent invocation runs inline inside `process_frame`, blocking the processor until streaming completes. Smaller correctness/naming concerns: an unguarded `json.loads` in the default response transformer, the camelCase public `agentArn` parameter, a race in the response-end bookend timer, and SSE parsing that won't handle CRLF or multi-line `data:` events. Worth a quick second pass before landing."
+  }
+}

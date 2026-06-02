@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "`changedFiles` complects three different identities into one mutable field",
+        "detail": "The `changedFiles?: string[]` field on BaseCoverageProvider is doing triple duty: it is (a) the configured intent (`options.changed` was set), (b) the resolved list of paths from git, and (c) the fallback list from `config.related` when the top-level `--changed` is in play. These are three different values with three different time semantics (config-time, test-run-start-time, related-resolution-time). Collapsing them into one nullable array means downstream code (`isIncluded`, `globFiles`) cannot tell whether \"no entries\" means \"changed mode is off\" or \"changed mode is on and nothing changed\" \u2014 both currently produce `this.changedFiles = undefined` or `[]`, and the behavior diverges silently. Make the intent explicit (e.g. a `changedFilter: { active: boolean, files: Set<string> } | null` value computed once) instead of a mutable place that hides which of the three states we're in.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-89, 329-345",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Place-oriented mutation of `globCache` + `changedFiles` couples lifecycle to call order",
+        "detail": "`isIncluded` memoizes results into `this.globCache`, but the cache key (`filename`) doesn't include whether `changedFiles` is active. The code patches around this by calling `this.globCache.clear()` inside `onTestRunStart`. That is a classic place-oriented-programming smell: a cache that lies until you remember to invalidate it, and an `onTestRunStart` hook whose correctness depends on being called before any `isIncluded`. If any caller invokes `isIncluded` between construction and `onTestRunStart` (or twice across runs with different `changed` values in watch mode), the cache will return stale answers. The simple decomposition: make the cache key a pure function of (filename, glob, exclude, changedFiles-identity), or recreate the cache as a value alongside the resolved filter rather than mutating in place.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-178, 329-345",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`onTestRunStart` complects \"resolve changed files\" with \"side-effect on the provider\"",
+        "detail": "The new hook does two unrelated things: it computes a set of files from git, and it mutates provider state. The pure-data version is a function `resolveChangedFiles(options, config) -> string[] | null` that returns a value; the provider then takes that value and constructs whatever filter it needs. As written, the hook is also fired from three different call sites in `core.ts` (runFiles, the empty-specifications branch, and the start path) \u2014 that's three places that must each remember to call it in the right order relative to `_testRun.start`. A value-returning helper would let `core.ts` compute the filter once and pass it where needed, instead of relying on the provider remembering its own lifecycle.",
+        "file": "packages/vitest/src/node/coverage.ts, packages/vitest/src/node/core.ts",
+        "lines": "coverage.ts 329-345; core.ts 607-610, 749-753, 880-885",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Inheritance from `test.changed` to `coverage.changed` is implicit and asymmetric",
+        "detail": "`resolveConfig` copies `resolved.changed` into `resolved.coverage.changed` only when the latter is `undefined`. The `false` case is then treated as \"explicitly off\" \u2014 which is the right intent but it's encoded by the absence/presence of a value in a mutated config object rather than as a value with an explicit meaning. The user-facing contract is also asymmetric: setting `coverage.changed: true` is documented as \"uses staged and unstaged changes\", but `onTestRunStart` passes `changedSince: true` to `VitestGit.findChangedFiles` \u2014 I cannot tell from the diff whether `VitestGit` accepts a boolean or requires a string. A pure resolver \u2014 `resolveCoverageChanged(coverageChanged, testChanged) -> false | true | string` \u2014 with an explicit enum-shaped return would make all four cases (off, inherit, explicit-ref, explicit-true) impossible to confuse.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "419-424",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform reinvents boolean coercion inline",
+        "detail": "The new `transform` in `cli-config.ts` hand-codes the `'true' | 'yes' | true` / `'false' | 'no' | false` mapping. This same coercion almost certainly exists elsewhere in the CLI plumbing (the existing `--changed` flag has the same shape). Duplicating the string-to-boolean ladder in each option is incidental complexity \u2014 extract it once and reuse, or let the existing boolean-or-string handler do the work.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`cleanUrl(_filename)` change in `isIncluded` is an unexplained behavior shift",
+        "detail": "The diff quietly changes `slash(_filename)` to `slash(cleanUrl(_filename))` inside `isIncluded`. This strips query strings from filenames before matching against globs and against `changedFiles`. That's likely needed so `foo.ts?v=123` matches `foo.ts` in the changed-files set \u2014 and the new `query-param-transforms.test.ts` case suggests so \u2014 but the change applies to every caller of `isIncluded`, not just the `changed` path. Any existing user whose include/exclude globs were matching against `?query`-suffixed paths will silently see different results. At minimum this deserves its own test and a note; ideally `cleanUrl` is applied only where it's needed (the changed-files comparison), not to every glob check.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151-152",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`changedFiles.includes(filename)` is O(n) per file inside a hot path",
+        "detail": "`isIncluded` is called once per candidate source file and is on the critical path for large repos. The new `included = this.changedFiles.includes(filename)` is a linear scan over the changed-files array on every call, after the glob check. For a monorepo with thousands of source files and dozens of changed files this is fine, but the simple-not-easy version is a `Set<string>` constructed once in `onTestRunStart`. The data structure is the wrong shape for the access pattern.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-177",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert behavior but not the decomposition",
+        "detail": "The new tests in `test/coverage-test/test/changed.test.ts` cover the happy paths (coverage.changed alone, with `excludeAfterRemap`, and overriding `changed`). They don't exercise: (a) `coverage.changed: true` (the documented \"uses staged and unstaged changes\" case), (b) watch-mode re-runs where `changedFiles` should be recomputed and the glob cache invalidated, (c) the empty-changed-set case (no files changed \u2014 does coverage report nothing, or fall back?). Each of those is a different state of the `changedFiles` identity over time, and each is where the current shape is most likely to surprise.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "71-166",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature is useful and the user-visible API is clean, but the implementation complects three concerns \u2014 configured intent, resolved file list, and lifecycle \u2014 into one mutable `changedFiles` field on the provider, plus a `globCache` that must be manually invalidated by an `onTestRunStart` hook called from three different sites in core.ts. The right decomposition is a pure resolver that returns a value (`{ active, files: Set<string> } | null`), constructed once per run and passed where needed, with the glob cache keyed by that value's identity rather than mutated in place. The `cleanUrl` change to `isIncluded` is a silent behavior shift that affects every caller, not just the changed-files path, and deserves its own test. The inheritance logic in `resolveConfig` is correct but encoded by `undefined` vs `false` semantics on a mutated object, which is exactly the kind of place-oriented confusion that produces subtle CLI surprises later. None of this is a blocker; it's a request to separate the value, the identity, and the time before the next feature lands on top of this shape."
+  },
+  "raw": ""
+}

@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "InstallRequirement contract for prepared/needs_more_preparation state machine is now silently broken across call sites",
+        "detail": "Previously the resolver guaranteed the postcondition: after resolve() returns, every requirement satisfies prepared==True and needs_more_preparation==False. The diff removes that bookkeeping from the resolver but does not relocate it into prepare_linked_requirements_more. Callers like install/download/wheel now assume that calling prepare_linked_requirements_more re-establishes the invariant, but the flags are no longer set anywhere. This is an LSP-style postcondition weakening: the supertype operation 'resolve' used to promise a fully-prepared requirement_set; it now returns requirements in a half-prepared state with no documented contract for who completes preparation. Any future caller (or a third command) will violate the invariant by accident.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist / get_dist contract is under-specified and creates two parallel sources of truth for the distribution",
+        "detail": "InstallRequirement.get_dist() now has three branches: cached _distribution, metadata_directory, local_file_path. The new set_dist() has no precondition (may a caller call it twice? must _distribution and metadata_directory agree?) and no postcondition documenting that subsequent get_dist() calls will return the cached value rather than re-reading from disk. This is SPEC-MISSING. The risk is a subtle abstraction leak: a caller that later populates metadata_directory will be silently shadowed by the cached _distribution, and the two can disagree. State the invariant: either _distribution is the authoritative cache once set, or metadata_directory wins after full preparation. Pick one and document it.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 608-620",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is being set from a metadata-only fetch path with a precondition that may not hold",
+        "detail": "In prepare.py the new code calls direct_url_from_link(req.link, req.source_dir) inside the metadata-only branch. The precondition of direct_url_from_link historically assumes source_dir reflects a materialized source (used to compute archive_info hash, etc.). In dry-run / metadata-only mode source_dir may be unset or empty, so the resulting DirectUrl will be a weaker postcondition than callers of download_info expect (e.g., pip lock / --report). Liskov view: download_info has an implicit contract (it describes what was actually downloaded and verified); populating it from a non-download path silently weakens that contract. Either narrow the type/field to indicate 'metadata-only provenance' or guard the assignment with a precondition check.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-545",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "WRONG-BOUNDARY: each command now re-implements 'finish preparation' rather than the preparer owning the lifecycle",
+        "detail": "install.py, download.py, and wheel.py each now contain an identical preparer.prepare_linked_requirements_more(requirement_set.requirements.values()) call inserted at the right moment. This is the resolver's responsibility leaking into every command. The module boundary is drawn around files, not around responsibility for the requirement lifecycle. A new command (or pip lock referenced in the news entry) will forget this call and silently regress to half-prepared requirements. Recommend: introduce a single 'finalize_for_install' / 'finalize_for_download' operation on the preparer (or a context manager around the requirement_set) that owns the postcondition.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-423 (and parallel sites in download.py, wheel.py)",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist accepts BaseDistribution with no subtype audit for metadata-only distributions",
+        "detail": "BaseDistribution is the supertype; metadata-only distributions returned by _fetch_metadata_only are a subtype. Some operations on BaseDistribution (e.g., accessing installed files, hashes computed from the wheel) have a stronger precondition (full wheel present) than the metadata-only subtype can satisfy. By caching it under the general get_dist() name, the codebase invites callers to invoke operations the metadata-only distribution cannot honor \u2014 an LSP violation surface. Either narrow the return type when in metadata-only mode, or document which BaseDistribution operations are safe pre-finalization.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-620",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "News entry mentions pip lock but the diff does not touch any pip lock command path",
+        "detail": "news/12603.feature.rst claims pip lock benefits from this change, but no command file for lock is modified and the new prepare_linked_requirements_more calls live only in install/download/wheel. If pip lock relies on the resolver's previous postcondition (full preparation during resolve), this PR may have silently regressed or improved it depending on its current call pattern \u2014 the contract is not stated. Verify and document the lock path explicitly.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The change is doing the right thing at the level of intent \u2014 pushing the heavy download out of the resolver so dry-run/lock can stop at PEP-658 metadata \u2014 but it accomplishes this by quietly weakening the resolver's postcondition without relocating the contract anywhere. resolve() used to guarantee a fully-prepared requirement_set (prepared=True, needs_more_preparation=False); now it returns requirements in a half-prepared state, and three commands each independently re-establish the invariant by calling prepare_linked_requirements_more at the right moment. This is a WRONG-BOUNDARY issue: the lifecycle of InstallRequirement is now distributed across the call sites rather than owned by the preparer or the requirement_set. Additionally, the new set_dist/get_dist cache is SPEC-MISSING (no documented interaction with metadata_directory, no LSP audit of metadata-only BaseDistribution subtypes), and download_info is being populated from a non-download path which weakens its implicit contract for downstream consumers like pip lock and --report. Recommend: introduce a single finalize operation on the preparer that owns the postcondition, document the set_dist contract and its interaction with metadata_directory, and verify the pip lock path mentioned in the news entry actually exercises the new metadata-only flow."
+  },
+  "raw": ""
+}

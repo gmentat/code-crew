@@ -1,0 +1,104 @@
+{
+  "persona": "pike",
+  "task_id": "pipecat__3113",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "New client created per invocation; the data flow says 'session in, stream out' \u2014 keep the client",
+        "detail": "Every LLMContextFrame opens a fresh aioboto3 client via `async with self._aws_session.client(...)`. The data structure here is a long-lived AWS connection; the algorithm (invoke + stream) becomes obvious if you hold that connection once. Move client creation to startup (or lazily once) and reuse it. As written, you pay TCP/TLS + credential resolution on every turn for no reason.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "212-219",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates the project's snake_case convention",
+        "detail": "Python and the surrounding codebase use snake_case. `agentArn` is camelCase because the AWS API spells it that way, but this is a public constructor parameter \u2014 callers shouldn't have to know the wire spelling. Name it `agent_arn` and translate to `agentRuntimeArn` at the boto3 boundary, which is exactly where translation belongs.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "115, 136, 215-216",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SSE parsing is reinvented and brittle; this is a filter, write it like one",
+        "detail": "The inner block splits on '\\n', checks 'data: ' prefix, slices `line[6:]`, warns on anything else. This is a stateless transform \u2014 bytes-in, text-out \u2014 and should be one small helper (or generator) shaped like a Unix filter. As written it conflates 'is this multi-part' branching with line parsing, ignores CRLF, and silently drops valid SSE features (event:, id:, blank-line record boundaries, multi-line `data:` continuations). Either use a real SSE parser or factor a tiny `iter_sse_data(part_bytes)` function and feed both branches through the same transform.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "227-251",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer will crash on non-JSON lines",
+        "detail": "`json.loads(response_line)` has no try/except. A single malformed line from the agent (keep-alive comment, partial chunk, error payload) takes down the whole turn with a JSONDecodeError that bubbles out of process_frame. Either catch and warn (consistent with the 'data: ' prefix warning above) or document that the default transformer assumes well-formed JSON per line and require callers to handle errors. Right now the failure mode is hidden.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "73-74",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Response-bookend state machine is doing too much for what it is",
+        "detail": "Four pieces of state (`_output_response_open`, `_last_text_frame_time`, `_close_task`, `_output_response_timeout`) plus a timeout-task dance exist to emit Start/End around text frames. But `process_frame` already knows exactly when the stream ends \u2014 it's the line after the `async for part` loop. The 1.0s timeout-close is only meaningful if frames can arrive *between* invocations, which this design doesn't support (each LLMContextFrame is one invocation, fully drained before returning). Drop the timer; emit Start before the loop iff any text was produced, End after. Same behavior, four fewer fields, one fewer task to leak. Also: `_last_text_frame_time` is written but never read.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "167-196, 253-258",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`from .agent_core import *` with no __all__",
+        "detail": "The module has no `__all__`, so the star-import in `__init__.py` re-exports `asyncio`, `json`, `os`, `aioboto3`, `logger`, every imported Frame type, and the two module-level helpers. Either define `__all__ = [\"AWSAgentCoreProcessor\", \"default_context_to_payload_transformer\", \"default_response_to_output_transformer\"]` or import the names explicitly. Small thing, but it leaks the namespace.",
+        "file": "src/pipecat/services/aws/__init__.py",
+        "lines": "11",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class docstring says `AWSAgentCoreProcessor`, PR title says `AWSBedrockAgentCoreProcessor`",
+        "detail": "The PR title and the class name disagree. Pick one and align module docstring, class name, and PR title. Small, but it's the kind of thing that haunts grep six months later.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "10-13, 77",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`default_context_to_payload_transformer` joins list-content parts without filtering type",
+        "detail": "`\" \".join([part.get(\"text\", \"\") for part in content])` assumes every list element is a dict with `.get`. Image parts, tool-use parts, or anything non-dict will raise AttributeError. Either filter on `isinstance(part, dict) and part.get(\"type\") == \"text\"`, or document that the default transformer is text-only and callers with multimodal content must supply their own. Right now it's a latent crash, not a design.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "53-54",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Env-var fallback baked into __init__ creates surprising precedence",
+        "detail": "Reading `os.getenv` at construction time means tests and reconfiguration can't override what was captured. boto3/aioboto3 already resolves credentials from env, profile, IMDS, etc., in a documented order. Pass through `None` and let the SDK do its job \u2014 fewer lines here, and the precedence rules become the AWS rules everyone already knows.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "143-148",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The processor is small and the shape is right \u2014 context comes in, payload goes out, SSE parts come back, text frames go out. That core data flow is sound. What gets in the way is the surrounding state: a per-invocation client (no reason; hold one), a four-field timer-driven bookend machine that does what a Start-before/End-after pair would do for free, and a hand-rolled `data: ` splitter that should be one small filter helper shared between the single-part and multi-part paths. Defaults will crash on malformed JSON lines and on multimodal list-content, which are the obvious next inputs. Naming nits (`agentArn`, class-vs-PR name, missing `__all__`) are small but worth fixing now before downstream code pins them. Strip the timer, keep the client, factor SSE parsing into a tiny generator, and the algorithm becomes self-evident from the data."
+  },
+  "raw": ""
+}

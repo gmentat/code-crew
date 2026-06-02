@@ -1,0 +1,76 @@
+{
+  "task_id": "vitest__9521",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "isIncluded's postcondition depends on mutable changedFiles state set by onTestRunStart",
+        "detail": "isIncluded was a pure function of filename plus glob config; now it silently depends on this.changedFiles, which is populated later by onTestRunStart. The globCache.clear() papers over the staleness, but the method's answer now varies by lifecycle phase. Resolve a ChangedFilesSet once at config-resolve time and pass it explicitly into isIncluded/getUntestedFiles.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path normalization contract between VitestGit/config.related and isIncluded is implicit and may not align",
+        "detail": "isIncluded calls this.changedFiles.includes(slash(cleanUrl(filename))), but VitestGit.findChangedFiles and ctx.config.related typically yield absolute paths in their own shape. The raw string membership test relies on undocumented normalization across providers/platforms. Canonicalize once at assignment in onTestRunStart and document the shape.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178, 332-345",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles stored as string[] with O(n) .includes on the isIncluded hot path",
+        "detail": "isIncluded runs per file and does array membership lookup against changedFiles. With many changed files this is O(n*m) on a hot path. Build a Set<string> once in onTestRunStart for O(1) lookup; the cache-invalidation story is unchanged.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-177, 332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart wired manually at three call sites in core.ts, easy to forget on a fourth",
+        "detail": "core.ts invokes coverageProvider?.onTestRunStart?.() after each _testRun.start in three places. Any future entry point that forgets the call silently breaks coverage.changed. Consolidate: call it inside _testRun.start, or have generateCoverage lazily resolve changedFiles from a single source of truth.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-886",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two changed-file sources (options.changed vs ctx.config.related) conflated under one field at runtime",
+        "detail": "onTestRunStart branches between re-running git for options.changed and reading ctx.config.related computed by test.changed. These are different facts with different provenance, decided by an if/else at use time. Pick one source of truth in resolveConfig instead of branching twice (resolveConfig and onTestRunStart fallback).",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI changed transform duplicates boolean coercion and silently accepts typos as git refs",
+        "detail": "The inline transform special-cases 'true'/'yes'/'false'/'no' and treats everything else as a ref, so 'tru' or 'flase' become refs that fail confusingly inside VitestGit. It also duplicates yargs/boolean coercion likely already used by the sibling --changed option. Validate at the boundary and reuse the existing helper.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the feature is well-scoped but adds incidental complexity around how \"changed files\" flows through the coverage provider. The core issue: isIncluded's contract now depends on mutable state (changedFiles) set by a separately-invoked lifecycle hook, with an implicit path-normalization contract and an O(n) array membership test on a hot path. The lifecycle hook is wired manually in three places in core.ts and the two changed-file sources (options.changed vs ctx.config.related) are conflated at runtime instead of at config-resolve time. Fix by resolving a single canonical Set<string> of normalized changed paths at config-resolve and passing it explicitly, plus tightening the CLI transform."
+  }
+}

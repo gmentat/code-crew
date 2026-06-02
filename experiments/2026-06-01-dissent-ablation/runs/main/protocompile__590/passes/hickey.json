@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "protocompile__590",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil result silently drops the panic, complecting error reporting with control flow",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the new code returns a bare nil. The caller of run() now has to know that nil means 'leader panicked' rather than 'result is ready'. The value (the outcome of the computation) and the identity (this task's result slot) and the time semantics (was it ever set? was it cleared?) are all complected into a single nil sentinel. Downstream code that previously could assume run() returns a non-nil *result will need to be audited; the comment 'Leader panicked but we did see a result' is itself confused (the typo 'did' likely means 'did not'), which is a sign the author has not yet named what this state actually is.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The fix patches the symptom of place-oriented state; t.result is being used as three different things at once",
+        "detail": "t.result is simultaneously: (a) an identity slot indicating 'a leader exists', (b) a value carrying the computed result, and (c) a signaling channel via .done. The race exists because the leader's panic path clears the slot (mutating place) while waiters are dereferencing it through Load(). The proper decomposition is to capture the *result value at the moment the waiter observes the leader, and never re-Load() the place afterward. The patch does this in one branch (passing output through to waitUntilDone) but leaves the place-oriented model in place, so the next caller who writes t.result.Load().done elsewhere will reintroduce the same class of bug. Name the invariant: once a waiter has a non-nil *result, it must hold that value, not re-read the slot.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460, 535-550",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two paths into waitUntilDone with subtly different output values; the early-return branch never re-reads",
+        "detail": "In the early branch (line 442) output is the already-loaded result from the closed-check above. In the CAS-failure branch a fresh Load() is performed. These are two different time-points observing the same place. If the leader transitions between 'pending' and 'panicked-cleared' between these reads, the two callers see different things. Make explicit which value of t.result each path is committing to, and document that waitUntilDone now operates on a snapshot, not the live slot.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection extraction is good but the comment 'only possible if output is pending' no longer travels with the call site",
+        "detail": "checkCycle's doc comment says cycles are 'only possible if output is pending', but the method itself does not enforce or check that precondition; it relies on the caller to invoke it only in that branch. That's an implicit contract complected between caller and callee. Either move the pending-check inside checkCycle, or rename it to make the precondition explicit (e.g. checkCycleAmongPending). The PR description itself notes 'only on the branch where we immediately know that the caller may be a child... we run the cycle check' \u2014 that knowledge is essential and should live in the type, not the prose.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproduces the race; the fix is hammock-less and unverifiable",
+        "detail": "A nil pointer deref under panic-during-leader is precisely the kind of bug that needs a deterministic reproduction (synctest, a controlled panic in a query, an assert that waiters return a typed error rather than panic). The diff contains no test. Without one, this fix is 'easy' (it stops the panic in the path the author noticed) but not 'simple' (we cannot demonstrate that the race window is closed, nor that future refactors won't reopen it). Add a test that injects a panic into the leader goroutine and asserts the waiter's observed outcome.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Returning nil from run() pushes nil-handling complexity outward without naming the new return contract",
+        "detail": "run()'s signature still says it returns *result, but it now has an unstated case where nil is meaningful. This is the classic 'complecting absence with failure with cancellation'. Either return a typed sentinel (&result{Fatal: ErrLeaderPanicked}) so the value carries its own meaning, or document the nil case in the function comment and audit every caller. Right now the value's meaning lives in the reader's head.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typo 'did see' likely 'did not see' \u2014 small but the comment is the only explanation of the new nil-return branch",
+        "detail": "'Leader panicked but we did see a result' reads as the opposite of what the code does. When the comment is the entire specification for a subtle concurrent edge case, the typo is load-bearing. Fix the wording and expand it: who clears t.result, when, and what the waiter is entitled to assume.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Follow-up PR for dependency cycles is acknowledged but not tracked in the type",
+        "detail": "The PR description says 'A follow up PR will be added for dependency cycles' and that 'current cycle detection only checks the immediate call path'. That's an essential limitation of the current model. Leave a TODO in checkCycle naming this gap, so the next reader of the code (not the PR) learns the same thing.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-409",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "This patch fixes a real nil-deref by snapshotting *result and passing it into waitUntilDone, which is the right direction \u2014 capture the value at observation time rather than re-Loading the place. But the fix is COMPLECTED and EASY-NOT-SIMPLE: t.result is still being asked to be an identity slot, a value, and a signaling channel at once, and the patch papers over one race window without naming the invariant. The new nil-return from run() is PLACE-ORIENTED leakage \u2014 absence, failure, and panic are all collapsed into one nil, with a typo'd comment as the only specification. P0s: name what nil-from-run means (or return a typed result) and decompose t.result so waiters never re-read the slot once they have a value. P1: there is no test reproducing the panic-during-leader scenario, which is exactly the kind of concurrent bug that needs a deterministic reproduction before we believe the window is closed."
+  },
+  "raw": ""
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "hickey",
+  "task_id": "kale__593",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "DEFAULT_BASE_IMAGE is defined in three places \u2014 the value is duplicated, not shared",
+        "detail": "The string 'python:3.12' now lives in backend/kale/pipeline.py (DEFAULT_BASE_IMAGE), in labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx (DEFAULT_BASE_IMAGE), and as a hardcoded fallback in Commands.ts getDefaultBaseImage. The whole point of this PR is single-source-of-truth for the default, but the value is complected with its location in three independent places. This is EASY-NOT-SIMPLE: it looks like centralization but the fact (the default image string) is still scattered. The fact should live in exactly one place \u2014 Python \u2014 and the TypeScript side should treat the absence of an RPC response as 'unknown', not silently substitute a stale literal.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "73",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The 'effective base image' is computed at three different layers with three different fallback chains",
+        "detail": "InlineMetadata computes (baseImage || pipelineBaseImage || defaultBaseImage || DEFAULT_BASE_IMAGE). The Jinja template computes (step.config.base_image or base_image or default_base_image). The dialog placeholder computes (pipelineBaseImage || defaultBaseImage || DEFAULT_BASE_IMAGE). These three chains must agree forever or the UI will lie about what will actually run. This is COMPLECTED: the resolution rule (a single function from facts to an image) is intertwined with three rendering sites. Extract one pure function \u2014 resolveBaseImage(cell, pipeline, default) \u2014 and call it from every site, including the template if possible.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "234-243",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior change: _set_base_image no longer falls back to empty string on pod-read failure",
+        "detail": "Previously, when podutils failed (no pod, ApiException) self.base_image was set to '' and the template's 'or python:3.12' kicked in. Now it is set to DEFAULT_BASE_IMAGE eagerly. That changes the *time semantics* of the default: before, the default was resolved at template-render time per step; now it is resolved at pipeline-config time and frozen. Any downstream code that distinguished 'user did not set' from 'set to python:3.12' has lost that distinction. State the intent explicitly \u2014 is the empty-string sentinel gone on purpose? \u2014 and pick one place where the default is materialized.",
+        "file": "backend/kale/pipeline.py",
+        "lines": "145",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The IMAGE button replaces a visible input with a hidden modal \u2014 losing information density for no gain",
+        "detail": "The previous UI showed the current base image inline in a text field. The new UI shows a button labeled 'IMAGE' that opens a dialog to see and edit the same value. The user now needs an extra click to see what image will run, and the disabled-when-stepName-empty rule is new gating that wasn't there before. This is EASY-NOT-SIMPLE: dialogs feel like 'cleaner UI' but they hide the value. If the goal was to show the default, the inline input could have used the default as its placeholder \u2014 one component, one place, one value visible.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "481-496",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Lazy local import of DEFAULT_BASE_IMAGE inside get_default_base_image RPC",
+        "detail": "The function does 'from kale.pipeline import DEFAULT_BASE_IMAGE' inside the function body. There is no circular import being broken here (compiler.py already imports it at module top). The local import is incidental complexity \u2014 it implies a problem that isn't there. Move it to the top of the module.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-98",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Width was changed from 35% to 30% with no visible reason in the diff",
+        "detail": "stepDependencies select went from width 35% to 30%. The base-image input that previously occupied 25% was removed. The arithmetic of the row layout is now implicit \u2014 what fills the remaining space? This is a small place-oriented change (magic numbers tuned by eye) where a flex/grid container would express the intent. Not blocking, but symptomatic of laying out by tweaking percentages.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "475",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "getDefaultBaseImage swallows the RPC error and substitutes a stale literal",
+        "detail": "On RPC failure the function returns 'python:3.12' \u2014 the very value that the RPC was meant to be the source of truth for. If the backend ever changes the default and the RPC fails, the UI will lie. Either propagate the error (let the UI render 'unknown') or accept that 'python:3.12' is a contract pinned in both languages and document it as such. Right now the code pretends to fetch the truth while having pre-decided what the answer will be.",
+        "file": "labextension/src/lib/Commands.ts",
+        "lines": "104-114",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "This PR wants to do a simple thing \u2014 surface the default base image in the UI \u2014 but the change is COMPLECTED across three layers. The fact 'python:3.12' is repeated in Python (pipeline.py), in TypeScript (CellMetadataEditor.tsx export), and as a swallowed-error fallback (Commands.ts), so the 'single source of truth' is actually three sources that must be kept in lockstep. The resolution rule (cell image, then pipeline image, then default) is also reimplemented at three sites with subtly different chains; that should be one pure function called everywhere, including the Jinja template if possible. The behavior change in _set_base_image (empty string to DEFAULT_BASE_IMAGE on pod-read failure) is a quiet shift in time semantics \u2014 the default is now materialized eagerly instead of at template-render time \u2014 and deserves to be a stated intent rather than a side effect. The UI move from inline input to modal-behind-button is EASY-NOT-SIMPLE: the same fact, now one click away. The question that should have been asked first: where does the default live, and who is allowed to know it?"
+  },
+  "raw": ""
+}

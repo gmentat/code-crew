@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "kale__593",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Default base image 'python:3.12' is duplicated across three places, complecting one fact with three identities.",
+        "detail": "The value lives in pipeline.py, nb_function_template.jinja2 fallback (via the original literal removed) and Commands.ts catch block, plus CellMetadataEditor.tsx as DEFAULT_BASE_IMAGE constant. One fact about the world ('the default') now has four places to drift. The whole point of the RPC was to make this a single source of truth; the TS-side fallback constant re-complects it. Keep the RPC value as the only source; on failure, render an explicit 'unknown' state rather than a stale literal.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "73, 521",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Effective-image resolution logic is duplicated between Jinja template and InlineMetadata.tsx, with subtly different precedence.",
+        "detail": "The template computes 'step.config.base_image or base_image or default_base_image'. The TS computes 'baseImage or pipelineBaseImage or defaultBaseImage or DEFAULT_BASE_IMAGE'. These are two implementations of one rule, in two languages. That rule is a pure function over four values; it should be named once (e.g. resolveBaseImage) and called from both display and compile paths, or at minimum documented as the canonical precedence.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "234-244",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior change: empty base_image no longer flows through to KFP default; this conflates 'unset' with 'use python:3.12'.",
+        "detail": "Previously self.base_image = '' signaled 'let KFP choose'. Now it forces 'python:3.12'. Those are two distinct facts ('user did not specify' vs 'user wants python:3.12') being collapsed into one value. If KFP's own default ever diverges from 3.12, every existing pipeline silently changes. Keep the identity 'unspecified' separate from the value 'python:3.12' and resolve it at the edge (template), not in pipeline state.",
+        "file": "backend/kale/pipeline.py",
+        "lines": "145",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New RPC 'get_default_base_image' adds a network round-trip to return a constant string.",
+        "detail": "DEFAULT_BASE_IMAGE is a compile-time constant on the backend. Wrapping it in an RPC turns a value into a time-dependent, failure-prone identity (note the try/catch fallback). Simpler: emit it once into the labextension config at startup, or include it in an existing bootstrap RPC alongside kfpUiHost. One round trip, one value, no fallback drift.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-99",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Replacing inline Input with a modal Dialog is 'easy-not-simple' UI complexity for a single text field.",
+        "detail": "The old UI showed one input next to other inputs; the new UI hides it behind a button labeled IMAGE that opens a modal with one field, a reset button, and an Ok button. More components, more state (baseImageDialogOpen), more click cost, same underlying fact (one string). The decomposition added a dialog without removing a concern. Consider keeping the inline input and showing the default as placeholder/helper text.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "484-496, 545-588",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Button styled width:'5%' with text 'IMAGE' is incidental layout coupling, not a simpler design.",
+        "detail": "A 5% width on a button whose label is 'IMAGE' will clip or wrap depending on container width. The previous 25%-width Input was at least sized to its content domain. This is a small thing, but it's a tell that the layout wasn't thought through on the hammock before the keyboard.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "484-496",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR sets out to make one fact \u2014 the default base image \u2014 visible in the UI, but in the process creates four places that fact lives (pipeline.py constant, RPC, Commands.ts fallback, CellMetadataEditor.tsx constant) and two implementations of the precedence rule (Jinja, TSX). That's COMPLECTED: one value, multiple identities, no single source of truth. The pipeline.py change also collapses 'unspecified' and 'python:3.12' into one value, losing information. The dialog UI is EASY-NOT-SIMPLE \u2014 more components and state for one string field. The question that should have been asked first on the hammock: what is the one place this default lives, and how does it flow to display and compile without being restated?"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "persona": "liskov",
+  "task_id": "falcon__2581",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Silent contract change: req.stream -> req.bounded_stream alters read() postcondition without documentation",
+        "detail": "The change in examples/things_advanced.py line 109 swaps req.stream.read() for req.bounded_stream.read(). These are not substitutable abstractions: req.stream is the raw WSGI input stream (read() may block indefinitely or read beyond Content-Length), whereas req.bounded_stream is bounded by Content-Length and returns b'' when length is None or 0. The PR description says the change was 'add req.content_length to req.stream.read()' which does not match the diff. The contract being relied upon (read() returns the body bytes for the current request, never blocks past Content-Length) should be stated, and the docstring/comment in the example should explain why bounded_stream is the correct ADT here. Without that, callers copying the example will not know which abstraction to choose.",
+        "file": "examples/things_advanced.py",
+        "lines": "109",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FAQ example violates its own implicit contract and leaks transport-layer concerns into the resource",
+        "detail": "The PostTest resource in docs/user/faq.rst reads req.stream.read(req.content_length or 0) and returns 400 when the read yields falsy bytes. This conflates two distinct invariants: (a) declared Content-Length is non-zero, (b) actual body bytes are present. A well-specified resource should either trust the framework's bounded_stream abstraction (and not re-implement length handling) or document the precondition explicitly. As written, the example teaches readers to bypass the bounded_stream abstraction and hand-roll length checks, which is exactly the leaky-abstraction pattern the framework already solves. The FAQ should state the contract: 'simulate_post lets you override headers to violate normal client invariants; here is how the server-side ADT responds.'",
+        "file": "docs/user/faq.rst",
+        "lines": "1375-1411",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts only status codes; postconditions on response body and side effects are unspecified",
+        "detail": "tests/test_examples.py resp3/resp4 assert only status_code. The ThingsResource.on_post postcondition includes setting resp.location to '/{user_id}/things/{id}' and calling db.add_thing. A substitution-safe test would assert at least that resp3 carries a Location header matching the documented format, and that resp4 does not mutate db. Without these, a future implementation that satisfies the status-code postcondition but breaks the location or persistence postconditions would pass these tests silently.",
+        "file": "tests/test_examples.py",
+        "lines": "62-80",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "README diff carries unrelated refactors that change a public contract (StorageError.handle signature)",
+        "detail": "The README diff reorders parameters of StorageError.handle from (ex, req, resp, params) to (req, resp, ex, params). This is a real contract change for falcon error handlers and is unrelated to the stated PR goal of adding POST tests for things_advanced. Mixing a signature/contract change into a test-additions PR makes the substitution boundary of the PR unclear: a reader cannot tell which changes are load-bearing for the new tests vs. drive-by cleanups. Either split into two PRs or call the signature update out explicitly in the PR description with the rationale (which falcon version moved to this ordering).",
+        "file": "README.rst",
+        "lines": "462-466",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "FAQ example class lacks docstring stating its abstract data type and operation contract",
+        "detail": "PostTest in the FAQ is presented without a docstring describing what it promises: 'on receiving POST, if Content-Length is absent or zero return 200; if Content-Length is non-zero and body has bytes return 201; if Content-Length is non-zero but body is empty return 400.' Without the spec written down, the example reads as ad-hoc branching. Since this is teaching material for how to exercise testing contracts, the contract itself should be explicit.",
+        "file": "docs/user/faq.rst",
+        "lines": "1383-1393",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR's stated purpose (add POST tests for things_advanced) is sound and the tests do exercise a real edge case (Content-Length non-zero with empty body). However the abstraction discipline is weak in three places. First, the swap from req.stream to req.bounded_stream in things_advanced.py is a real contract change between two different stream ADTs, presented without comment and inconsistent with the PR description. Second, the FAQ example hand-rolls length-checking against req.stream rather than using the bounded_stream ADT the framework provides, teaching the wrong pattern. Third, the README diff smuggles in a public-handler signature change (StorageError.handle parameter order) unrelated to the test additions, blurring the substitution boundary of this change. Tests assert only status codes; the location and persistence postconditions of on_post are not exercised. Recommend: state the contract for each example resource, choose one stream ADT and document why, and split the README signature change into its own PR."
+  },
+  "raw": ""
+}

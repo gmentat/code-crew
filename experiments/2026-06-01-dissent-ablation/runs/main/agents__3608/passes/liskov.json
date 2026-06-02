@@ -1,0 +1,54 @@
+{
+  "persona": "liskov",
+  "task_id": "agents__3608",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close-control message type does not match Deepgram's documented contract ({\"type\":\"Close\"} vs {\"type\":\"CloseStream\"})",
+        "detail": "The PR description and the Deepgram SDK reference both state that the required control message is {\"type\":\"CloseStream\"}, but the implementation sends {\"type\":\"Close\"}. This is a precondition mismatch at the protocol boundary: the contract the remote endpoint advertises is not the contract this client is honoring. If the server silently ignores unknown control types, the fix accomplishes nothing (audio still truncated); if it errors, the warning is swallowed by the broad except. The constant should be json.dumps({\"type\": \"CloseStream\"}) to actually satisfy the documented contract.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws postcondition weakened: a single receive() may consume a data frame, not a close acknowledgment",
+        "detail": "The supertype contract of _close_ws is 'flush pending output, then terminate'. ws.receive() returns the next message of any type, which during a streaming TTS session is likely to be a binary audio frame already in flight, not the server's response to Close. Waiting for one arbitrary message neither guarantees the server processed CloseStream nor drains remaining audio for the caller. The drain loop should read until a Close/Closed frame or timeout, and the discarded audio frames should at minimum be acknowledged in the contract (frame clause) so callers understand what _close_ws promises to do with in-flight audio.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-139",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare Exception catch in _close_ws hides contract violations from the WebSocket layer",
+        "detail": "`except Exception as e` over send_str + receive collapses distinct failure modes (already-closed socket, network error, protocol error, cancellation) into a single warning. Per the operating principles, the module boundary is where the contract lives; here the boundary is silently absorbing every failure on the way out. At minimum, asyncio.CancelledError should be re-raised, and ConnectionResetError / WSServerHandshakeError-style closures should be distinguished from genuine protocol failures so the contract of _close_ws is observable.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140-141",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class-level _FLUSH_MSG / _CLOSE_MSG constants are read from _close_ws on the outer TTS class via SynthesizeStream.*",
+        "detail": "_close_ws lives on the outer class (presumably ChunkedStream or TTS) but reaches into SynthesizeStream for its protocol constants. That couples two abstractions through their internals rather than through a shared protocol module. The Deepgram wire-protocol constants are an abstract data type of their own (the control-message vocabulary); lifting them to a module-level _CONTROL_FLUSH / _CONTROL_CLOSE (or a small ControlMessage type) makes the contract explicit and prevents the same drift that produced the Close-vs-CloseStream bug above.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-130, 235-239",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The change moves _close_ws toward honoring Deepgram's documented graceful-shutdown contract, which is the right direction, but the contract is stated incorrectly: the PR description and Deepgram SDK both specify {\"type\":\"CloseStream\"} while the code sends {\"type\":\"Close\"}. That is a precondition mismatch at the protocol boundary and likely defeats the fix. Secondary contract issues: the single ws.receive() doesn't actually establish the postcondition the comment claims (server-ack + cleanup), and the broad except swallows distinguishable failures including CancelledError. The protocol-vocabulary constants also belong in a small shared ADT rather than being reached into from another class. Decision: LSP-VIOLATION on the wire-protocol contract; fix the message name, tighten the drain loop, and narrow the exception handling before merge."
+  },
+  "raw": ""
+}

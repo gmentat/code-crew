@@ -1,0 +1,64 @@
+{
+  "persona": "pike",
+  "task_id": "protocompile__590",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panicked likely re-triggers nil deref upstream",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the function returns a bare nil *result. Callers of run() use the returned *result without nil-checks (output.done, output.Fatal, etc. in the rest of the call graph and in done callbacks). The fix moves the nil deref from inside waitUntilDone to the caller of run. Either return a synthetic failed result with a closed done channel and Fatal set, or have callers handle nil explicitly. Also the comment 'Leader panicked but we did see a result' appears to be a typo for 'did NOT see a result' \u2014 worth fixing for the next reader.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Race window remains: t.result can be swapped to nil between Load and use of output.done",
+        "detail": "The diff captures output := t.result.Load() once after a failed CAS, which closes the original race on the wait path. Good. But the first branch of run() (the closed(output.done) and checkCycle path at the top) still reads t.result.Load() and dereferences output.done. If a leader can set t.result to nil at any point (per the PR description), that earlier Load is equally racy \u2014 the same nil-deref pattern can occur there. The fix needs to be applied consistently wherever t.result.Load() is dereferenced, not just on the CAS-failure path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-449",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Data structure smell: *atomic.Pointer[result] with nil-as-cleanup-signal overloads two meanings",
+        "detail": "The root cause is that t.result encodes three states in one pointer: 'no leader yet' (nil), 'leader running' (non-nil pending), and 'leader gave up' (nil again). Reusing nil for two different states is exactly what produces races like this \u2014 readers can't distinguish 'not started' from 'aborted'. Data dominates: a small sentinel result value (a single shared *result with Fatal set and done already closed) for the abort case, or a dedicated state enum, makes the algorithm self-evident and removes the need for ad-hoc nil checks scattered through run(). Worth considering before adding a second follow-up PR on top of this shape.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is a clean win; small composable shape",
+        "detail": "Pulling cycle detection out of run() into checkCycle(caller, q) error is exactly the right move \u2014 run() becomes shorter, cycle detection is now a stateless transform over caller.path that returns an error or nil, and it can be tested in isolation. This is the composition direction this file should keep going. No change requested here; flagging as positive signal.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Passing output explicitly into waitUntilDone is the right call; consider naming",
+        "detail": "Threading the snapshotted *result through waitUntilDone instead of having it re-Load is the correct fix and removes the immediate race. Minor: the parameter is named output which shadows the named return in run(); pending or leaderResult would read more clearly at the call site and makes the role obvious without reading run().",
+        "file": "experimental/incremental/task.go",
+        "lines": "535-550",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The checkCycle extraction is a textbook small-composable improvement \u2014 run() gets shorter and cycle detection becomes a stateless transform. The waitUntilDone signature change closes the obvious race on the wait path. However, the fix is incomplete: returning bare nil from run() when the leader vanished just relocates the nil deref to run()'s callers, and the closed(output.done) branch at the top of run() still reads t.result.Load() with the same racy pattern. The deeper issue is the data structure \u2014 t.result uses nil to mean both 'not started' and 'aborted', which is what generates this class of bug. A sentinel aborted-result (done already closed, Fatal set) would let the algorithm stay self-evident and remove the scattered nil checks. Decision: TOO-CLEVER-AROUND-WRONG-DATA-STRUCTURE \u2014 request changes."
+  },
+  "raw": ""
+}

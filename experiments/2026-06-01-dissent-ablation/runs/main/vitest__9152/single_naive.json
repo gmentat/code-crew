@@ -1,0 +1,134 @@
+{
+  "task_id": "vitest__9152",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Sync FS reads on every stack-trace parse without caching",
+        "detail": "getSourceMap calls existsSync + readFileSync synchronously for each external file referenced by a stack frame, and extractSourcemapFromFile re-runs on every invocation with no memoization. When a stack contains multiple frames from the same external module (common), the same large transpiled file (and possibly its .map sibling) is read and parsed repeatedly. On large monorepos with deep stacks this is a noticeable per-error cost.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186, 318-340",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No error handling around readFileSync; a transient read failure breaks stack parsing",
+        "detail": "Both getSourceMap and createConvertSourceMapReadMap call readFileSync after an existsSync check with no try/catch. A race (file deleted between checks), permission error, or invalid UTF-8 will throw and propagate out of parseErrorStacktrace, turning a recoverable enhancement (apply source map if available) into a fatal error during test reporting. The fallback should be 'return undefined and report the original stack'.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "180-184, 335-339",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "@types/convert-source-map placed in dependencies rather than devDependencies",
+        "detail": "convert-source-map is consumed internally by test-run.ts; its types are not part of vitest's public API surface. Putting @types/convert-source-map in dependencies ships type-only metadata to every consumer at install time. It should live under devDependencies unless a published .d.ts re-exports the type.",
+        "file": "packages/vitest/package.json",
+        "lines": "201",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Source resolution change relies on `from` being a filesystem path",
+        "detail": "Switching from resolve(s, from) to resolve(from, '..', s) is the conventional source-map semantic (sources are relative to the map's parent directory). However, if `from` is ever a URL or virtual path (e.g., vite virtual modules, http(s)://), `resolve` from pathe/node:path will produce a nonsense path. Worth confirming that DecodedMap's `from` is always a real filesystem path in all callers, and adding a guard otherwise.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "366-368",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Fallback returns '{}' which is not a valid source map",
+        "detail": "createConvertSourceMapReadMap returns '{}' when the referenced .map file does not exist. This is valid JSON but not a valid source map (missing version, mappings, sources). Depending on how convert-source-map and downstream @jridgewell/trace-mapping consume it, this could surface as a noisy warning or cause TraceMap construction to throw later. Returning undefined/null (if API permits) or a minimal-but-valid map ({version:3,sources:[],names:[],mappings:''}) would be safer.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "338",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Return type annotated as rollup's SourceMap is misleading",
+        "detail": "extractSourcemapFromFile is typed as returning rollup's SourceMap, but the value comes from convert-source-map's toObject() which returns a RawSourceMap-shaped plain object \u2014 not the rollup class with toString/toUrl methods. Importing the type from rollup as a structural shape works but is a confusing dependency to pull in here. Prefer importing RawSourceMap from @jridgewell/trace-mapping or convert-source-map directly.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "10, 320",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No dedicated unit test added; coverage relies solely on a snapshot update",
+        "detail": "The PR checklist asks for a test that fails without the change and passes with it. The diff updates only the stacktraces.test.ts.snap. This is sufficient regression coverage for the specific transpiled fixture but does not directly assert behavior for: missing .map files, malformed map comments, virtual modules, or files outside node_modules. A focused unit test on extractSourcemapFromFile would harden the new module.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "57-78",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convertSourceMap.fromMapFileSource may throw on invalid map comments",
+        "detail": "convert-source-map's fromMapFileSource historically threw when the map comment pointed at a missing or malformed file; the readMap callback added here mitigates the missing-file case by returning '{}', but a malformed inline data URL or a syntactically broken sourceMappingURL comment can still throw. Wrapping the fromSource/fromMapFileSource calls in try/catch with a debug log would make the path robust to user code that ships bad map comments.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "321-329",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether sync readFileSync in stack parsing is acceptable",
+        "positions": [
+          {
+            "persona": "pragmatic_shippability",
+            "position": "Stack-trace parsing is already sync (parseErrorStacktrace is sync), errors are not hot-path, and the alternative (async refactor) is a much larger change. Ship as-is; add caching only if profiling shows it matters."
+          },
+          {
+            "persona": "performance_discipline",
+            "position": "Even in error paths, repeated sync reads of large transpiled bundles add up \u2014 especially in watch mode where many tests can fail in a session. A small WeakMap/Map cache keyed by file path is ~5 lines and removes the concern entirely."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the source-path resolution change is universally safe",
+        "positions": [
+          {
+            "persona": "formal_correctness",
+            "position": "resolve(from, '..', s) is the canonical interpretation of source-map sources (relative to the map's directory). The previous resolve(s, from) was a bug. The fix is correct and matches the spec/Vite behavior."
+          },
+          {
+            "persona": "edge_case_skeptic",
+            "position": "DecodedMap is used across many call sites; if any caller passes a URL, data: URI, or virtual module id as `from`, the new resolution produces garbage paths silently. The old code was also wrong for those cases, but the snapshot diff doesn't prove the new behavior is universally safe \u2014 only that the transpiled fixture works."
+          }
+        ]
+      },
+      {
+        "topic": "Where @types/convert-source-map should live",
+        "positions": [
+          {
+            "persona": "packaging_strict",
+            "position": "Internal-only types belong in devDependencies. Putting them in dependencies bloats consumer installs and conflates public API types with internal ones."
+          },
+          {
+            "persona": "monorepo_pragmatist",
+            "position": "Vitest already ships many type packages as dependencies because its public types transitively reference them. Consistency with the existing package.json layout may be the reason \u2014 verify before flagging as wrong."
+          }
+        ]
+      }
+    ],
+    "summary": "The fix is conceptually correct: it (a) corrects source-path resolution in DecodedMap to treat `from` as the map file rather than its directory, and (b) wires up a getSourceMap callback so external (node_modules) modules with sourcemap comments get their stack frames mapped back to original sources. The snapshot diff confirms the user-visible improvement. The main concerns are operational robustness rather than correctness: synchronous file reads with no caching and no error handling in an error-reporting path, a `'{}'` fallback that isn't a valid source map, and a type-package placed in `dependencies`. None are merge-blockers, but tightening error handling and adding a small read-cache before landing would meaningfully harden the change. A dedicated unit test for extractSourcemapFromFile (missing map, malformed comment, virtual module) would also be worth adding alongside the existing snapshot update."
+  },
+  "raw": ""
+}

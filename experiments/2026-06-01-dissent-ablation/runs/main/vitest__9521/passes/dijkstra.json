@@ -1,0 +1,104 @@
+{
+  "persona": "dijkstra",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Mutable shared state `changedFiles` introduces an unstated invariant across the provider lifecycle",
+        "detail": "A new instance field `changedFiles?: string[]` is set inside `onTestRunStart` and consulted inside `isIncluded` and `getUntestedFiles`. No precondition is documented: what guarantees that `onTestRunStart` has run before `isIncluded` is called? What guarantees that a previous run's value has been invalidated on a re-run when `options.changed` is later cleared? The code clears `globCache` when `changedFiles` is set but never resets `changedFiles` to undefined when `options.changed` is falsy on a subsequent invocation, so a stale array can survive across runs. State the invariant or refuse the smuggled goto disguised as a field.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-89, 329-346",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`onTestRunStart` is called in three places by manual duplication rather than by a single structured hook",
+        "detail": "Three separate `await this.coverageProvider?.onTestRunStart?.()` calls were sprinkled into `core.ts` at lines 610, 753, and 885. This is the modern equivalent of a goto: the author has smuggled a cross-cutting concern into three branches of control flow and is trusting future maintainers to remember to add the fourth call when a fourth code path appears. Either factor the test-run start into a single function that owns the call, or document the invariant that every test-run entry point must invoke this hook. As written, correctness depends on programmer vigilance, which is exactly the discipline structured programming was invented to eliminate.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-611, 749-754, 880-886",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`onTestRunStart` silently swallows the case where `findChangedFiles` returns null/undefined",
+        "detail": "`const changedFiles = await vitestGit.findChangedFiles({ changedSince: this.options.changed }); this.changedFiles = changedFiles ?? undefined`. When git lookup fails or returns nothing, `changedFiles` becomes undefined and the system silently falls back to reporting coverage for *all* files. The author has not stated the postcondition: is it acceptable for a CI user who asked for changed-only coverage to receive full coverage instead, with no diagnostic? This is a defensive-as-substitute pattern: the nullish coalescing hides a meaningful failure. Either reason about it and document the fallback as intended, or refuse silently and throw.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-340",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`isIncluded` uses array linear scan `this.changedFiles.includes(filename)` inside a hot path",
+        "detail": "`isIncluded` is called per-file and is cached, but the membership test is O(n) over the changed-files list for every cache miss. For a repository with hundreds of changed files this is silently quadratic against include-glob expansion. A Set would make the membership test O(1) and is the obvious correct data structure for the question being asked. The author has chosen the wrong data type for the operation, which is precisely the kind of sloppiness that compounds.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-178",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path normalization asymmetry between `changedFiles` source and `isIncluded` comparison",
+        "detail": "`isIncluded` now computes `filename = slash(cleanUrl(_filename))` and compares against `this.changedFiles.includes(filename)`. But `changedFiles` is populated either from `VitestGit.findChangedFiles` or from `this.ctx.config.related` \u2014 neither documented as producing `slash`-normalized, `cleanUrl`-stripped paths. On Windows, or for any caller that passes a path with query suffix or backslashes, the equality will silently fail and the file will be excluded from coverage. State the precondition on the shape of `changedFiles` entries, or normalize them on assignment.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151-178, 329-340",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI `transform` accepts string `'true'`/`'false'` but type signature claims `boolean | string`",
+        "detail": "The transform converts `'true'`/`'yes'` to `true` and `'false'`/`'no'` to `false`, but any other string passes through unchanged. There is no validation that the resulting string is a plausible git ref. A user typo `--coverage.changed=ture` will silently be treated as a git ref and fail later in `VitestGit.findChangedFiles`, far from the source of the error. The transform is a polite goto: it pretends to validate while actually only translating two pairs of literals.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`getUntestedFiles` semantics changed under the same name",
+        "detail": "Previously the predicate was `this.ctx.config.changed` and used `this.ctx.config.related`. Now it is `this.changedFiles`, which is populated from either coverage.changed or test.changed. The function name and the call sites have not changed, but its meaning has: it now filters by coverage-changed-since rather than test-changed-since. The author has redefined a primitive without renaming it. Any caller reasoning about its postcondition has been silently invalidated.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "197-204",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Documented default is `false` but resolution makes it inherit from `test.changed`",
+        "detail": "Docs and JSDoc say `@default false`. The resolveConfig code sets `coverage.changed = resolved.changed` when undefined. So the actual default is `test.changed`, not `false`. The documentation and the code disagree about the postcondition. Either fix the doc to say 'inherits from test.changed; otherwise false', or change the code to honor the documented default.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "280-287",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert behavior but not invariants",
+        "detail": "The new tests in `changed.test.ts` and `query-param-transforms.test.ts` are tested-not-proved: they exercise three or four configurations and assert the coverage map. There is no test for the failure modes \u2014 git command failing, empty changed list, Windows path separators, query-suffix paths, override precedence with `false` explicit vs undefined. Tests show the presence of the happy path; they do not establish the absence of bugs in the cases that matter. The author has confused 'it works on my fixtures' with correctness.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "70-166",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The patch adds a new option whose intent is reasonable but whose implementation is unreasoned. The author introduced a mutable instance field `changedFiles` with no stated precondition or invariant, sprinkled the `onTestRunStart` hook into three control-flow branches by hand rather than through a structured single entry, and silently degrades to all-files coverage when git lookup fails. Path normalization is asymmetric between writer and reader, the membership test is a linear scan, the CLI transform pretends to validate two literals and passes everything else through, and the documented default contradicts the resolved default. The tests are TESTED-NOT-PROVED \u2014 they verify happy paths only and prove nothing about the failure modes that will bite CI users. UNREASONED in its current form. Would not REFUSE outright, but the author should state the spec, normalize `changedFiles` on assignment, collapse the three hook sites into one, and either fail loudly on git errors or document the fallback."
+  },
+  "raw": ""
+}

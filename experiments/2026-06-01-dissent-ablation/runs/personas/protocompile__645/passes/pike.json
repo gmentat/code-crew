@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil-guard pattern is repeated ~15 times instead of pushed into the data structure",
+        "detail": "Almost every accessor now opens with the same five-line `var x T; if f != nil { x = f.field } ; return seq.NewFixedSlice(x, ...)` ritual. The data is fighting the code. If `imports`, `arenas`, and the per-file slices were addressed through helper methods that tolerate a nil receiver (or via a tiny `safeSlice(f, func(*File)[]T)` filter), every getter collapses to one line. WRONG-DATA-STRUCTURE / COULD-BE-A-FILTER.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "180-330",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two different nil-zero idioms coexist (`f == nil` vs `IsZero()`); pick one",
+        "detail": "`*File` methods guard with `f == nil`; value types like `Type`, `Member`, `Oneof` guard with `!t.IsZero()`. Both shapes are reasonable, but mixing them inside the same package forces every future maintainer to remember which type uses which. A single convention (e.g. always `IsZero()`, with `*File.IsZero()` defined as `f == nil`) would make the rule one line of prose instead of a footnote per file.",
+        "file": "experimental/ir/ir_file.go, experimental/ir/ir_type.go",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflection-driven test discovers methods at runtime instead of being a simple table",
+        "detail": "`testZeroAny` walks `reflect.Type.NumMethod`, special-cases `IsZero`, `ValueNodeIndex`, and `Context` by name, and infers \"accessor\" from `NumIn==1`. That is clever in the bad way: when a future method violates an unstated assumption, the failure will be a confusing reflect panic, not a clear test name. A boring per-type table of `(name, func(T) any)` would be longer but obvious. TOO-CLEVER.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "92-137",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`ValueNodeIndex` sentinel `-1` is encoded in the test rather than the type",
+        "detail": "The test hard-codes that `ValueNodeIndex` returns `-1` on zero. That sentinel now lives in a doc comment plus a reflect special-case. An `Index` type with an `Ok()` method, or returning `(int, bool)`, would make the zero behavior self-evident from the signature and drop the special case from the test. Data dominates.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`Imports()` / `TransitiveImports()` allocate a zero `imports` struct just to dispatch",
+        "detail": "`var imp imports; if f != nil { imp = f.imports }; return imp.Directs()` copies the struct on every call only so the method dispatch works on a value. Giving `*imports.Directs` a nil-tolerant receiver (it already nil-checks downstream) and calling `f.imports.Directs()` directly would be shorter and avoid the copy. Small but the pattern repeats.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "181-198",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts \"Len() == 0\" via reflection on any return with a `Len` method",
+        "detail": "The fallback branch calls `r.MethodByName(\"Len\")` and replaces the value with its length. This silently passes any return type that happens to expose a `Len() int` method, even ones where length-zero is not the right zero-check. A short explicit list of indexer types would catch regressions where a new return type sneaks past the heuristic.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "125-135",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The behavior change is correct and the new zero-test is valuable, but the implementation pushes the same defensive boilerplate into every getter rather than fixing the data structure. Two different nil-idioms (`f == nil` vs `IsZero()`) coexist in one package, which is a maintenance trap. The test itself leans on reflection and name-based special cases where a small explicit table would be clearer and more durable. None of this blocks merge, but a follow-up that unifies the nil-tolerance into one helper (or into the receiving types) would let the getters return to one line each and remove the cleverness from the test."
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "persona": "knuth",
+  "task_id": "prowler__9561",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getCategoryLabel silently drops the previous explicit mapping; the heuristic is asymptotically fine but practically wrong for several known IDs",
+        "detail": "The old adapter had an explicit CATEGORY_LABELS map with hand-tuned labels (e.g., 'forensics-ready' -> 'Forensics Ready', 'trustboundaries' -> 'Trust Boundaries', 'internet-exposed' -> 'Internet Exposed'). The new heuristic in lib/categories.ts replaces this with rules: special-case dict (empty), version pattern, length<=3 -> upper, else capitalize. For 'trustboundaries' (a single 15-char token without a hyphen) this yields 'Trustboundaries', not 'Trust Boundaries' as before. State the invariant: 'every previously known ID renders identically'. That invariant fails for at least this case, and there are no tests asserting it. Either re-add the affected entries to SPECIAL_CASES or add a regression test enumerating the legacy IDs and their expected labels.",
+        "file": "ui/lib/categories.ts",
+        "lines": "1-54",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Short-word-is-acronym heuristic is unsound; 'new', 'old', 'all', 'log', 'web' etc. would be uppercased",
+        "detail": "Rule 3 ('words of length <=3 are likely acronyms') is a guess masquerading as a rule. It happens to work for the current 14 category IDs, but it is an unstated assumption about the entire future input domain (the API supplies category IDs). The fallback comment in the old code at least documented the simple 'capitalize and replace hyphens' behavior; the new code asserts a stronger claim about the input distribution. Either (a) restrict to an explicit allow-list of known acronyms, or (b) document the invariant 'API category IDs are guaranteed to be either acronyms <=3 chars or capitalizable words' and add a test to that effect. Without one of these, the function is under-audited.",
+        "file": "ui/lib/categories.ts",
+        "lines": "44-49",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HorizontalBarChart computes maxValue inside the .map callback - O(n^2) instead of O(n)",
+        "detail": "Inside the per-item map, the code computes `const maxValue = data.length > 0 ? Math.max(...data.map((d) => d.value)) : 0;`. This runs once per row, so total work is O(n^2) in the number of bars. The previous code had the same issue inline; the refactor was a chance to lift it. For typical n (~14 categories) the constants are tiny and this is firmly in the 'don't optimize without measuring' bucket - PREMATURE-OPTIMIZATION to chase. But the fix is also free: hoist `const maxValue = ...` above the .map. Worth doing because it also makes the invariant ('maxValue is constant across rows') explicit to the reader.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "63-73",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "displayPercentage logic mixes two distinct quantities under one name",
+        "detail": "`calculatedWidth` uses `item.value / maxValue * 100` (bar width as fraction of largest bar) while `displayPercentage` uses `item.value / total * 100` (share of total). Both fall back to `item.percentage` first. This is correct, but the two derivations share enough structure that a reader has to stop and verify they aren't the same thing. A one-line literate comment stating the invariant - 'width is scaled to the largest bar so visual differences are legible; the displayed percentage is share-of-total' - would save the next reader the trip. NEEDS-LITERATE-COMMENT.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "63-73",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SEVERITY_ORDER now has two keys collapsing to the same ordinal without comment",
+        "detail": "`Informational: 4` and `Info: 4` both map to 4. This is presumably intentional (the API can return either spelling) but the invariant 'Info and Informational are aliases for the same severity' is not stated. A one-line comment, or better a derived constant `const INFORMATIONAL = 4; ... Informational: INFORMATIONAL, Info: INFORMATIONAL`, would make the alias relationship obvious to the reader and prevent the values from drifting apart in a future edit.",
+        "file": "ui/components/graphs/shared/constants.ts",
+        "lines": "15-22",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CategorySelector treats empty string and 'all' identically but the empty case is unreachable",
+        "detail": "`handleValueChange` checks `value === '' || value === 'all'`. The Select only emits values from SelectItem children, none of which is `''`. The empty branch is dead defensive code; either remove it (the type system already guarantees the value comes from SelectItem) or add a literate comment explaining why it's there (e.g., 'shadcn select may emit empty string when cleared programmatically'). Dead-but-defensive code without a stated reason invites future readers to wonder whether they're missing a case.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "23-29",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "Verdict: UNDER-AUDITED. The diff is mostly a clean extraction of a category-label helper plus a UI component, but the extraction changes the algorithm. The previous code was a lookup table with an explicit fallback; the new code is a heuristic (special-case dict, version regex, length<=3 -> upper, else capitalize). For the current 14 known IDs the heuristic happens to coincide with the old table except 'trustboundaries' (now 'Trustboundaries', was 'Trust Boundaries'), and it commits the function to an unstated assumption about all future API category IDs. The HorizontalBarChart changes also introduce an O(n^2) max-scan that the refactor was well-placed to fix. None of this is wrong in the asymptotic sense, but the invariants are not stated and there are no regression tests pinning the legacy labels - which is precisely the case Knuth marks under-audited rather than rigorous."
+  },
+  "raw": ""
+}

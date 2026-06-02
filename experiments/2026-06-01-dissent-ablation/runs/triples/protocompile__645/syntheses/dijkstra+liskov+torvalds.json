@@ -1,0 +1,78 @@
+{
+  "task_id": "protocompile__645",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil/IsZero guards copy-pasted across ~20 accessors instead of a single helper",
+        "detail": "The same `var s []T; if x != nil { s = x.field }; return seq.NewFixedSlice(s, ...)` boilerplate recurs across ir_file.go, ir_type.go, and ir_imports.go. One missed guard reintroduces a panic. Capture the invariant once \u2014 a zeroSafeSlice helper or a nil-tolerant seq.NewFixedSlice \u2014 so future accessors cannot drift.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "182-365",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value contract is implicit and only enforced by a reflective test",
+        "detail": "Every accessor on a zero/nil receiver is supposed to return the zero of its result, but the contract is nowhere written down. State it once in package-level doc (or on IsZero) so future methods know the precondition. The test approximates the spec rather than codifying it.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel zero predicates (f == nil vs x.IsZero()) for the same notion of absence",
+        "detail": "File uses `if f != nil` while Type/Member/Oneof/Element use `!x.IsZero()`. Different idioms for the same abstract guard invite drift and make future accessors inconsistent. Pick one canonical predicate across the IR types \u2014 ideally IsZero on *File too \u2014 so substitution is uniform.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex returns sentinel -1, inventing a new postcondition callers will violate",
+        "detail": "Every other zero accessor returns the type's zero; ValueNodeIndex returns -1, and callers doing `MessageKeys().At(e.ValueNodeIndex())` will panic. The doc comment is not the type signature. Return `(int, bool)`, add a HasValueNode predicate, or require callers to check IsZero first.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflective zero test silently skips methods with parameters and special-cases ad hoc",
+        "detail": "testZeroAny filters to NumIn()==1, so accessors taking arguments (e.g. ImportFor) never exercise the zero path, and Context/IsZero/ValueNodeIndex are special-cased inline. Add an explicit allowlist of skipped methods so new accessors cannot silently escape coverage.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "85-137",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "imports.Directs/Transitive closures still capture i and read i.publicEnd after the nil guard",
+        "detail": "When i==nil the empty slice prevents the mapper from running, so it works today. But the closure still references i.publicEnd / i.weakEnd, so any refactor that loses the length guard reintroduces the panic. Bail out earlier with an empty Indexer or assert non-nil at the top.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-245",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR identifies a real class of bug \u2014 accessors panicking on zero values \u2014 but resolves it by scattering ad-hoc nil/IsZero guards across roughly twenty call sites instead of capturing the invariant in one helper. The zero-value contract is sound in intent but implicit in execution: it lives only in a reflective test rather than stated in package doc, and two parallel predicates (`f == nil` vs `IsZero()`) coexist for the same notion. ValueNodeIndex's -1 sentinel is an abstraction leak that relocates the panic to callers. Land the test first, factor the guard into one helper, document the contract, and fix the sentinel before merging."
+  }
+}

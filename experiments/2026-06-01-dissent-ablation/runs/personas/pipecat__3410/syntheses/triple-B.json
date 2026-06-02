@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3410",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Trailing audio in _audio_send_buffer is never flushed on stream end or shutdown.",
+        "detail": "The fixed-size packetizer holds back any remainder smaller than fixed_audio_packet_size and discards it on disconnect, EndFrame, or Cancel. The postcondition 'all serialized audio reaches the wire' is violated. Either pad-and-flush on end-of-stream or document the truncation explicitly.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Real-time pacing is advertised but not implemented in the send loop.",
+        "detail": "The PR and changelog promise 'real-time pacing,' but _write_frame drains the buffer in a tight while loop with back-to-back sends. No clock, sleep, or _next_send_time gate ties packet emission to wall-clock time. Either implement pacing or rename the knob to reflect framing-only behavior.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size has no validated invariant against sample width and channels.",
+        "detail": "The size is an untyped int with no precondition that it be a multiple of (bytes_per_sample * channels). A misconfigured value (e.g. 641 on 16-bit mono) silently tears samples at every packet boundary. State the invariant and enforce it at setup() or StartFrame with an assert/raise.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66, 498-509",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization is a Vonage-specific concern leaking into the generic FastAPI transport.",
+        "detail": "20ms framing is a property of the Vonage protocol and belongs in VonageFrameSerializer's contract, not in FastAPIWebsocketTransport. A composing PacketizingFrameSerializer wrapper would respect the module boundary and keep _write_frame as a thin dispatcher rather than welding serialize+buffer+chunk+send together.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "56-66, 495-515",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF deserialization accepts two undocumented digit shapes instead of pinning the protocol.",
+        "detail": "deserialize() tries message.get('digit') then message.get('dtmf', {}).get('digit') with no spec reference. That hardens a guess into the contract. Cite the documented Vonage shape, parse that, and treat the other as an explicit compatibility shim with a TODO or log-and-drop.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "150-178",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Event dispatch in deserialize() is an if-elif ladder over string events with no enumerated type.",
+        "detail": "The text-message branch is a chain of event-string comparisons mostly logging and returning None, with one real handler. A small dict from event name to handler would make the data drive the code, shrink the function, and make unknown-event handling (currently a silent debug log) explicit.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "120-180",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the Vonage serializer is reasonably clean but the FastAPI transport changes are where the substance lies. Three structural problems dominate: trailing audio is never flushed on stream end, the advertised 'real-time pacing' is not actually implemented (only chunking), and fixed_audio_packet_size has no enforced alignment invariant against sample width. A boundary issue compounds these: Vonage-specific 20ms framing leaks into a generic transport when a composing serializer wrapper would be cleaner. Secondary cleanups: DTMF digit-shape parsing should be pinned to the documented Vonage protocol, and the event-string if-elif ladder wants to be a small dispatch table."
+  }
+}

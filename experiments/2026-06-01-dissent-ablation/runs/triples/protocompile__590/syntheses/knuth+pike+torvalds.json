@@ -1,0 +1,78 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() relocates the nil-deref to every caller instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() now returns nil. Callers treat *result as non-nil and will deref output.done/output.Fatal, swapping one nil-deref for another upstream. The leader's panic-cleanup path should produce a sentinel failed *result with a closed done channel and Fatal set, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The TOCTOU race between CompareAndSwap and t.result.Load() is not actually closed",
+        "detail": "Between the CAS failing and the subsequent Load, the leader can panic and clear t.result. The patch handles one snapshot but offers no proof of progress; the pending-output branch above also trusts t.result.Load() without the same guard, so the two paths handle the same race inconsistently. Either retry the CAS loop or state and enforce the invariant precisely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the branch it annotates",
+        "detail": "The comment fires precisely when output is nil \u2014 i.e. we did NOT see a result. A contradicting comment in a concurrency primitive is worse than none. Fix to something like: 'Leader panicked and cleared t.result before we could observe it; abandon this wait.'",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test reproduces the panicking-leader race",
+        "detail": "A concurrency fix without a deterministic reproducer is folklore and will regress. Add a test that injects a panic in the leader goroutine with N waiters and asserts each waiter receives a well-formed error result rather than nil or a panic. This locks the invariant and documents intent.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Shadowed `output` variable in the CAS-failure branch hurts readability",
+        "detail": "`output := t.result.Load()` shadows the named return `output` from run()'s signature. A reader must track two `output`s in one function and which one the named return refers to on each path. Rename the local (e.g. `winner`) so the named return is the only `output`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR bundles an unrelated refactor with the race fix, making bisection harder",
+        "detail": "The checkCycle extraction is a clean composition win, but combining a pure refactor with a subtle concurrency fix makes review and bisection harder. Split into two patches: a zero-behavior-change refactor and a minimal race fix. The author already plans a follow-up, so the split is natural.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "torvalds",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The checkCycle extraction and threading *result explicitly through waitUntilDone are clean wins, but the core race fix is half-done: returning bare nil from run() just relocates the nil-deref one frame up into every caller, and the TOCTOU window between CompareAndSwap and t.result.Load() is still open in principle. The right fix is a sentinel failed-result with a closed done channel rather than overloading nil. A misleading comment, a shadowed variable, no regression test, and a bundled refactor compound the problem."
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "task_id": "vitest__9521",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles is set per provider instance but never cleared between runs in watch mode",
+        "detail": "onTestRunStart() assigns this.changedFiles when options.changed or ctx.config.changed is set, but if neither condition is true on a subsequent run (e.g., config reloaded in watch mode), the stale value from the previous run persists. This can cause coverage filtering to silently use outdated changed-file lists. The method should reset this.changedFiles = undefined at the top before the conditional assignments.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-347",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path comparison in isIncluded uses raw filename while changedFiles likely contains relative paths",
+        "detail": "isIncluded does `this.changedFiles.includes(filename)` where filename is `slash(cleanUrl(_filename))` \u2014 the absolute, normalized path passed in. VitestGit.findChangedFiles historically returns absolute paths, but coverage providers also pass relative paths in some flows (e.g., getUntestedFiles passes file relative to root). The includes() check is an exact string match with no normalization, so a mismatch between absolute/relative or slash style will silently drop files. Needs explicit normalization on both sides or a Set keyed by a canonical form.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache is populated with changed-file-filtered results, polluting subsequent runs",
+        "detail": "isIncluded writes the included result (which is now AND-ed with changedFiles membership) into this.globCache. If onTestRunStart later clears or changes changedFiles, only one explicit globCache.clear() at the end of onTestRunStart guards this \u2014 but isIncluded is also called from getUntestedFiles and other paths that may run before/after that clear. Mixing glob results and changed-file membership in the same cache conflates two orthogonal predicates and risks subtle staleness across configuration permutations.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "169-182",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart is invoked in three places but not in all test-run entry points",
+        "detail": "The hook is added to three locations in core.ts (lines 610, 753, 885), but Vitest has additional run paths (typecheck, browser mode, benchmark) that also call _testRun.start. If coverage is collected in those paths, changedFiles will never be populated and the feature silently regresses to including all files. A single centralized hook (e.g., wrapping _testRun.start) would be more robust than three sprinkled callers.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "610, 753, 885",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform accepts boolean-from-string but type signature is boolean | string",
+        "detail": "The CLI transform converts 'true'/'yes' to true and 'false'/'no' to false. However, the documented type is `boolean | string` and the option is documented as accepting a git ref. Users passing `--coverage.changed=yes` will get a working boolean, but `--coverage.changed=main` works as a ref \u2014 this is consistent. The issue: the docs in coverage.md say default is `false (inherits from test.changed)` which is contradictory; the default before inheritance is `undefined`, after inheritance may be string/boolean. Documentation should clarify that explicit `false` disables inheritance (as the test confirms).",
+        "file": "docs/config/coverage.md",
+        "lines": "411-413",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl introduced in isIncluded without explanation or test for query-param case beyond happy path",
+        "detail": "The change from `slash(_filename)` to `slash(cleanUrl(_filename))` strips query strings (e.g., ?vue&type=script). This is a behavior change that affects all callers of isIncluded, not just the new changed-files path. The query-param-transforms test covers this, but the PR description does not call out this incidental behavior change. Worth a code comment explaining why cleanUrl is needed here.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test file mode changed from 644 to 755 with no apparent reason",
+        "detail": "test/coverage-test/test/changed.test.ts had its executable bit flipped (old mode 100644 -> 100755). Test files should not be executable. Likely an accidental chmod from the contributor's environment.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance check uses `!== undefined` which means explicit `false` for test.changed propagates",
+        "detail": "`if (resolved.coverage.changed === undefined && resolved.changed !== undefined)` \u2014 if a user sets `test.changed: false` explicitly (rare but valid), it propagates to coverage.changed: false, which is the same as the default anyway, so harmless. But if test.changed defaults to undefined (not false), the symmetry is good. Worth verifying the default of test.changed is undefined, not false, otherwise inheritance triggers unexpectedly.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "422-424",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test for the inheritance-disabled case via CLI",
+        "detail": "The unit test covers the resolveConfig inheritance path, but there is no integration test verifying that `--coverage.changed=false` on the CLI overrides `--changed=HEAD`. Given the transform's special-casing of 'false'/'no', a CLI-level test would lock in that behavior.",
+        "file": "test/core/test/cli-test.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart name collides conceptually with onTestFailure/onAfterSuiteRun but semantics differ",
+        "detail": "Existing lifecycle hooks like onAfterSuiteRun fire per suite; onTestFailure fires on failure. onTestRunStart fires once at the start of a run. The naming is fine but the optional `?` makes it a soft contract \u2014 custom providers won't know they should implement it. Consider documenting in the CoverageProvider interface comment that this is where changed-file computation happens and that omitting it disables changed-file support.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "31-32",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Should onTestRunStart live in the lifecycle hook or be computed once at config-resolve time?",
+        "positions": [
+          {
+            "persona": "Simplicity framing",
+            "position": "Resolving changedFiles in resolveConfig (sync-ish, one place) avoids the multi-call-site bug entirely and removes the need for globCache.clear(). The git call is cheap and deterministic for a single run."
+          },
+          {
+            "persona": "Pragmatic shippability framing",
+            "position": "Lifecycle hook is correct because in watch mode the changed set evolves per run \u2014 computing at config time would freeze it to the initial value. The bug is the missing reset, not the hook design."
+          }
+        ]
+      },
+      {
+        "topic": "Should changedFiles filter happen inside isIncluded or upstream as a separate filter?",
+        "positions": [
+          {
+            "persona": "Abstraction discipline framing",
+            "position": "isIncluded should answer 'does this file match the include/exclude globs' \u2014 folding in a changed-file membership conflates two predicates and pollutes the glob cache. A separate filter applied after isIncluded would be cleaner."
+          },
+          {
+            "persona": "Pragmatic framing",
+            "position": "Co-locating the check inside isIncluded means every existing caller (untested files, instrumented files, report filter) gets the changed-file behavior for free. Splitting into two predicates means hunting down every caller and adding the second check."
+          }
+        ]
+      },
+      {
+        "topic": "Severity of the path-normalization risk in isIncluded",
+        "positions": [
+          {
+            "persona": "Formal correctness framing",
+            "position": "String-equality membership across paths that may be absolute or relative, with or without query params, is a P0 correctness bug waiting for a user report. Should block merge until normalized via Set<canonical-path>."
+          },
+          {
+            "persona": "Empirical framing",
+            "position": "The tests pass and VitestGit returns paths in a consistent form for the covered flows. Mark as P1 and let real-world feedback drive any edge-case fixes."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR cleanly adds a `coverage.changed` option with sensible inheritance from `test.changed`, a CLI flag, docs, and integration tests. The main concerns are operational robustness rather than design: onTestRunStart never resets `this.changedFiles`, so watch-mode runs can carry stale state; the hook is wired into three specific call sites in core.ts but may be missed by other test-run paths (typecheck, browser); and path comparison in `isIncluded` uses raw string `includes()` which is fragile across absolute/relative/query-param forms. The `cleanUrl` addition is a quiet behavior change worth a code comment. None of the issues are clearly merge-blocking, but the stale-state and missing-hook-sites concerns should be addressed before landing to avoid silent regressions."
+  },
+  "raw": ""
+}

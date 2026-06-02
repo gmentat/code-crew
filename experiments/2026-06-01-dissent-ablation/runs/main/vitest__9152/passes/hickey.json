@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getSourceMap silently swallows I/O and parse errors on every external frame",
+        "detail": "The new getSourceMap callback calls readFileSync and convertSourceMap.fromSource on any file that exists, with no try/catch and no caching. A malformed inline sourcemap comment, a binary file that happens to pass existsSync, or a transient read error will throw out of the stack-trace formatter, which is the worst possible place to throw. The value here is 'a sourcemap, or nothing' \u2014 make that value explicit and total: wrap the body, return undefined on any failure, and memoize per file path so a stack with N frames in the same module doesn't re-read and re-parse the file N times.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188, 318-331",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolvedSources path semantics changed from 'resolve relative to map URL' to 'resolve relative to map's parent directory' without a test pinning the intent",
+        "detail": "The one-line change from resolve(s || '', from) to resolve(from, '..', s || '') is the actual fix, and it conflates two different ideas of 'from': the URL of the map vs. the directory containing the map. The sourcemap spec resolves sources relative to the map file (which is what '..' approximates for a file path, but not for a URL, and not when 'from' is already a directory). This is a value-semantics change at the heart of the module; it deserves a unit test on DecodedMap that documents the chosen interpretation (map-path vs. map-dir, file vs. URL, absolute source paths, sourceRoot) rather than only being validated through a snapshot four layers up the stack.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "extractSourcemapFromFile and the stack-trace handler are complected with project.vite and the filesystem",
+        "detail": "extractSourcemapFromFile is a pure-ish value transformer (code string + path -> SourceMap | undefined), but it's only reachable through a closure that also queries project.vite.moduleGraph and calls existsSync/readFileSync inline. The pure core \u2014 'given a file's text and its path, return its embedded or referenced sourcemap' \u2014 is worth lifting into its own exported function with no fs and no Vite dependency, and the test-run.ts callback should be the thin shell that decides 'is this an external module?' and 'read the bytes'. That separation is the difference between a value that's easy to test and a behavior that's only reachable by booting Vitest.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188, 318-341",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns '{}' as a sentinel instead of signaling absence",
+        "detail": "When the referenced .map file is missing, the reader returns the string '{}' so that convert-source-map parses an empty object rather than throwing. That's a place-oriented workaround: the function's real return type is 'map text or nothing', and encoding 'nothing' as a parseable-but-meaningless value hides the case from callers and from logs. Returning undefined / null (whichever convert-source-map's API accepts) or throwing a typed MissingSourceMap and catching it in extractSourcemapFromFile would make the time/identity of 'we couldn't find the map' explicit instead of laundering it through a fake value.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "333-341",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Snapshot-only verification of the fix; no test pins the behavior at the unit boundary",
+        "detail": "The only evidence the fix works is the updated stacktraces.test.ts.snap showing .ts line numbers instead of .js. Snapshots verify the current end-to-end string; they do not document the contract. A small test that constructs a DecodedMap with known sources / from values and asserts resolvedSources, plus a test for extractSourcemapFromFile against fixtures (inline map, external .map, missing .map, malformed comment), would make the value semantics of this change durable \u2014 and would catch the next regression without anyone having to read a stack trace.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "56-75",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix is a one-line path-resolution correction in DecodedMap plus an external-module sourcemap loader hooked into parseErrorStacktrace. The path-resolution change is the load-bearing line and it changes value semantics (resolve relative to the map's parent directory rather than to the map URL) without a unit test pinning that interpretation. The new loader in test-run.ts is COMPLECTED: a pure 'bytes + path -> sourcemap or nothing' transformation is tangled with Vite's module graph, the filesystem, and an unguarded readFileSync/parse pair that will throw out of the stack-trace formatter on any malformed inline map. Decompose the pure core out, total the function with a try/catch, memoize per file, and replace the '{}' sentinel with explicit absence. The behavior change deserves unit tests at the DecodedMap and extractSourcemapFromFile boundaries; the snapshot diff alone is EASY-NOT-SIMPLE evidence."
+  },
+  "raw": ""
+}

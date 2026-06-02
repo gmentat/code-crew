@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3113",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Bookend invariant (Start/End frame pairing) broken by race between timeout task, in-flight pushes, and overlapping invocations.",
+        "detail": "_output_response_open and _close_task are shared mutable state with no lock. The 1.0s timeout-driven End frame can fire while _push_text_frame is mid-await, and a second LLMContextFrame arriving during streaming can push a second Start without closing the first. State the invariant and serialize access, or drop the timer entirely and emit Start/End around the loop.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "108-201",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer raises JSONDecodeError, aborting the stream and leaving bookend state corrupted.",
+        "detail": "json.loads is called with no try/except. A malformed SSE line propagates out of process_frame mid-response, leaving _output_response_open=True and a dangling close task. Either document transformers as total (catch and return None) or wrap at the call site and log+skip. The transformer contract under malformed input must be stated.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "76-89, 221-246",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AWS bedrock-agentcore client is created and torn down per LLMContextFrame instead of once per processor lifetime.",
+        "detail": "async with self._aws_session.client(...) opens a fresh client on every frame. Boto session+client setup is non-trivial and adds per-frame latency. Open the client once in setup() and close it in cleanup() so client lifecycle stops leaking into the per-call hot path.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "204-220",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No exception safety around AgentCore invocation; failures leave bookend state wedged for the next invocation.",
+        "detail": "If invoke_agent_runtime or any async-for iteration raises, Start may already be pushed, _output_response_open stays True, and _close_task remains scheduled. The next LLMContextFrame then pushes a second Start without closing the first. Wrap in try/finally that guarantees the bookend invariant on every failure path.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "187-235",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public parameter agentArn violates PEP 8 and the file's own snake_case convention.",
+        "detail": "Every other constructor parameter uses snake_case (aws_access_key, aws_region) but agentArn is camelCase, mirroring the AWS field. Rename to agent_arn and translate to agentRuntimeArn at the boto3 call site. This is the signature users type; keep one convention at the Python boundary.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "102-118",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Default context transformer silently swallows non-text content parts, masking malformed multimodal input.",
+        "detail": "' '.join([part.get('text', '') for part in content]) emits empty strings for image/tool parts, producing leading/trailing/double spaces and silent omissions. Filter non-text parts then join, or document explicitly that only text parts are supported and refuse others. The postcondition is currently ambiguous.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "52-61",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a single verdict: the processor's framing state machine is under-specified and racy. The Start/End bookend invariant is held by unsynchronized mutable state, a 1s timeout task, and a final explicit close \u2014 three representations of the same fact that race with each other, with overlapping invocations, and with exceptions. The default response transformer can raise JSONDecodeError mid-stream and corrupt that state. The boto client lifecycle leaks into the per-frame path. Naming (agentArn) and the silent-drop multimodal default round out the cleanup list."
+  }
+}

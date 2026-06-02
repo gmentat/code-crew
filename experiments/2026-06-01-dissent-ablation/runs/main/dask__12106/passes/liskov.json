@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "dask__12106",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "`raise PerformanceWarning(msg)` followed by unreachable `break` violates the warning-vs-exception contract",
+        "detail": "`PerformanceWarning` is, by name and convention in the scientific Python ecosystem (numpy, pandas, dask), a `Warning` subclass meant to be emitted via `warnings.warn`, not raised. Raising it strengthens the postcondition of `to_zarr` (it can now fail with an exception where previously it warned/proceeded), which is an LSP-style violation of the caller's contract. The PR description itself asks 'Would an exception be appropriate here?' \u2014 the contract has not been decided, yet the code raises. Additionally, the `break` after `raise` is dead code, indicating the author was uncertain whether this is a warning loop or a fatal check. Decide the contract: either `warnings.warn(msg, PerformanceWarning)` and `break`, or `raise ValueError(msg)` / a dedicated exception \u2014 but not a raised `Warning`.",
+        "file": "dask/array/core.py",
+        "lines": "~3905-3925",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "SPEC-MISSING: contract of `to_zarr` under shard/config conflict is undefined",
+        "detail": "The PR author explicitly asks in the description what should happen when the global `array.chunk-size` config competes with the zarr shard shape. That is the contract question, and it must be answered before the code lands \u2014 downstream callers (xarray, anyone with CI pipelines writing zarr) need to know whether `to_zarr` may now raise, warn, or silently proceed. Document the precondition (config-derived chunk size must be >= shard size, or shard size wins) and the postcondition (what the rechunk guarantees) in the docstring. Without this written down, every wrapper of this write path is operating against an implicit contract.",
+        "file": "dask/array/core.py",
+        "lines": "~3870-3935",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`safe_chunk_size` conflates per-axis violation with whole-shard byte size",
+        "detail": "Inside the per-axis loop checking divisibility on axis `ax`, the suggested `safe_chunk_size` is computed as `np.prod(zarr_write_chunks) * itemsize` \u2014 the total bytes of one shard, which is the right number for the global `array.chunk-size` config, but the message presents it alongside a per-axis violation. The invariant being checked is per-axis (`dw[0] % zw == 0`); the remediation is global. Make the message explicit that `safe_chunk_size` is the whole-shard size, not the axis-`ax` size, otherwise users will set the config and be surprised when other axes still fail.",
+        "file": "dask/array/core.py",
+        "lines": "~3910-3920",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LEAKY-ABSTRACTION: divisibility check uses only `dw[0]`, ignoring that `normalize_chunks` may return non-uniform tuples",
+        "detail": "`dask_write_chunks[ax]` is a tuple of chunk sizes along that axis; `nominal_dask_chunk_size = dw[0]` assumes all chunks share the nominal size (with possibly a smaller remainder). For typical `auto_chunks` output that holds, but `normalize_chunks` does not promise uniform chunks \u2014 it returns a tuple precisely because chunks may vary. If a non-uniform tuple flows through (future `auto_chunks` changes, or `previous_chunks` that don't divide evenly), `dw[0]` silently misses violations in `dw[1:]`. Either check `all(c % zw == 0 for c in dw[:-1])` (allowing the final remainder), or document the precondition that `dask_write_chunks[ax]` is uniform-prefix.",
+        "file": "dask/array/core.py",
+        "lines": "~3902-3908",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test depends on `PerformanceWarning` being importable from `dask.array.core` \u2014 boundary not stated",
+        "detail": "The test now imports `PerformanceWarning` from `dask.array.core`. If this symbol is intended as public API, it should be exported via `__all__` and documented; if it is internal, the test reaches across the module boundary. The boundary needs to be drawn \u2014 either promote it to public contract or use the standard `warnings`/exception machinery so the test doesn't pin an internal name.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~35",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test name says 'warns' but asserts `pytest.raises`",
+        "detail": "`test_zarr_risky_shards_warns` advertises a warning; the assertion checks an exception. This is a naming/contract mismatch in the test suite \u2014 future readers will be confused about whether the documented behavior is 'warn' or 'raise'. Rename to `test_zarr_risky_shards_raises` and align with whatever the resolved contract from the P0 above turns out to be.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~5197-5215",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`max(1, z.dtype.itemsize)` defends against a precondition that zarr already guarantees",
+        "detail": "Zarr arrays do not have zero-itemsize dtypes; this `max(1, ...)` defends against a case the zarr contract already excludes. Either trust the contract and drop the `max`, or add a comment naming the case being defended against. Defensive guards without a stated reason erode the clarity of the invariant.",
+        "file": "dask/array/core.py",
+        "lines": "~3911",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The change moves `to_zarr` toward a cleaner contract \u2014 rechunk to an integer multiple of the shard shape \u2014 which is a real improvement to the abstract data type of the zarr write path. However, the contract under config/shard conflict is left explicitly undecided in the PR description while the code commits to `raise PerformanceWarning(...)`, which both violates the warning-vs-exception convention and silently strengthens `to_zarr`'s failure postcondition. The per-axis divisibility check also leaks the assumption that `normalize_chunks` returns uniform chunks (`dw[0]`), and the test asserts `pytest.raises` on a class named `*Warning`, a contract mismatch the codebase should not enshrine. Decide the contract first (warn-and-proceed vs. raise-a-real-exception), document it on `to_zarr`, then align the implementation, the symbol's exported status, and the test names to that contract."
+  },
+  "raw": ""
+}

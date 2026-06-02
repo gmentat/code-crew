@@ -1,0 +1,110 @@
+{
+  "task_id": "kale__601",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Whole compiled script inlined into RPC payload when a path already exists",
+        "detail": "The backend reads the entire compiled .kale.py file from disk and inlines it as script_content in every compile_notebook response, even though pipeline_package_path already points at the same file. This bloats every RPC response with an unbounded payload, threads a potentially large string through three layers of React state, and is paid on every compile regardless of whether the user ever clicks Download. The correct shape is a small read/download endpoint keyed by path (or reusing the existing artifact link with a download attribute) so the bytes are fetched on demand and the compile response stays small.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "116-125",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "File read has no error handling, no encoding, and no size bound",
+        "detail": "open(script_path) is called unguarded with no explicit encoding and no upper bound on size. A missing file, permission error, non-UTF8 content, or large script will now fail the entire compile_notebook RPC even though compile_pipeline already succeeded, coupling a convenience feature to the success path of the main operation. At minimum pin encoding='utf-8', bound the read, and wrap in error handling so script_content becomes optional rather than fatal; better, do not read here at all.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-120",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "compiledPath and compiledContent duplicated across layers with no invariant tying them together",
+        "detail": "The same artifact is represented twice in the response (a path and inline bytes) and threaded through Commands, DeploysProgress state, and DeployProgress props with no stated invariant that content == read(path). The two representations can desynchronize if anything mutates script_path between compile and read, and the type system gives no help. Either commit to a single CompiledArtifact value type at the boundary, drop compiledPath in favor of on-demand fetch, or split content retrieval into its own RPC so the existing compile contract stays clean.",
+        "file": "labextension/src/widgets/deploys-progress/DeploysProgress.tsx",
+        "lines": "36-90",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GetAppIcon used as a clickable control is not a real button \u2014 no keyboard activation, no role, no focus ring",
+        "detail": "The download trigger is a bare <GetAppIcon onClick=...> styled with cursor:pointer. titleAccess provides an accessible name but the element is not focusable, has no role='button', and cannot be activated by Enter/Space. Wrap it in an IconButton (or render an <a download> consistent with the sibling 'Done' link) so the affordance matches the action and keyboard users can reach it.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "235-239",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Download handler built imperatively via DOM mutation instead of declaratively",
+        "detail": "handleDownloadClick uses createElement('a'), appendChild, click, removeChild, and revokeObjectURL \u2014 a six-step imperative DOM dance for what is conceptually a (filename, bytes) pair. A plain <a href={url} download={fileName}> rendered when content is available is shorter and obvious; alternatively, extract a downloadBlob(name, content) helper so the component depends on a stated operation rather than DOM mechanics. There is also no try/finally around revokeObjectURL, so a throw mid-sequence leaks the object URL.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-183",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Filename fallback 'pipeline.kale.py' is dead code that would mask a bug if it fired",
+        "detail": "fileName = props.compiledPath.split('/').pop() || 'pipeline.kale.py' is unreachable in correct operation because the outer guard already requires compiledPath to be truthy, and if it ever did fire it would silently substitute a plausible-looking but wrong filename. The precondition on compiledPath's shape (no trailing slash, forward-slash separated) is also unstated. Drop the fallback or assert the invariant, and let a single function own the (path -> displayName) mapping.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "171-173",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Click is a silent no-op when compiledContent is missing \u2014 affordance and precondition out of sync",
+        "detail": "The GetAppIcon is rendered whenever compiledPath is present, but handleDownloadClick silently does nothing if compiledContent is absent. The user sees a button that promises an action and gets no feedback. Gate rendering on (compiledPath && compiledContent), render a disabled state, or make compiledContent a required field of the success state so the type encodes the invariant.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-184",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a single verdict: the feature is small and works, but the data shape is wrong. The compiled script already lives on disk at a path the RPC returns; inlining the full contents into every compile_notebook response and threading it through three layers of React state is plumbing carrying an unbounded payload that may never be used. The backend read is also under-specified \u2014 no encoding, no size bound, no error handling, no invariant tying the inlined bytes to the package path \u2014 so a side feature can now fail the main compile RPC. The frontend wiring is sloppy in matching ways: an icon-with-onClick instead of a real button (breaking keyboard a11y), an imperative DOM download dance with no try/finally around revokeObjectURL, a dead filename fallback, and a silent no-op when state is missing. NEEDS-WORK: replace the inline payload with a small read-by-path endpoint (or reuse the existing artifact link with a download attribute), guard and bound the server read, render the control as a real button, and tighten the click handler's contract."
+  },
+  "raw": ""
+}

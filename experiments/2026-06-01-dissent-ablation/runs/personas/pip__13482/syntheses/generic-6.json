@@ -1,0 +1,94 @@
+{
+  "task_id": "pip__13482",
+  "arm": "generic-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "install --dry-run still calls prepare_linked_requirements_more, defeating the PR's stated goal",
+        "detail": "install.py unconditionally invokes preparer.prepare_linked_requirements_more before the dry-run early-return, triggering exactly the full wheel downloads the PR claims to avoid. The call must be gated on not options.dry_run or moved below the dry-run short-circuit. Without this, the headline fix is a no-op.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-422",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Resolver no longer sets req.prepared / needs_more_preparation, leaving stale state flags for downstream consumers",
+        "detail": "The resolver previously set req.prepared=True and req.needs_more_preparation=False after preparation. That block was deleted but never reintroduced in the new command-side call sites. Any caller of resolver.resolve() that doesn't invoke prepare_linked_requirements_more (e.g., pip lock, --report, third parties) or downstream code branching on these flags will see inconsistent state, risking re-preparation or assertion failures.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_dist returns cached metadata-only distribution even after full wheel download",
+        "detail": "set_dist caches the PEP-658 metadata-only BaseDistribution, and get_dist now prefers self._distribution over metadata_directory/local_file_path. After prepare_linked_requirements_more downloads and unpacks the real wheel, get_dist still returns the stale metadata-only dist, potentially serving incorrect metadata or missing RECORD/files info. The cache must be invalidated on full preparation.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info built from req.source_dir which may be None during metadata-only fetch",
+        "detail": "In prepare_linked_requirement the metadata-only branch calls direct_url_from_link(req.link, req.source_dir) before any unpack. source_dir is typically None at this point, producing a DirectUrl missing subdirectory/hash info compared to the post-download path. This degrades --report and pip lock output fidelity, particularly for VCS or non-PyPI links.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression tests added for dry-run no-download behavior",
+        "detail": "The PR closes #12603 with a behavioral guarantee that pip install --dry-run on a PEP-658 index doesn't fetch wheel bodies, but no functional or unit test pins this down. Without a regression test using a fake index serving PEP-658 metadata, future refactors will silently regress the fix. Add a test asserting no full-wheel download occurs in the dry-run path.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist lacks docstring documenting the PEP-658 caching contract and precedence over metadata_directory",
+        "detail": "set_dist is a trivial one-liner that now takes precedence over metadata_directory in get_dist, but has no docstring or comment explaining that it's intended only for PEP-658 metadata-only flows and should not shadow a fully-prepared distribution. A short note about the cache invariant would prevent future misuse.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The panel reaches unanimous consensus on two P0 issues that gut the PR's stated goal: install --dry-run still calls prepare_linked_requirements_more unconditionally, and the resolver no longer sets req.prepared/needs_more_preparation flags with no replacement bookkeeping. Three P1 correctness gaps follow: get_dist returns a stale metadata-only distribution after full download, download_info is built from a likely-None source_dir during metadata-only fetches, and there are no regression tests for the headline behavior. The direction is sound but the implementation needs guarding, flag restoration, and cache invalidation before merge."
+  }
+}

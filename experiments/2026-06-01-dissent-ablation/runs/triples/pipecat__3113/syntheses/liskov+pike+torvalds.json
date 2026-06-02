@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3113",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "AWS bedrock-agentcore client is recreated on every LLMContextFrame instead of being reused.",
+        "detail": "Each invocation opens and tears down a fresh aioboto3 client inside process_frame, incurring TLS setup, credential resolution, and teardown on a voice-pipeline hot path. The client lifecycle belongs in setup()/cleanup(), with one long-lived client per processor. This also leaks aioboto3 session semantics into per-frame logic.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout-based LLMFullResponseEndFrame emission races with explicit end-of-stream close and can break Start/End bookend invariants.",
+        "detail": "_push_text_frame schedules a 1s timer to emit the End frame while process_frame also emits one at end-of-stream, with _output_response_open as shared mutable state and no serialization. Overlapping invocations or the timer firing between chunks can double-close, drop the End, or interleave bookends. Emit Start once before the loop and End once after; drop the timer.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "171-201, 245-252",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer calls json.loads with no error handling and crashes the stream on malformed lines.",
+        "detail": "A malformed SSE line, error payload, or keepalive raises JSONDecodeError, aborting the invocation mid-response and leaving _output_response_open true with unbalanced bookends. Either wrap the call and log+skip, or specify that the transformer returns None on parse failure so it composes cleanly with the rest of the pipeline.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78-87, 240-246",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "agentArn parameter name violates PEP 8 and the file's snake_case convention.",
+        "detail": "Every other constructor argument is snake_case (aws_access_key, aws_region) but agentArn mirrors the AWS API field. Public Python API should be agent_arn, translated to agentRuntimeArn only at the boto3 call site. Small but it is part of the signature users type.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104-152",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hand-rolled SSE parsing is brittle and mixes transport with business logic.",
+        "detail": "split('\\n'), startswith('data: '), and slice [6:] are inlined in process_frame and assume exactly one space after 'data:', which SSE does not guarantee. Extract a small generator that yields response lines from bytes so process_frame just consumes and pushes. Composition beats a 40-line conditional.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "218-246",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "aioboto3 dependency bump is bundled into the feature patch instead of a separate commit.",
+        "detail": "pyproject.toml and uv.lock churn for aioboto3/aiobotocore/boto3/botocore/s3transfer (15.0 to 15.5) affects every AWS consumer in the repo. It deserves its own patch with justification for why the new processor requires the bump, separated from the feature change.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel converges on NEEDS-WORK. Three issues are unanimous P1s: the AWS client is rebuilt per invocation instead of held by the processor, the timer-plus-flag scheme for LLMFullResponseEndFrame races with the explicit end-of-stream close and can break Start/End bookends, and default_response_to_output_transformer raises on malformed JSON instead of failing safely. Two P2s round out the consensus: agentArn should be agent_arn to match the codebase's snake_case voice, and the hand-rolled SSE parsing should be a small composable filter. Torvalds also flags that the aioboto3 version bump should be a separate patch."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "hickey",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Frame carries a live FrameProcessor reference, complecting value with identity",
+        "detail": "ServiceSwitcherRequestMetadataFrame is a ControlFrame (a value, a fact-in-time) but its `service` field is a mutable FrameProcessor identity. Values should be comparable, serializable, loggable, and time-stable; a processor reference is none of those. Pass a stable service id/name string and resolve it at the edge. This is the classic value/identity complecting.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting by object identity (==) on FrameProcessor is place-oriented and brittle",
+        "detail": "`frame.service == self.strategy.active_service` relies on whatever __eq__ FrameProcessor inherits (likely identity). If the active service is swapped, replaced, or wrapped, equality silently breaks and the frame leaks downstream. A named identity (id/name) compared as a value would be simpler and survive time.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Frame-handling protocol is now complected: handle, then re-push the same control frame",
+        "detail": "STTService and the mock both call `_push_stt_metadata()` then `push_frame(frame)`. The switcher then has to recognize and swallow it again by target match. Two processors share a tacit contract that isn't named anywhere. Either consume at the service (old behavior) or route by target only at the switcher; doing both intertwines the responsibilities.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string type `\"FrameProcessor\"` hides an unstated import-cycle constraint",
+        "detail": "The dataclass field is typed as the string \"FrameProcessor\" with no import in frames.py. That works at runtime but signals that frames.py and processors are entangled in a way the type system is papering over. If `service` were a string id, the type would be honest and the module boundary would stay clean.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Non-active-target path is unspecified; behavior on mismatch is implicit",
+        "detail": "The new guard returns only when `frame.service == active_service`. When it doesn't match, the frame passes through downstream. That's probably fine, but it's not stated anywhere and there's no test for it. The time-semantics of \"who sees this frame, when, and why\" deserves one explicit sentence and one test, not inference from control flow.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The rename is a real improvement: the frame's purpose (target a specific service) is now in its name. But the implementation reaches for the easy answer (stash the FrameProcessor object on the frame) rather than the simple one (a stable service identifier as a value). That complects value with identity and forces equality semantics that depend on FrameProcessor's __eq__. The protocol is also split awkwardly: services handle-and-re-push, the switcher swallows-on-match. A service id on the frame plus a single point of consumption would decompose this cleanly. Tests pass, but the design question wasn't asked: what is this frame a value of, and who owns its lifecycle?"
+  }
+}

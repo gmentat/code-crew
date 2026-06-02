@@ -1,0 +1,64 @@
+{
+  "persona": "liskov",
+  "task_id": "autogluon__5586",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "setuptools<82 cap added to runtime dependency without contract documentation",
+        "detail": "core/setup.py adds 'setuptools<82' to extras_require alongside 'stevedore<5.5'. The abstract data type here is the package's dependency contract \u2014 what versions does this extra promise to work with? Pinning setuptools (a build-time tool, not a runtime dep in most cases) inside a runtime extra is a boundary violation: the build-system constraint is leaking into the runtime contract. The CI scripts already cap setuptools at the right boundary (build-isolation); duplicating it into core/setup.py imposes the cap on every downstream consumer of this extra, even those not affected by the mmcv bug.",
+        "file": "core/setup.py",
+        "lines": "63",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary: CI workaround leaked into shipped package metadata",
+        "detail": "The FIXME comments in the workflow scripts correctly localize the workaround to CI. But core/setup.py has no such comment \u2014 the 'setuptools<82' line carries no marker explaining it is a temporary workaround tied to an external upstream issue. When mmcv#3325 is fixed, there is no breadcrumb for the maintainer to find and remove this cap from the published package. The contract here (which deps does autogluon-core require) is silently coupled to a transient mmcv build issue.",
+        "file": "core/setup.py",
+        "lines": "63",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "mmdet version bump (3.2.0 -> 3.3.0) is unexplained in diff",
+        "detail": "setup_mmcv.sh bumps mmdet from 3.2.0 to 3.3.0 with no comment justifying the change. The commit framing is 'fix mmengine failure' \u2014 the mmdet bump is an undocumented change to the installed component contract. A subtype audit question: does mmdet 3.3.0 preserve the postconditions that downstream multimodal code depends on? Worth a one-line comment stating why 3.3.0 was chosen (compatibility with mmengine 0.10.7?).",
+        "file": ".github/workflow_scripts/setup_mmcv.sh",
+        "lines": "11",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Redundant 'pip install setuptools<82' before --no-build-isolation install",
+        "detail": "Line 9 installs 'setuptools<82' into the env, then line 10 installs mmcv with --no-build-isolation. Under --no-build-isolation, the env's setuptools is the one used \u2014 so the constraint is needed. But the same constraint is also applied in env_setup.sh build_pkg. Two places enforce the same invariant with no shared definition. If the cap is lifted in one place and not the other when mmcv#3325 closes, the workaround will partially persist. Consider a single source of truth (env var, shared variable, or one script that sets the env).",
+        "file": ".github/workflow_scripts/setup_mmcv.sh",
+        "lines": "9-10",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pinning mmengine to PyPI 0.10.7 changes the contract vs prior git-pinned fix",
+        "detail": "The previous install used a specific mmengine git SHA chosen 'with the fix for torch 2.5'. The new install pins mmengine==0.10.7 from PyPI. The diff does not state whether 0.10.7 contains the torch 2.5 fix that the previous SHA was selected for. If 0.10.7 predates or lacks that fix, the torch 2.5 compatibility postcondition is now weaker than before \u2014 an LSP-style regression at the dependency-graph level. Worth a one-line confirmation in the comment.",
+        "file": ".github/workflow_scripts/setup_mmcv.sh",
+        "lines": "10",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The CI fix is reasonable as a localized workaround for the mmcv/setuptools-82 issue, and the FIXME comments in the workflow scripts correctly mark it as transient. The main contract concern is core/setup.py: a CI build-time workaround has leaked into the package's runtime dependency contract without a FIXME breadcrumb, meaning every downstream consumer of this extra inherits the cap and no maintainer signal exists to remove it when upstream is fixed. Secondary concerns are an unexplained mmdet 3.2.0->3.3.0 bump, duplicated setuptools<82 enforcement across two scripts with no shared source of truth, and the move from a specific mmengine git SHA (chosen for a torch 2.5 fix) to a PyPI pin (0.10.7) without confirming the same fix is present. Decision label: LEAKY-ABSTRACTION for the core/setup.py change; the rest is acceptable CI plumbing that would benefit from tighter comments."
+  },
+  "raw": ""
+}

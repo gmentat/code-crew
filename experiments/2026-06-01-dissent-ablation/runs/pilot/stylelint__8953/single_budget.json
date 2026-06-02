@@ -1,0 +1,124 @@
+{
+  "task_id": "stylelint__8953",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Normalization only handles ClassName nodes; ignores escaped IDs, attribute selectors, and tag/pseudo selectors with equivalent escape ambiguity",
+        "detail": "normalizeNodeEscaping only branches on parser.isClassName(node). The same escape-equivalence issue applies to ID selectors (#u-m\\+ vs #u-m\\00002b), attribute selectors, and pseudo-classes/elements with escaped identifiers. The PR title and changelog claim a general fix for 'escaped selectors' but the implementation narrows coverage to class names only, leaving symmetric false negatives. Either broaden the helper to all node types whose value-getter/setter normalizes escaping, or scope the changelog and tests to class selectors only.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "97-105",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Early-return on missing raws.value may skip normalization for nodes that still need it",
+        "detail": "The guard `if (!node.raws?.value) return;` assumes that if raws.value is absent, node.value is already in canonical form. This relies on internal behavior of postcss-selector-parser: when raws.value is unset, the stored value is what was parsed. If a node's value was set programmatically by an earlier rule transform (without populating raws), normalization may be skipped even when needed. Verify against the parser source or remove the optimization until benchmarked \u2014 correctness should not depend on an undocumented invariant.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "101-102",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage missing for combined/compound selectors and nested cases",
+        "detail": "Reject tests cover only simple `.u-m\\xx {}` forms. Add cases for compound selectors (`.a.u-m\\+`, `.u-m\\+:hover`), descendant combinators (`.a .u-m\\+`), selector lists within one rule (`.u-m\\+, .u-m\\00002b {}`), and nested @media to prove the walker reaches all relevant nodes. Without these, the fix's generality is unverified.",
+        "file": "lib/rules/no-duplicate-selectors/__tests__/index.mjs",
+        "lines": "90-115",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Self-assignment idiom is fragile and obscures intent",
+        "detail": "`node.value = node.value` is a clever exploit of getter/setter side effects but relies on postcss-selector-parser preserving this exact behavior across versions. A future refactor of the parser that decouples raws bookkeeping from the setter would silently break normalization with no test failure outside this exact escape case. Consider either pinning a minimum parser version with a comment, adding a unit test specifically guarding the round-trip, or factoring out a tiny `renormalizeValue(node)` helper that's easier to swap if upstream changes.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "104",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Walker now does two function calls per node where one composite would do",
+        "detail": "The walk callback was a direct reference to normalizeSelectorNodeWhitespaceAndComments. It now constructs an arrow that calls two helpers per child. For large stylesheets with many selectors this doubles per-node call overhead. Not a blocker, but consider inlining or letting the existing walker just do one pass that handles both concerns, or short-circuit normalizeNodeEscaping early for non-ClassName nodes (already done) so the cost is mostly one isClassName check.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "13-18",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changeset labeled 'minor' but the change is a bug fix",
+        "detail": "The changeset entry uses `\"stylelint\": minor` while the description begins with 'Fixed:'. Stylelint's convention (per other recent changesets) is `patch` for bug fixes. Verify against repo policy; if patch is correct, the release will be incorrectly bumped to a minor version.",
+        "file": ".changeset/fix-escaped-selector-duplicates.md",
+        "lines": "2",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "@ts-expect-error comment risks silently breaking if upstream types add raws",
+        "detail": "If postcss-selector-parser later exposes `raws` in its type definitions, the `@ts-expect-error` directive will start failing the TypeScript check. This is the intended TS behavior, but worth a follow-up note or use of `@ts-ignore` only if the project policy permits. Alternatively, declare a narrow local type extension to access raws without suppressing the diagnostic.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "100",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Scope of normalization: class-only vs all node types",
+        "positions": [
+          {
+            "persona": "pragmatic shippability",
+            "position": "The reported issue (#3972) is about class selectors. Ship the minimal fix that closes the bug; expand later when concrete reports come in. Broadening now risks regressions in less-tested paths."
+          },
+          {
+            "persona": "abstraction discipline",
+            "position": "Escape equivalence is a property of all CSS identifiers, not just class names. Solving one node type leaves a footgun where the same rule still false-negatives on IDs and attribute selectors. Either generalize or document the limitation in the rule's docs and changelog."
+          }
+        ]
+      },
+      {
+        "topic": "node.value = node.value idiom",
+        "positions": [
+          {
+            "persona": "simplicity",
+            "position": "The idiom is concise and directly leverages library behavior; renaming/wrapping it would add ceremony without changing semantics. The eslint-disable plus comment is sufficient signaling."
+          },
+          {
+            "persona": "formal correctness / maintenance",
+            "position": "The pattern depends on a non-obvious side effect of a third-party setter. Future maintainers (and future parser versions) may not preserve it. Wrap behind a named helper and pin a tested parser version range."
+          }
+        ]
+      },
+      {
+        "topic": "raws.value early-return optimization",
+        "positions": [
+          {
+            "persona": "performance pragmatist",
+            "position": "Most class selectors won't have raws.value populated; skipping them avoids unnecessary work in the hot path of a linter that runs on large codebases."
+          },
+          {
+            "persona": "correctness-first",
+            "position": "The optimization conflates 'no raws.value' with 'already canonical', which is an undocumented invariant. Until proven by a parser-level test, prefer always normalizing and benchmark before optimizing."
+          }
+        ]
+      }
+    ],
+    "summary": "The fix is small, targeted, and uses a legitimate (if slightly clever) postcss-selector-parser behavior to normalize CSS escape sequences in class selectors. The reject tests demonstrate the bug closure. Two notable concerns: (1) the fix is scoped to ClassName nodes only, leaving the same false-negative pattern intact for ID, attribute, and pseudo selectors despite a general-sounding changelog; and (2) the changeset is marked `minor` for what reads as a bug fix, which may produce an incorrect version bump. No clear P0 blockers, but expanding coverage (or narrowing the changelog), verifying the changeset bump level, and adding compound/list test cases would meaningfully strengthen the PR before merge."
+  },
+  "raw": ""
+}

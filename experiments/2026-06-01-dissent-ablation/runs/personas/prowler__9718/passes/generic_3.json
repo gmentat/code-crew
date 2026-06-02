@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR description and check filename are inconsistent (compute_image_publicly_shared vs compute_image_not_publicly_shared)",
+        "detail": "The PR description repeatedly refers to a directory `compute_image_publicly_shared/` and check class `compute_image_publicly_shared`, but the actual files use `compute_image_not_publicly_shared`. While the actual code is internally consistent, this signals the PR description was not updated and may indicate confusion about the canonical naming convention (other checks like `compute_instance_group_load_balancer_attached` use positive framing too).",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IAM policy failure is silently treated as 'not publicly shared', producing false PASS",
+        "detail": "In `_get_images`, if `getIamPolicy` raises (e.g., permission denied as test-image-3 simulates), `publicly_shared` stays False and the image still gets appended, resulting in a PASS finding. This hides real risk when the scanner lacks `compute.images.getIamPolicy` permission. Consider skipping the image, marking it MANUAL, or surfacing the error in status_extended.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-575",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image listing does not filter custom vs. public Google-managed images",
+        "detail": "`self.client.images().list(project=project_id)` returns custom images in the project, which is fine, but the PR description claims it lists 'all custom images'. If a user happens to scan a project that mirrors public images, results may include unintended entries. More importantly, deprecated images and images from other projects shared with the caller aren't handled. Worth documenting the scope or adding `filter='deprecated.state!=DEPRECATED'`.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-545",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test mock for getIamPolicy does not reflect real call signature, weakening coverage",
+        "detail": "In `mock_api_images_calls`, `client.images().getIamPolicy = mock_get_image_iam_policy` replaces the method with a function returning a MagicMock. But the real code calls `.getIamPolicy(...).execute(num_retries=...)`. The mock works coincidentally because MagicMock accepts any kwargs, but it doesn't verify the call shape. Also, the third image's exception path is never asserted in `compute_service_test.py` beyond `publicly_shared=False`, which is the same as a true private image.",
+        "file": "tests/providers/gcp/gcp_fixtures.py",
+        "lines": "1283-1313",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model missing useful fields for findings (e.g., self link, family, creation time)",
+        "detail": "The `Image` BaseModel only stores name, id, project_id, and publicly_shared. Downstream consumers and remediation guidance would benefit from `self_link` or `family`. Resource ARN/URI fields are commonly used elsewhere in Prowler checks for cross-referencing. Not blocking, but worth adding before the check ships widely.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Required GCP permission `compute.images.getIamPolicy` not documented in PR or permissions config",
+        "detail": "The PR checklist asks 'do we need to update permissions for the provider? Please review this carefully' but the diff adds no permission documentation. `compute.images.getIamPolicy` is required and may not be in the default Prowler role, which would cause silent PASS findings per the P1 above. Verify the GCP provider permission manifest.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "summary": "The new GCP check is small, focused, and well-tested at unit level, but it has a meaningful correctness gap: when `getIamPolicy` fails (e.g., missing permission), the image is silently recorded as not publicly shared and reported as PASS, masking real risk. The PR description also references a different check name than the one shipped, suggesting the naming was changed late and not fully reconciled. Required IAM permissions aren't documented despite the PR template flagging this. Test coverage for the exception path exists in fixtures but isn't asserted in service tests. Overall a reasonable feature that needs the failure-mode handling tightened before merge."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "hickey",
+  "task_id": "chia-blockchain__20099",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "default_raise sentinel pattern persists after its sole justification (3.9 support) is removed",
+        "detail": "chia/wallet/wallet_request_types.py still carries `default_raise()` and `field(default_factory=default_raise)` on most request dataclasses. The comment above TransactionEndpointRequest explicitly states this is for <3.10 compatibility. Now that 3.9 is dropped and kw_only=True is used directly, these fields have no defaults conceptually, but the code still pretends they do via a raising factory. This is COMPLECTED: it intertwines field declaration, runtime error semantics, and a compatibility shim that no longer applies. The simple form is a kw-only field with no default; let the dataclass constructor raise TypeError naturally. Leaving default_raise behind keeps the incidental complexity that motivated the refactor in the first place.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "42-44, 1227-1602",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-file kw_only_dataclass replaced by per-call repetition instead of one named concept",
+        "detail": "The PR deletes the `kw_only_dataclass` helper and inlines `@dataclass(frozen=True, kw_only=True)` on roughly fifteen classes. The helper was carrying a real concept (\"this is a streamable, kw-only, frozen request type\") and the rationale string. Replacing one name with fifteen identical decorator stacks is EASY-NOT-SIMPLE: each call site is familiar, but the concept is now scattered and the next change (say, adding slots=True) touches fifteen places instead of one. A one-line wrapper without the version branch is still the right shape; the version branch was the problem, not the wrapper.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "42-49, 235, 1230, 1351, 1366, 1383, 1397, 1411, 1431, 1457, 1472, 1487, 1502, 1514, 1558, 1574, 1588",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Ruff UP rules suppressed wholesale with a TODO instead of decomposing the migration",
+        "detail": "ruff.toml adds UP045, UP007, UP035 to the global ignore list with a TODO comment. UP007/UP045 are exactly the `Optional[X]` -> `X | None` and `Union` -> `|` migrations that the PR description names as the motivating cleanup. Suppressing them globally is INCIDENTAL-COMPLEXITY: it postpones the work, hides the scope of remaining changes, and means new code merged tomorrow can use either style. Either run the autofix now (ruff handles UP007/UP045 mechanically) or scope the ignore to specific paths so the boundary is visible. A `TODO: Remove these` ignore tends to live forever.",
+        "file": "ruff.toml",
+        "lines": "102-106",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "default_raise still tagged `# pragma: no cover` with a stale 3.10 rationale",
+        "detail": "chia/wallet/wallet_request_types.py keeps `def default_raise() -> Any:  # pragma: no cover` with the comment \"this is just for < 3.10 compatibility\". On a 3.10+ codebase that comment is now wrong, and the no-cover pragma masks whether anything still actually triggers the raise. If the function is kept, the comment should describe its real current purpose; if it is dead, delete it. Right now the file says one thing and means another.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "42-44",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test-install-scripts.yml does package discovery (`dnf search`) inside the install step",
+        "detail": ".github/workflows/test-install-scripts.yml now runs `dnf update -y && dnf search python3.12 && dnf install git python3.12 -y` for Amazon and Rocky. `dnf search` is interactive reconnaissance whose output is not consumed and not asserted on; it complects \"prepare the box\" with \"let a human read the log later.\" Either drop the search (simpler) or make it a separate documented diagnostic step. Also: `dnf update -y` before every CI run is incidental work that slows the matrix and changes the baseline image between runs.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "214-247",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "install.sh minimum-version check still hard-codes `< 7`",
+        "detail": "install.sh now prints \"Chia requires Python version >= 3.10\" but the guard above remains `[ \"$PYTHON_MINOR_VER\" -lt \"7\" ]`. The message and the predicate disagree; on 3.7/3.8/3.9 the script will fall through to a later step instead of failing at the explicit minimum. The value (\"minimum supported minor version\") should be one place, used by both the check and the message. As written it is PLACE-ORIENTED: the same fact lives in two cells that can drift, and just did.",
+        "file": "install.sh",
+        "lines": "138-139",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "conditions.py loses the documentation of a known coverage quirk",
+        "detail": "chia/wallet/conditions.py drops the comment and `# pragma: no cover` that explained why 3.9 didn't cover the `continue` branch. That is correct in spirit, but the link to coveragepy#1530 was the only signpost in the file that this branch was deliberately hard to exercise. If the branch is now genuinely covered on 3.10+, a one-line test note (or no comment at all) is fine; just confirm coverage actually exercises this `continue` on supported versions before relying on the pragma removal. Otherwise coverage gates may quietly start failing.",
+        "file": "chia/wallet/conditions.py",
+        "lines": "1472-1476",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The mechanical 3.9 removal is sound, but the refactor stops short of the simplification it enables. The clearest win \u2014 deleting `default_raise` and the `kw_only_dataclass` helper now that `kw_only=True` works everywhere \u2014 has been taken only halfway: `default_raise` lives on as a sentinel pattern that no longer has a compatibility reason to exist, and the helper was inlined into fifteen identical decorator stacks instead of being kept as one named concept. Meanwhile ruff.toml suppresses UP007/UP035/UP045 with a `TODO: Remove these` ignore, which postpones the very migration the PR description sells (Union/Optional -> `|`). Smaller items: install.sh has the minimum version in two places that just drifted, the CI install step does interactive `dnf search` it never reads, and the conditions.py coverage signpost was deleted without confirmation the branch is now covered. The right shape is less code, not just code-with-the-version-branches-deleted."
+  },
+  "raw": ""
+}

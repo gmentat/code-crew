@@ -1,0 +1,76 @@
+{
+  "task_id": "pipecat__3410",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size has no validation that it aligns with PCM sample width",
+        "detail": "The param accepts any int with no check that it's a multiple of bytes_per_sample * channels. A misconfigured 641 silently slices samples in half and ships noise. Comments claim 16-bit PCM but nothing enforces the format. Add an assert or raise on StartFrame stating the precondition.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66, 498-510",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization buffer applies to all bytes payloads and weakens serializer postcondition",
+        "detail": "_write_frame buffers any bytes payload into _audio_send_buffer when the param is set, so non-audio binary payloads get sliced into packet_bytes chunks. Trailing bytes shorter than packet_size are also never flushed at EOS/Cancel, dropping audio at shutdown. Gate on AudioRawFrame and flush (or pad) on stream end.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-512",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization concern leaks Vonage-specific framing into a generic transport",
+        "detail": "20ms@16kHz framing is a property of the Vonage protocol and belongs in VonageFrameSerializer's contract, not in FastAPIWebsocketTransport. Pushing fixed_audio_packet_size up forces every future protocol to renegotiate this knob. A composing PacketizingFrameSerializer wrapper would respect the module boundary and leave the transport interface unchanged.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "56-66, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InterruptionFrame clears buffer but in-flight sends and resampler state are not handled",
+        "detail": "process_frame clears _audio_send_buffer, but websocket send is async and an in-progress chunk can still reach the wire after interruption. The output resampler's filter state from dropped audio is also not reset, producing artifacts on the next utterance. Add a send lock/sequence guard and reset resampler state on interruption.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "428-435, 495-510",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename from audio_packet_bytes to fixed_audio_packet_size is a silent breaking change",
+        "detail": "The param sits on a public dataclass with Optional default None, so existing users of audio_packet_bytes lose packetization with no error \u2014 just wrong behavior. Either keep a deprecated alias for one release or flag the break loudly in the changelog.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF digit parsing accepts two undocumented payload shapes",
+        "detail": "deserialize tries message['digit'] then message['dtmf']['digit'] with no spec citation for either. Pick the documented Vonage shape, treat the other as a compatibility shim with a TODO, or remove the speculative branch. Defensive 'try both' code hides protocol drift and survives forever.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "157-171",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The Vonage serializer is small and roughly correct, but the new fixed_audio_packet_size buffering on FastAPIWebsocketTransport has real problems. It applies to any bytes payload (not just audio), drops trailing audio at shutdown, races with InterruptionFrame, and pushes a Vonage-specific framing concern into a generic transport when it belongs in a composing serializer wrapper. The param accepts misaligned sizes with no validation despite comments asserting PCM16, and the rename from audio_packet_bytes is a quiet breaking change. NEEDS-WORK before merge."
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "stylelint__9044",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "HAS_PERCENTAGE regex lacks case-insensitive flag while HAS_KEYWORD has it \u2014 inconsistent contract for selector matching",
+        "detail": "In keyframe-selector-notation, HAS_KEYWORD uses the 'i' flag but HAS_PERCENTAGE does not. The PERCENTAGE_SELECTORS values like '0%', '100%' are numeric so case does not matter, but the asymmetry is a contract smell: the pre-filter regex is meant to mirror what the downstream parser accepts, and the downstream parser is case-insensitive for keywords. State the contract: 'the pre-filter must be a strict superset of selectors the parser would flag.' Verify '0%' / 'from' boundaries match what parseSelector emits, and document why one side needs 'i' and the other does not.",
+        "file": "lib/rules/keyframe-selector-notation/index.mjs",
+        "lines": "35-37",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pre-filter regex introduces an implicit invariant that is nowhere stated",
+        "detail": "Every one of these short-circuits encodes a hidden contract: 'if the regex does not match, the rule has nothing to report.' That invariant is load-bearing \u2014 if it is ever false, the rule silently stops reporting real violations. No comment, no test asserts the invariant, and no spec ties the regex to the set of conditions the rule actually flags (e.g. for font-weight-notation, HAS_NAMED must match every value that would otherwise be reported as 'should be numeric'). Add a one-line contract comment above each pre-filter naming what it promises, and ensure existing test coverage exercises both branches of the short-circuit.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "selector-pseudo-element-colon-notation pre-filter `/:/` is too coarse and changes the abstraction boundary",
+        "detail": "The previous code performed `ruleNode.selector.includes(':')` inside the callback, after the standard-syntax check. Moving the filter into `walkRules(/:/, ...)` is semantically similar but the regex matches any colon anywhere in the rule's selector string representation. That is fine for standard selectors, but the contract previously was 'skip rules without a colon in their selector AFTER confirming standard syntax.' Now non-standard rules whose selector contains a colon still pay parse cost, while the old code's early-out is gone. Net effect is likely neutral or positive for perf, but the substitution is not exact \u2014 document that walkRules' filter applies to the selector string and confirm postcondition unchanged.",
+        "file": "lib/rules/selector-pseudo-element-colon-notation/index.mjs",
+        "lines": "40",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "import-notation `url` branch returns when params contains `url(` \u2014 correct, but the contract is asymmetric and unstated",
+        "detail": "For `primary === 'string'`, the rule bails when there is no `url(`. For `primary === 'url'`, it bails when there IS `url(`. Both are correct preconditions, but they are written as terse negated/non-negated regex tests with no comment. The contract is: 'rule reports a violation iff the params contain a notation different from `primary`.' State that once at the top of the function so future maintainers do not invert a branch.",
+        "file": "lib/rules/import-notation/index.mjs",
+        "lines": "50-53",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HAS_NUMERIC / HAS_NAMED in font-weight-notation use `\\b` boundaries against CSS values that may contain `var(--x)` or calc expressions",
+        "detail": "The pre-filter is sound for plain values like `font-weight: 400` or `font-weight: bold`, but `font` shorthand can include things like `font: var(--weight) 16px/1 sans-serif`. `\\b400\\b` will not match inside `var(--weight)` so the rule will short-circuit and emit no warning \u2014 which is the desired behavior since there is no literal numeric weight to flag. Confirm with a test that `font: var(--x) 16px sans-serif` under `primary: 'named-where-possible'` is not falsely warned-on after this change, and that a custom property name like `--weight-700` does not falsely trigger via the `\\b700\\b` boundary.",
+        "file": "lib/rules/font-weight-notation/index.mjs",
+        "lines": "42-48",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "media-feature-range-notation pre-filter uses `[<>]` but the contract should mention `=` is not relevant",
+        "detail": "The `prefix` branch skips when params lack `<` or `>`. Range notation in CSS is `<`, `>`, `<=`, `>=`, `=`. The pre-filter correctly catches `=` only when paired (i.e. `<=`), but a bare `=` in a range query (which is valid range syntax) would be skipped. Verify whether `@media (width = 100px)` is a case the rule is supposed to flag under `primary: 'prefix'`; if so, the pre-filter is too narrow and is a missed-report regression. If not, add a comment naming the omitted form.",
+        "file": "lib/rules/media-feature-range-notation/index.mjs",
+        "lines": "65-71",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR is a performance optimization that adds cheap pre-filter regexes before the expensive parse step in six `*-notation` rules. From an ADT perspective, each pre-filter encodes a load-bearing invariant \u2014 \"if this regex does not match, the rule has nothing to report\" \u2014 and that invariant is nowhere stated. The substitutions are mostly sound but a few deserve scrutiny: HAS_PERCENTAGE vs HAS_KEYWORD case-flag asymmetry in keyframe-selector-notation, the `[<>]` filter possibly missing bare-`=` range syntax in media-feature-range-notation, and `\\b`-boundary behavior on CSS values containing `var()` or hyphenated custom properties in font-weight-notation. Recommend: add a one-line contract comment above each pre-filter that names what it promises (must be a superset of values the rule would report), and verify each branch with tests. ADT-SOUND with SPEC-MISSING caveats."
+  },
+  "raw": ""
+}

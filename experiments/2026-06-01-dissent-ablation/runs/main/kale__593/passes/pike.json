@@ -1,0 +1,114 @@
+{
+  "persona": "pike",
+  "task_id": "kale__593",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "DEFAULT_BASE_IMAGE constant duplicated in three places \u2014 Python and TypeScript both hardcode 'python:3.12'",
+        "detail": "The data here is one string: the default base image. It lives in backend/kale/pipeline.py as DEFAULT_BASE_IMAGE, in labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx as DEFAULT_BASE_IMAGE = 'python:3.12', and inline as a fallback in labextension/src/lib/Commands.ts getDefaultBaseImage. When the default changes, three call sites must change together or they drift. Pick one source of truth \u2014 the backend constant served via RPC \u2014 and have the TS side treat any local fallback as a clearly-labeled last-resort, not a parallel constant. Wrong data structure: the truth is one value with one owner, but the code structures it as three independent values.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "73",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Changing self.base_image = '' to DEFAULT_BASE_IMAGE silently alters compiler behavior in the failure path",
+        "detail": "Previously, when pod introspection failed, base_image was left empty and the template fell back through 'step.config.base_image or base_image or \"python:3.12\"'. Now the middle slot is populated with python:3.12 unconditionally on failure. This conflates two distinct states \u2014 'we could not determine an image' and 'we chose python:3.12' \u2014 and the comment above still says 'Use kfp default image' which is no longer what happens. The data shape lost a meaningful tri-state (unset / determined / fallback); pick whether empty-means-default is the contract everywhere, or keep the empty sentinel and resolve it at the template only.",
+        "file": "backend/kale/pipeline.py",
+        "lines": "138-145",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Effective-base-image resolution is recomputed in three places with the same precedence rules",
+        "detail": "The precedence step.config.base_image -> pipeline base_image -> default appears in the Jinja template, in InlineMetadata.createBaseImageText (baseImage || pipelineBaseImage || defaultBaseImage || DEFAULT_BASE_IMAGE), and in the dialog placeholder in CellMetadataEditor (pipelineBaseImage || defaultBaseImage || DEFAULT_BASE_IMAGE). This is the classic case where the right data structure \u2014 a resolver function (baseImage, pipelineBaseImage, defaultBaseImage) -> {image, source} \u2014 would make the algorithm self-evident at each call site and make the '(default)' label correct in all cases. Right now an empty pipelineBaseImage that ought to display as '(pipeline default)' is indistinguishable from an unset one.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "234-247",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isDefault label is wrong whenever a pipeline-level base_image is set",
+        "detail": "In createBaseImageText, isDefault = !this.props.baseImage. But effectiveImage can resolve to pipelineBaseImage \u2014 that is not the default, it is the pipeline-level override. The UI will say '... (default)' for steps that inherit the pipeline's image, which is misleading. Either compute the source explicitly (step / pipeline / default) and label accordingly, or only show '(default)' when neither step nor pipeline image is set.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "237-244",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IMAGE button replaces a visible Input \u2014 costs a click and hides the current value from the inline editor",
+        "detail": "Before this change the user saw and edited the base image in one field. Now there is a button labeled IMAGE that opens a modal to show and edit the same string. That is more framework for the same data: one string in, one string out. The whole reason for the dialog appears to be 'show the default'; that can be done with placeholder text and a small helper line under the existing Input without the Dialog/DialogTitle/DialogContent/DialogActions machinery. Less code, fewer clicks, no regression in discoverability.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "480-496, 545-588",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Button width: '5%' inside a 30%-wide flex slot is a magic number fighting the layout",
+        "detail": "style={{ width: '5%' }} on the Button inside a div makes the actual rendered size dependent on the parent's intrinsic width, which is itself a percentage of a percentage. The data here is 'a button that says IMAGE' \u2014 its width should be content-sized, not 5% of an arbitrary container. This is the kind of cleverness that breaks under any resize.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "488-495",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New RPC get_default_base_image returns a hardcoded constant \u2014 could be a filter instead of a round-trip",
+        "detail": "nb.get_default_base_image just imports DEFAULT_BASE_IMAGE and returns it. The labextension hardcodes 'python:3.12' as fallback when this RPC fails. Either bake the default into a config endpoint that already exists (kfp UI host fetch happens in the same init), or accept that the value is static and ship it via the existing settings/config plumbing rather than adding a dedicated RPC for one string.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-99",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Local import inside get_default_base_image is unnecessary",
+        "detail": "DEFAULT_BASE_IMAGE is a module-level constant in kale.pipeline. Importing it inside the function body adds nothing \u2014 there is no cycle to break here, and the function is called per RPC. Move the import to the module top with the rest.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-99",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reordering createBaseImageText below createLimitsText changes inline-display order without explanation",
+        "detail": "The swap at the bottom of InlineMetadata.render moves base image below limits. That may be intentional, but it's an unrelated UI change buried in a feature PR. If the new ordering is desired, say so; otherwise leave the order alone to keep the diff focused on showing the default.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "287-288",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DefaultState.defaultBaseImage = '' is a sentinel that downstream code has to re-check",
+        "detail": "Initializing defaultBaseImage to empty string means every consumer must guard with || DEFAULT_BASE_IMAGE. Initialize it to the known fallback ('python:3.12') so the data structure carries a usable value at all times, and the algorithm at every read site becomes 'just use it'.",
+        "file": "labextension/src/widgets/LeftPanel.tsx",
+        "lines": "100",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature does a simple thing \u2014 surface the default base image in the UI \u2014 but the implementation spreads that one string across three sources of truth (Python constant, TS constant, TS inline fallback) and recomputes the same precedence chain in three places. That is wrong-data-structure: one value with one owner has been modeled as three. The pipeline.py change from base_image = '' to DEFAULT_BASE_IMAGE also quietly collapses a meaningful tri-state in the failure path and contradicts its own comment. The new Dialog is too-much-framework for editing one string \u2014 the existing Input with a placeholder and helper text would deliver the same UX in a fraction of the code. Strip the duplicate constant, write one resolver function for (step, pipeline, default) -> {image, source}, fix the '(default)' label so it reflects actual source, and reconsider whether the modal earns its keep."
+  },
+  "raw": ""
+}

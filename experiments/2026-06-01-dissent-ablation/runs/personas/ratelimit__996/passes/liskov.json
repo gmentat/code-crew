@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "RateLimit contract is silently violated: GetLimit mutates and replaces a shared RateLimit object per request",
+        "detail": "The contract of GetLimit (and the rateLimit pointer returned from descriptor lookup) is that it returns a stable descriptor-bound limit. The new code reassigns `rateLimit = NewRateLimit(...)` and overwrites Stats/FullKey on every call when keys differ. Since rateLimit originates from `nextDescriptor.limit` (shared config state), this introduces a race and weakens the postcondition that Stats identifies the descriptor. Either return a copy or compute Stats per-request without mutating shared state.",
+        "file": "src/config/config_impl.go",
+        "lines": "~420-432",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP/precondition violation: enhanced-key branch reads rateLimit.FullKey before detailed_metric branch sets it",
+        "detail": "The new block compares `enhancedKey != rateLimit.FullKey`, but FullKey is only assigned in the detailed_metric branch above. For non-detailed paths, FullKey may be the zero value or whatever a previous call left, so the comparison is undefined against the contract. The precondition `FullKey reflects current stats key` is not established before the check, breaking substitutability with the prior implementation.",
+        "file": "src/config/config_impl.go",
+        "lines": "~415-432",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: metric-key construction logic is duplicated and entangled with lookup control flow",
+        "detail": "Three parallel key builders (existing detailedMetricFullKey, new valueToMetricFullKey, plus matchedViaWildcard/matchedUsingValue flags) live inside the lookup loop. The abstract operation here is `formatSegment(descriptor, entry, mode)`; instead the implementation is inlined three times with near-identical branches. Extract a small helper so the contract for each mode is stated once and subtypes (detailed, value_to_metric, default) are visibly substitutable.",
+        "file": "src/config/config_impl.go",
+        "lines": "~316-372",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Spec missing: no stated contract for interaction between value_to_metric set at non-leaf vs leaf descriptors",
+        "detail": "The flag is per-descriptor but the final key is assembled from segments across levels. README says detailed_metric takes precedence, but does not specify behavior when a parent has value_to_metric and the leaf has neither flag, nor when wildcard parent has flag false but child true. Tests cover examples but no invariant is written. Document the contract: which descriptor's flag controls which segment.",
+        "file": "README.md",
+        "lines": "+339-349",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wrong boundary: rateLimitDescriptor.valueToMetric is per-node but consulted by caller-side lookup logic",
+        "detail": "The decision to include a value belongs to the descriptor that owns the segment; instead, GetLimit reaches into `nextDescriptor.valueToMetric` while building the segment for the current entry. This couples the lookup loop to descriptor internals rather than asking the descriptor for its segment representation. A method like `nextDescriptor.metricSegment(entry, matchKind)` would keep the module boundary clean.",
+        "file": "src/config/config_impl.go",
+        "lines": "~344-372",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literals for rateLimitDescriptor make future field additions error-prone",
+        "detail": "`&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric}` uses positional initialization. The next field added will silently shift meanings at every call site. Use named-field literals so the struct's contract is explicit at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature adds a useful capability but the implementation violates the contract of the existing RateLimit abstraction. GetLimit now mutates and even reconstructs the shared RateLimit object derived from descriptor state, and the new branch compares against `rateLimit.FullKey` which is not guaranteed to be set on the non-detailed path. The metric-key assembly logic is also duplicated three times inside the lookup loop, leaking implementation details that should live behind a descriptor-owned `metricSegment` operation. Strengthen the contract (per-descriptor segment formatting), produce a per-request RateLimit view rather than rewriting the shared one, and document the cross-level semantics before merge."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "vega__4219",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "panLog/zoomLog read domain[0] before empty-domain check, masking the intended runtime error",
+        "detail": "In panLog and zoomLog, `Math.sign(domain[0])` is evaluated before `pan`/`zoom` runs the `isNonEmpty` check. For an empty domain, `domain[0]` is `undefined`, so `Math.sign` returns NaN and the helper builds nonsense `log`/`exp` functions before the throw fires inside `pan`. Works today but is fragile \u2014 move the empty check up front or assert before computing `sign`.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "55-57, 78-80",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "coerceNumber silently substitutes 0 for null/NaN inputs, changing observable behavior",
+        "detail": "Previously `panLinear`/`zoomLinear` used `toNumber` directly as `lift`, so a domain like `[null, 10]` produced NaN arithmetic. The new `coerceNumber: x => toNumber(x) ?? 0` converts null/undefined into 0 instead, which silently shifts the returned domain rather than propagating NaN. The PR claims `runtime behavior should be the same`; this contradicts that.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "29-30",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Domain return type [number, number] is a lie when lift/ground produce NaN or Infinity",
+        "detail": "`Domain = [number, number]` is returned unconditionally, but `log(sign)` on a domain whose sign flips, or `pow` with fractional exponents on negatives, can yield NaN/Infinity. The type advertises a clean numeric pair while the implementation may emit NaN. Either narrow the type, or document that NaN is a legal `number` here.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "6, 38, 47-69",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty-domain throw is only tested for panLinear and zoomLinear",
+        "detail": "The new tests cover only `panLinear([], \u2026)` and `zoomLinear([], null, \u2026)`. The other six exported entry points (`panLog`, `panPow`, `panSymlog`, `zoomLog`, `zoomPow`, `zoomSymlog`) share the same precondition but are not exercised, and as noted above the Log variants take a different code path before reaching the check.",
+        "file": "packages/vega-util/test/transform-test.js",
+        "lines": "69-77",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "peek overload may surprise callers passing a mutable non-empty tuple",
+        "detail": "The new overload `peek<T>(array: readonly [T, ...T[]]): T` is fine, but the parameter type uses `readonly`, so callers with a plain `T[]` that the compiler cannot prove non-empty fall through to `T | undefined`. That is the intent, but pair this with an explicit JSDoc note so downstream TS users know they need a tuple/const-assertion to get the non-undefined return.",
+        "file": "packages/vega-util/src/peek.ts",
+        "lines": "1-6",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Anchor type allows null/undefined but downstream callers may not have expected undefined",
+        "detail": "`Anchor = number | null | undefined` widens the original implicit contract (callers passed `null` explicitly in tests). The `anchor != null` guard handles both, so runtime is fine, but exporting this through public TS types lets callers omit the argument entirely for `zoomPow`/`zoomSymlog`, which is a new API affordance worth confirming is intentional.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "8, 80-89",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The TypeScript port is mostly mechanical and safe, but two behavioral regressions slipped in: `coerceNumber` defaulting null to 0 changes how `panLinear`/`zoomLinear` handle non-numeric inputs, and the Log variants compute `Math.sign(domain[0])` before the new empty-domain guard runs, so an empty input produces NaN helpers before the error fires. Tests only cover the empty-domain throw for the linear variants. The `peek` overload and exported `Domain`/`Anchor` types are reasonable but worth tightening or documenting before this becomes the public typing surface."
+  }
+}

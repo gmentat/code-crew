@@ -1,0 +1,84 @@
+{
+  "persona": "hickey",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "`changedFiles` is mutable state on the provider, complecting lifecycle/time with inclusion logic",
+        "detail": "`BaseCoverageProvider` now carries a `changedFiles?: string[]` field that is set during `onTestRunStart` and silently read by `isIncluded` and `globAllFiles`. The same provider instance is reused across runs (watch mode, multiple runFiles calls). The 'changed set' is a value with a clear time semantic (this run, since this ref), but it is being stored as place-oriented mutable state on the provider, intertwined with the cache. If `onTestRunStart` is ever skipped, or runs in a different order, `isIncluded` will silently return stale or incorrect results. The simple decomposition is: compute the changed-file set as a value at the start of the run, pass it explicitly into the include predicate (or build a per-run predicate), and let the provider stay stateless about it.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-90, 329-345",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`globCache` and `changedFiles` are complected; cache invalidation is done by `clear()` at a distance",
+        "detail": "`isIncluded` memoizes results in `globCache`, but the result now depends on a second input (`changedFiles`) that lives elsewhere on `this`. The fix in `onTestRunStart` is `this.globCache.clear()`, which is exactly the kind of place-oriented patch Hickey warns about: two concerns (pattern match vs. change-set membership) share one cache keyed only on filename. If `onTestRunStart` is called twice with different refs, or skipped, the cache will lie. Either key the cache on `(filename, changedFilesVersion)` or, better, separate the two predicates: `matchesIncludeGlob(filename)` (cacheable, pure) and `isChanged(filename)` (cheap set lookup). Then `isIncluded = matchesIncludeGlob && (changedFiles ? isChanged : true)` \u2014 no cache invalidation required.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180, 329-345",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`coverage.changed` and `config.changed` use two different mechanisms to produce the 'changed files' value",
+        "detail": "When `coverage.changed` is set, the provider calls `VitestGit.findChangedFiles({ changedSince })` directly. When only `config.changed` is set, the provider reuses `config.related` (which was computed earlier by a different path). These should be one concept \u2014 'the set of files considered changed for this run' \u2014 produced by one function with explicit inputs (root, ref-or-true), and consumed everywhere. As written, the two branches can diverge in normalization, path style (absolute vs. relative, slashed vs. native), and semantics ('true' vs. an explicit ref). The current `isIncluded` comparison `this.changedFiles.includes(filename)` is exact-string equality on a slashed, cleanUrl'd path \u2014 it will silently fail if `findChangedFiles` returns paths in a different shape than `config.related`. Decompose: one function, one value, one shape.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345, 170-180",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`onTestRunStart` hook added to the public CoverageProvider interface and called from three call sites \u2014 easy to miss a fourth",
+        "detail": "Three places in `core.ts` now call `await this.coverageProvider?.onTestRunStart?.()` immediately after `_testRun.start(...)`. This is a classic incidental-complexity pattern: a lifecycle event split across call sites, with the contract being 'remember to call this before generateCoverage'. Any future code path that starts a test run (rerun, watch, typecheck-only, project mode) must also remember. The simple alternative is to compute the changed-file value lazily inside the provider the first time it is needed within a run (keyed on a run id), or to centralize `_testRun.start` so the start-of-run notification fans out from one place. As-is, this is the kind of contract that decays quietly.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-885",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI `transform` accepts string `'true'`/`'false'` and boolean `true`/`false`, conflating two value spaces",
+        "detail": "The transform branches on both string literals and booleans for the same flag. The shape of the input should be one value type; mixing makes the downstream consumers handle a union that didn't have to exist. Simpler: define the CLI argument as 'optional string', and have one resolver that maps `undefined -> false`, `'' | 'true' | 'yes' -> true`, `'false' | 'no' -> false`, anything else -> the ref string. One function, one place, one shape.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-320",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`cleanUrl` added inside `isIncluded` silently changes the cache key shape for all callers",
+        "detail": "The change `slash(cleanUrl(_filename))` is unrelated to the headline feature and affects every existing caller's cached results (query-param URLs now collapse to their base). That may be the right fix \u2014 the new test for `query-param-transformed.ts` suggests it is \u2014 but it is essential-complexity work bundled into an incidental-complexity feature PR. Worth either a dedicated commit message line acknowledging the behavior change for non-`changed` users, or a separate PR. As a reviewer: confirm this does not change which files get reported for users who never set `coverage.changed`.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "12, 152",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance default `coverage.changed === undefined ? config.changed` couples two unrelated knobs",
+        "detail": "Making `coverage.changed` silently inherit from `test.changed` is convenient (easy) but not simple: it means reading the resolved config no longer tells you what the user asked for, and the docs have to explain a special case. The test even verifies that you have to set `changed: false` explicitly to opt out. Consider: leave them independent, document that users who want both behaviors set both flags, and keep the resolved config a faithful record of intent. If inheritance stays, name the inherited-vs-explicit distinction somewhere observable so debugging is possible.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "419-424",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature is useful and the surface area is small, but the implementation complects three concerns on the provider instance: the changed-file set (a value with a per-run time semantic), the include-glob cache (a pure function of filename + options), and the lifecycle event that links them. The fix is to treat 'the set of changed files for this run' as an explicit value produced by one function with one shape, then build the include predicate from two pure pieces (glob match AND optional change-set membership) so the `globCache.clear()` patch disappears. Bundling the unrelated `cleanUrl` behavior change into this PR and adding a new public `onTestRunStart` lifecycle hook that must be threaded through every test-run entry point are smaller instances of the same pattern \u2014 easy patches that move the system away from simple. None of these are correctness blockers today; they are the kind of incidental complexity that compounds. Recommend: decompose the changed-set computation, separate the two predicates, and split or call out the cleanUrl change."
+  },
+  "raw": ""
+}

@@ -1,0 +1,114 @@
+{
+  "persona": "liskov",
+  "task_id": "chia-blockchain__20317",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "LSP violation: subclasses' current_p2_puzzle_hash signatures diverge from a missing supertype contract",
+        "detail": "The refactor introduces current_p2_puzzle_hash() on DIDWallet (no args) and current_p2_puzzle_hash(nft) on NFTWallet (one arg). These are de facto siblings in the WalletProtocol family but have incompatible signatures and no declared supertype contract. A caller cannot substitute one for the other, and there is no WalletProtocol method that names the operation. State the contract on the protocol (or split into two clearly-named operations), or document explicitly that this is not a polymorphic operation. Without that, the abstraction is informal and future callers will misuse it.",
+        "file": "chia/wallet/did_wallet/did_wallet.py, chia/wallet/nft_wallet/nft_wallet.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: sign_message / verify_signature lack documented preconditions and invariants",
+        "detail": "The new chia/wallet/util/signing.py is the module boundary for signing, but the contract is implicit: which signing modes are valid, what format `message` must take per mode (utf-8 vs hex string), what `address` means and when it must be supplied, and what error conditions are raised vs returned in the response. The verify_signature docstring still says ':param request:' from the prior RPC shape and is now stale. Write the precondition (mode -> message format), postcondition (response invariants), and the exceptional path (ValueError vs VerifySignatureResponse with error). This is the new public surface of a security-sensitive module.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "17-66",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LEAKY-ABSTRACTION: callers must reassemble synthetic key + private-key lookup + sign at every call site",
+        "detail": "Both sign_message_by_address and sign_message_by_id in the RPC now do: get_private_key(puzzle_hash) -> convert_secret_key_to_synthetic -> sign_message(secret_key, ...). The signing module promised to encapsulate signing, but the synthetic-key derivation, the keystore lookup, and the puzzle-hash discovery all leak back into the caller. This duplicates logic and re-creates the bug surface the refactor was supposed to eliminate. Prefer a higher-level operation like sign_message_for_puzzle_hash(wsm, puzzle_hash, message, mode) so the contract 'given a puzzle hash, produce a CHIP-0002 signature' lives in one place.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1846-1900",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "WRONG-BOUNDARY: VerifySignatureResponse lives in wallet_request_types but is constructed by chia/wallet/util/signing.py",
+        "detail": "The signing util now imports VerifySignatureResponse from wallet_request_types, while SignMessageResponse is a new dataclass defined locally in signing.py. The boundary is inconsistent: one response type is a Streamable RPC DTO, the other is an internal dataclass, and the signing module depends on RPC request types. Either move VerifySignatureResponse (or a thin internal equivalent) into the signing module, or have the RPC layer translate an internal SignVerifyResult into the wire type. As written, the 'signing library' is coupled to the wallet RPC wire format, which contradicts the PR's stated goal of making it available to 'other wallet areas'.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "13",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module-level signing_mode_enum() function duplicates the per-class @property of the same name",
+        "detail": "wallet_request_types.py defines a free function signing_mode_enum(request) and then two @property signing_mode_enum methods on SignMessageByAddress and SignMessageByID that each just delegate to the free function. This is two ways to spell the same operation in the same module, sharing a name. Pick one: either the @property (clean caller site, request.signing_mode_enum) or the free helper. Two names for one contract invite drift.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Partial enumeration of SigningMode in signing_mode_enum() \u2014 fallthrough is silently CHIP_0002",
+        "detail": "signing_mode_enum(request) handles three of four (is_hex, safe_mode) combinations explicitly and falls through to CHIP_0002 for the remaining case. The intent is correct (is_hex=False, safe_mode=True -> CHIP_0002) but the implementation hides the invariant. Make the mapping total and explicit (e.g., final elif or a 2x2 dict) so a future reader sees the full contract and cannot accidentally extend the boolean grid without updating the mapping.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "verify_signature docstring is stale after extraction",
+        "detail": "The function-level docstring still reads ':param request:' but the function no longer takes a request \u2014 it takes keyword-only fields. Update to document each parameter and the invariants stated above.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-24",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Naming: hex_message is used for non-hex bytes",
+        "detail": "Both sign_message and the (deleted) wallet sign_message used a local variable named hex_message that, in three of four branches, holds bytes that are not hex (it's a tree hash or a utf-8 bytestring). The name encodes the wrong invariant. Rename to message_bytes or message_to_sign to mirror message_to_verify in verify_signature.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "76-84",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert_secret_key_to_synthetic placed on Wallet but conceptually belongs to the signing util / p2 puzzle module",
+        "detail": "Wallet.convert_secret_key_to_synthetic is a one-line wrapper around calculate_synthetic_secret_key with DEFAULT_HIDDEN_PUZZLE_HASH. It does not depend on Wallet state and is now called from the RPC layer via main_wallet purely as a namespace. This is INHERITANCE-FOR-REUSE-shaped: a free function masquerading as a method. Make it a module-level helper in p2_delegated_puzzle_or_hidden_puzzle (or in signing.py) and call it directly.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests for sign_message_by_id only cover the NFT path; DID path remains untested",
+        "detail": "The PR description states it adds tests for the previously-untested sign_message_by_id. The new test covers NFT. The DID branch of sign_message_by_id in wallet_rpc_api.py was also refactored (current_p2_puzzle_hash, synthetic key conversion, get_coin) and is similarly untested. Add a DID-path test to lock the contract on the other subtype before further refactors.",
+        "file": "chia/_tests/wallet/nft_wallet/test_nft_wallet.py",
+        "lines": "668-783",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The extraction is directionally correct \u2014 pulling signing into chia/wallet/util/signing.py is the right module boundary \u2014 but the contract has not yet been stated and the abstraction leaks at every call site. The wallets gained a current_p2_puzzle_hash() operation with incompatible signatures (DID takes no args, NFT takes an NFTCoinInfo) and no supertype declaration, which is an LSP-shaped problem waiting to happen. The RPC layer still re-assembles the full signing pipeline (lookup -> synthetic key -> sign) at two call sites, so the new library has not actually centralized the operation it claims to own. Two parallel ways to compute signing_mode_enum exist in the same file, and verify_signature now imports an RPC wire DTO, coupling the new library back to wallet_request_types. Decision label: SPEC-MISSING with a side of LEAKY-ABSTRACTION; fixable without major rework if the contract is written down and the call sites are collapsed to a single sign-by-puzzle-hash entry point."
+  },
+  "raw": ""
+}

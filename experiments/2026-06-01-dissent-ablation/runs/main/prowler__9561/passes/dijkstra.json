@@ -1,0 +1,84 @@
+{
+  "persona": "dijkstra",
+  "task_id": "prowler__9561",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getCategoryLabel postcondition is silently weakened from old behavior",
+        "detail": "The previous adapter held an explicit invariant: a hard-coded label table mapped known IDs to fixed strings (e.g., 'forensics-ready' -> 'Forensics Ready'), with a documented fallback. The new heuristic in lib/categories.ts replaces this with a rule cascade (special-cases -> version pattern -> short-word -> capitalize). The author cannot, from the code alone, state the postcondition 'for every legal category id, f(id) equals the previously-emitted label.' They have replaced a proved mapping with a heuristic that is TESTED-NOT-PROVED, with no tests visible in the diff. At minimum, exhibit the input set (the known CATEGORY_IDS), enumerate f over it, and assert equality with the prior table. Otherwise this is a silent semantic change shipped as a refactor.",
+        "file": "ui/lib/categories.ts",
+        "lines": "1-54",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SEVERITY_ORDER now has two keys mapping to the same ordinal \u2014 an unstated invariant violation",
+        "detail": "SEVERITY_ORDER previously enumerated five disjoint severities with distinct ordinals. The diff adds Info: 4 alongside Informational: 4. The implicit invariant 'each severity name maps to a unique ordinal, and the ordinal totally orders severities' is now broken: two distinct strings collide at 4. If any consumer reverse-maps ordinal to name (e.g., for display, sort stability, equality), behavior is undefined. The correct discipline is to pick one canonical key, normalize inputs to it at the boundary, and keep the codomain injective \u2014 not to widen the domain in place.",
+        "file": "ui/components/graphs/shared/constants.ts",
+        "lines": "13-21",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CategorySelector uses the empty string as a sentinel for 'all' \u2014 smuggled control flow",
+        "detail": "handleValueChange treats both '' and 'all' as the null selection. Only 'all' is ever produced by the SelectItem rendering; '' is a defensive branch with no producer. This is DEFENSIVE-AS-SUBSTITUTE: the author is guarding against a state that the type system and the rendered options already forbid, instead of stating and enforcing the precondition (value is one of 'all' | category.categoryId). Either prove '' is reachable and document the producer, or delete the branch. Carrying dead conditionals trains future readers to mistrust the structured flow.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "22-28",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HorizontalBarChart percentage logic has an unverified invariant on item.percentage's domain",
+        "detail": "calculatedWidth and displayPercentage both use the expression (item.percentage ?? <fallback>). Nullish coalescing fires only on null/undefined; it does NOT fire on 0. The previous code used (item.percentage || ...), which fell back on 0 as well. The semantics have therefore changed: a legitimate item.percentage === 0 now renders width 0 and label 0%, where previously it would have fallen back to the computed ratio. The author must state explicitly: is item.percentage allowed to be 0, and if so, is 0% the intended display? Without that specification, this is a silent behavior change disguised as a refactor.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "61-75, 119-122, 186",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty SPECIAL_CASES dictionary ships as scaffolding, not as code",
+        "detail": "SPECIAL_CASES is declared empty with a comment 'Add entries here if needed.' This is speculative infrastructure for a problem not yet known to exist. Either it has been reasoned about (in which case state which IDs require it and add them now) or it has not (in which case delete it and add it when the first counter-example arrives). Shipping the empty container plus its lookup branch is overhead without correctness content.",
+        "file": "ui/lib/categories.ts",
+        "lines": "5-8, 32-35",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "selectedPoint?.category vs payload.name || payload.category \u2014 equality predicate is fragile",
+        "detail": "CustomDot computes currentCategory = payload.name || payload.category and then tests selectedPoint?.category === currentCategory. The 'isSelected' predicate is therefore correct only under the unstated precondition that selectedPoint.category equals whichever of name/category the radar library hands back. The new isFaded flag amplifies the cost of this fragility: every non-selected dot now visibly fades, so any mismatch produces a fully-faded chart with nothing highlighted. State the invariant on category identity, or key off the categoryId field which the diff already threads through CategorySelector.",
+        "file": "ui/components/graphs/radar-chart.tsx",
+        "lines": "98-101",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Width fallback chain still computes Math.max over data on every iteration",
+        "detail": "maxValue is now hoisted out of the inline expression \u2014 good. But it is still recomputed inside the .map callback for each row, i.e., O(n^2) over the bar list. n is small, so this is not a defect of correctness; it is a defect of reasoning. The competent programmer states 'maxValue is invariant over the iteration' and lifts it once, before the map. Leaving it inside is evidence that the author transcribed the fix rather than thinking about it.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "62-63",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "This is a UI refactor presented as a feature, and it bundles three different acts: (1) a verbatim text rename (Threat Score -> Prowler ThreatScore), which is correct and uninteresting; (2) the genuine new feature, the CategorySelector and radar fade; and (3) a silent replacement of a proved label table by a heuristic, plus a quiet behavioral change in HorizontalBarChart's percentage fallback and a domain widening in SEVERITY_ORDER. The third bucket is what concerns me. The author has not stated, anywhere in the diff, the postcondition 'the new getCategoryLabel agrees with the old one over the known category set,' and there are no tests in this diff to discharge that obligation; this is TESTED-NOT-PROVED at best, UNREASONED at worst. The SEVERITY_ORDER change breaks injectivity of the ordering map, which is an invariant the rest of the codebase almost certainly relies on without saying so. Verdict: not REFUSED, but do not merge until the label function is proved equivalent over the known IDs, the percentage-fallback semantics are stated explicitly, and SEVERITY_ORDER is normalized at the boundary rather than aliased in place."
+  },
+  "raw": ""
+}

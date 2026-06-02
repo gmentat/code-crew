@@ -1,0 +1,50 @@
+{
+  "name": "liskov",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close message type 'Close' contradicts the documented 'CloseStream' contract",
+        "detail": "The PR description and Deepgram's documented control-message contract specify {\"type\": \"CloseStream\"}, but _CLOSE_MSG sends {\"type\": \"Close\"}. The subtype's postcondition (server processes remaining audio, returns final frames) requires the contract-correct message. If Deepgram silently ignores unknown types, the abstraction leaks: callers believe graceful close holds when it does not.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws contract under closed/failed socket states is unspecified",
+        "detail": "_close_ws is now called in success, error, and already-closed paths, but its precondition (ws is open and writable) is implicit. Sending on a closing socket raises ConnectionResetError, which the broad except swallows as a warning. State the precondition: check ws.closed before send, or document that any send failure is benign. Otherwise the postcondition 'ws is closed' holds, but at the cost of noisy logs on the normal error path.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-142",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Single ws.receive() does not guarantee draining final audio frames",
+        "detail": "The postcondition implied by the PR description is 'all remaining TTS audio is received before close.' One ws.receive() with a 1s timeout receives at most one frame, then proceeds to close. If the goal is draining, the contract requires looping until a terminal message or timeout. As written, the operation's postcondition is weaker than advertised.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-137",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Control-message constants belong on a shared protocol ADT, not duplicated per class",
+        "detail": "STT already sends a CloseStream message; TTS now defines its own. The Deepgram wire protocol is one abstract data type with a small set of control messages. Centralize _FLUSH_MSG/_CLOSE_MSG (and the STT equivalent) in a protocol module so the contract has one source of truth and drift between STT and TTS cannot happen silently.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The fix moves _close_ws toward a graceful-shutdown contract, but the contract is not stated and the implementation diverges from it in two places: the close message is \"Close\" rather than the documented \"CloseStream\", and a single receive() does not actually drain remaining audio. The broad try/except hides whether the postcondition (server-acknowledged close) was met. Centralizing Deepgram control-message constants would give STT and TTS one shared protocol ADT instead of two drifting copies. None of these block merge if Deepgram tolerates \"Close\", but the contract should be written down and the message string verified against the SDK."
+  }
+}

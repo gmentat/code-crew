@@ -1,0 +1,77 @@
+{
+  "task_id": "vitest__9152",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Synchronous readFileSync inside getSourceMap runs per stack frame with no caching.",
+        "detail": "getSourceMap fires per frame during error formatting and does readFileSync (plus a second read inside convert-source-map) every time, with no memoization. Deep stacks hitting the same file produce O(frames * fileSize) work where O(uniqueFiles * fileSize) suffices. Add a Map<file, SourceMap|undefined> cache keyed by file path.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolvedSources change to resolve(from, '..', s) lacks an invariant comment and direct unit test.",
+        "detail": "The one-line change in DecodedMap silently shifts semantics: 'from' is now treated as a file whose parent contains sources, matching the sourcemap spec. The intent is obscured by the '..' trick; path.resolve(path.dirname(from), s) would name the intent. Add a direct unit test on resolvedSources so this doesn't get reverted.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "createConvertSourceMapReadMap returns '{}' for missing map files, silently masking errors.",
+        "detail": "Returning the literal string '{}' as a fake empty source map hides real problems (broken sourceMappingURL, missing .map file) behind a silent no-op. Downstream code can't distinguish 'no map' from 'map pointed at nothing'. Return undefined and let the caller decide, or log once at debug level.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "333-343",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixing 'pathe' and 'node:path' in the same file invites Windows path-separator bugs.",
+        "detail": "The file already imports resolve from 'pathe' but new code imports node:path and uses path.resolve/path.dirname. pathe normalizes separators across platforms; node:path does not. Pick one \u2014 the codebase's voice is pathe \u2014 unless there's a concrete reason to deviate.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "19-25, 326-340",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "readFileSync on a hot error path has no try/catch and can itself throw.",
+        "detail": "existsSync + readFileSync is racy and readFileSync can still throw (EACCES, EISDIR, symlink loop). If it throws inside parseErrorStacktrace's getSourceMap callback, the original error reporting dies and the user sees a sourcemap error instead of their test failure. Wrap in try/catch and fall through to no source map.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "180-186",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New convert-source-map dependency and helper placement deserve a second look.",
+        "detail": "extractSourcemapFromFile is a stateless (code, filePath) -> SourceMap transform that belongs next to DecodedMap in packages/utils/src/source-map.ts, not in test-run.ts. The repo already ships @jridgewell/trace-mapping; pulling in convert-source-map for ~30 lines of regex+fs work warrants measuring the win before taking the dep.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "318-345",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix is real, targeted, and substantively correct: the resolvedSources change matches the sourcemap spec and the new external-module path works. But the implementation is under-audited and written like it shipped under deadline. The load-bearing concerns are synchronous readFileSync per stack frame with no cache, the '{}' fallback that lies to convert-source-map about missing maps, and the absent invariant/unit test for the DecodedMap change. Verdict: NEEDS-WORK \u2014 cache reads, stop returning '{}', add a direct unit test on resolvedSources, and clean up the pathe/node:path mixing before landing."
+  }
+}

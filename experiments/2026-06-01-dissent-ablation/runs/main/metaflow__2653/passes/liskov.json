@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "metaflow__2653",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Contract of read_from_fifo_when_ready silently weakened: timeout and process-exit detection no longer hold after first byte",
+        "detail": "The function's implicit contract has two postconditions: (a) return all bytes written by the subprocess before it closes the FIFO, and (b) bound waiting by the timeout/poll loop so a hung subprocess does not block the parent forever. The new code satisfies (a) better but breaks (b): once a single chunk arrives, the fd is switched to blocking and the loop becomes an unbounded `while True: os.read()`. There is no longer any timeout, no poll-based liveness check, and no check_process_exited guard. A subprocess that writes one byte then hangs (or a writer that keeps the FIFO open without closing on crash) will block the parent indefinitely. This is a Liskov substitution failure at the function level: the new implementation strengthens its EOF guarantee but weakens the liveness postcondition the callers were relying on.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "130-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two read paths now coexist with divergent invariants; the module boundary no longer states which path owns EOF detection",
+        "detail": "Before the change there was one read loop with one invariant: poll, read, decide EOF via (events + empty read) or BlockingIOError + content, with a process-exit fallback. After the change there are two loops with two different EOF disciplines: the outer non-blocking loop (poll-based, process-exit-aware) and the inner blocking loop (POSIX EOF only). The contract of `read_from_fifo_when_ready` does not say which regime applies when, and callers cannot reason about whether their timeout/poll_timeout_ms argument still bounds total wait time. Either document the two-phase contract explicitly (phase 1: bounded wait for first byte; phase 2: unbounded blocking drain, callers must ensure writer always closes) or unify the loops.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "125-165",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fcntl mode-switch is an abstraction leak; the fd's blocking discipline is now a hidden side effect of having received data",
+        "detail": "The fd is created elsewhere with O_NONBLOCK as part of its contract with the rest of the IPC machinery. This function mutates that contract mid-call based on whether any data has arrived, and never restores it. If the fd were ever reused, inspected, or passed to another reader after this function (or after an exception inside the inner loop), it would now be in blocking mode contrary to its declared state. The blocking/non-blocking flag is part of the fd's invariant and should not be silently mutated by a reader helper; at minimum wrap the mode switch in try/finally that restores O_NONBLOCK on exit.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-137",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of the macOS-specific process-exit EOF fallback regresses a documented platform invariant",
+        "detail": "The deleted branch encoded a real, documented platform fact: on macOS the FIFO may not deliver a clean EOF when the writer closes, so the reader must consult check_process_exited to decide EOF. The PR assumes that the POSIX blocking-read EOF guarantee covers this case, but that guarantee only applies once we are in blocking mode AND all writers have closed all references to the FIFO. If on macOS the first poll event arrives but the writer's close path is the one that was previously unreliable, the new inner blocking loop can wedge indefinitely instead of falling back to process-exit detection. Either re-introduce a process-exit check inside the blocking loop (e.g., periodic timeout + check_process_exited) or document why the macOS case is now provably covered.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "147-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "has_blocking_error is now dead state; either remove it or restate its role",
+        "detail": "The BlockingIOError branch previously set has_blocking_error and broke on content; the new branch only passes. If has_blocking_error is still declared and threaded through the surrounding function, it is now vestigial state that does not participate in the loop's invariant. Remove it so the loop's state is exactly the state the contract needs.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Specification of read_from_fifo_when_ready is not written down anywhere reviewers can check",
+        "detail": "The bug and the fix both turn on subtle preconditions (writer always closes its end; fd starts non-blocking; subprocess lifetime bounds the read) and postconditions (returns full content; bounded wait until first byte; unbounded thereafter). None of these are in a docstring. Add a short spec block: preconditions on the fd and on command_obj, postconditions on returned content, behavior on writer-never-closes, behavior on timeout, and the two-phase blocking discipline. Code without spec is not finished code.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "120-165",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The fix correctly diagnoses a real EOF/buffering race and the POSIX blocking-read guarantee is the right primitive to lean on, but it is applied in a way that silently rewrites the function's contract. The original `read_from_fifo_when_ready` promised callers a bounded, poll-driven wait with a process-exit fallback; the new implementation gives a stronger completeness guarantee for the happy path while weakening the liveness postcondition (no timeout, no process-exit check, indefinite block) once any byte has arrived. By Liskov substitution this new implementation is not a valid replacement of the old one for callers that depended on bounded waits or on the macOS process-exit fallback. The fcntl mode flip is also an abstraction leak: a reader helper mutates the fd's blocking discipline mid-call and never restores it. Recommended changes: (1) keep the blocking-drain idea but cap it with poll + check_process_exited so liveness is preserved, (2) restore O_NONBLOCK in a try/finally, (3) write the two-phase contract into a docstring so future maintainers and subtypes (other readers in the IPC layer) can be audited against it."
+  },
+  "raw": ""
+}

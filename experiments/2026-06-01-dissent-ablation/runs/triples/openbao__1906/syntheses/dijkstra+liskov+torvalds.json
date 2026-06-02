@@ -1,0 +1,78 @@
+{
+  "task_id": "openbao__1906",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "revoke_error exposed via API without redaction contract or capability gating",
+        "detail": "All three reviewers flag this: the PR author themselves asks whether exposing RevokeErr is safe. Error strings from arbitrary backends routinely leak paths, endpoints, and credential fragments. Either define and enforce a redaction invariant where RevokeErr is written, or gate the field behind a sudo/root-only capability. Do not ship a public field whose contents are 'should not be sensitive'.",
+        "file": "vault/logical_system.go",
+        "lines": "2195-2200",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FetchLeaseTimes rename broadens contract and breaks exported API without spec update",
+        "detail": "Renaming the exported FetchLeaseTimes to FetchLeaseInfo churns a public symbol downstream consumers call, and silently widens the postcondition from 'times' to a partially-populated leaseEntry whose exact projection is implicit. Either keep the old name (or add a thin wrapper alias) or return a distinct, documented LeaseInfo struct stating which fields are guaranteed populated.",
+        "file": "vault/expiration.go",
+        "lines": "1703-1745",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric label 'fetch-lease-times' and old test name remain after rename",
+        "detail": "metrics.MeasureSince still uses the literal 'fetch-lease-times' and TestExpiration_FetchLeaseTimesIrrevocable keeps the old name. Either deliberately rename the telemetry key (and call it out) or keep the function name. Silent mismatch between code and metric confuses operators later.",
+        "file": "vault/expiration.go",
+        "lines": "1712",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport redaction is enumerated, not structurally enforced",
+        "detail": "The function returns *leaseEntry as an allowlist by enumeration with no invariant tying it to the type. When a future field is added to leaseEntry, nothing forces a decision about sensitivity, and the unexported namespace field leaks across the 'export' boundary. Return an exported LeaseInfo struct with explicit fields, or add a test that fails when leaseEntry grows.",
+        "file": "vault/expiration.go",
+        "lines": "1735-1750",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests cover only 'path'; namespace_path and revoke_error are unexercised, and absence of sensitive fields untested",
+        "detail": "TestSystemBackend_leases adds a single equality check for path. The two security-relevant new fields have zero coverage, and nothing asserts that Secret.InternalData, ClientToken, or Auth are absent from the response. Add a child-namespace test for namespace_path, a forced-revoke-failure test for revoke_error, and a negative assertion on sensitive members.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI schema marks path Required:true but value may be empty for edge-case leases",
+        "detail": "The framework path spec declares path as Required, but leaseInfoForExport copies whatever le.Path holds, which can be empty for irrevocable entries loaded from storage or token leases. Either enforce that Path is always non-empty for any lease returned here, or drop Required:true so generated clients don't break.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel consensus is NEEDS-WORK on a small, otherwise readable patch. The dominant concern, flagged by all three reviewers and the PR author, is exposing revoke_error on a non-privileged endpoint without a redaction contract or capability gate. The FetchLeaseTimes rename is gratuitous churn on an exported symbol, broadens the contract without restating it, and leaves a stale 'fetch-lease-times' metric label and test name behind. The redaction property of leaseInfoForExport is enumerated rather than structurally enforced, and tests assert presence of one new field but never absence of sensitive ones. Fix the revoke_error exposure, revert or alias the rename (with consistent telemetry), tighten the export contract, and expand test coverage to the two security-relevant fields."
+  }
+}

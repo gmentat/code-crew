@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "CHANGELOG entry name does not match the actual check directory/ID",
+        "detail": "The PR title and description say the check is `compute_image_publicly_shared`, but the directory and class are `compute_image_not_publicly_shared`. The CHANGELOG entry uses `compute_image_not_publicly_shared`, which matches the code, but the PR description is inconsistent. More importantly, ensure metadata.json `CheckID` matches the file/folder name exactly \u2014 it does here, but verify documentation/PR description is corrected before merge to avoid downstream confusion.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "3",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`_get_images` lists all images including Google-managed/public images by default",
+        "detail": "`images().list(project=project_id)` returns custom images owned by the project, but the description claims only custom images are evaluated. Worth confirming behavior \u2014 the API will not return public Google images for someone else's project, but if `project_id` happens to be `debian-cloud` etc. it would. Consider filtering by `family`/source or documenting the assumption.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-560",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-image getIamPolicy errors are logged but image still appears as not publicly shared",
+        "detail": "If `getIamPolicy` raises (e.g., permission denied as in test-image-3), `publicly_shared` remains False and the image is appended. The check will then report PASS for an image whose policy could not be read, hiding a true public-share. Consider skipping the image, marking as unknown, or surfacing an error state instead of a false PASS.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "545-571",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Images fetched serially per project instead of via `__threading_call__`",
+        "detail": "All other resource collectors in `__init__` use `__threading_call__`, but `_get_images()` iterates projects sequentially and additionally makes one `getIamPolicy` call per image serially. For accounts with many projects/images this will be noticeably slow and inconsistent with the surrounding service. Consider parallelizing across `project_ids`.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "37-38, 538-581",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reliance on `error.__traceback__.tb_lineno` will crash if traceback is None",
+        "detail": "If an exception is raised without an attached traceback (rare but possible via `raise SomeError()` re-raised from a context without traceback, or in tests using `Exception()` directly), `error.__traceback__` may be None and `.tb_lineno` will AttributeError inside the except handler. Other handlers in this file appear to use the same pattern, so this is a pre-existing nit, but the new code copies it.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "568-570, 578-580",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Required IAM permissions for `compute.images.getIamPolicy` not documented",
+        "detail": "The PR checklist explicitly asks whether provider permissions need updating. This check requires `compute.images.list` and `compute.images.getIamPolicy`. Confirm Prowler's documented GCP role/permission set already includes `getIamPolicy` on images, or update it; otherwise users will see widespread permission-denied logs and silent PASS results.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "summary": "The new GCP check is well-structured and tested, but has a few non-trivial concerns. The most important is that `getIamPolicy` errors cause images to be reported as PASS (not publicly shared) when their policy could not actually be read, which can hide real exposures \u2014 the test fixture for image-3 even exercises this silent-PASS path. Image collection is also serial across projects unlike all other collectors in `compute_service.py`. Smaller items: PR description vs. actual check name mismatch, no apparent update to required GCP IAM permissions for `compute.images.getIamPolicy`, and traceback access pattern."
+  }
+}

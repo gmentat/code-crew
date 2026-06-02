@@ -1,0 +1,74 @@
+{
+  "persona": "knuth",
+  "task_id": "openbao__1906",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo is a breaking API change with no shim",
+        "detail": "FetchLeaseTimes is an exported method on ExpirationManager. Renaming it (rather than keeping FetchLeaseTimes as a thin wrapper calling FetchLeaseInfo) breaks any out-of-tree caller that imports vault as a library. From a literate-programming perspective, the rename is correct (the method no longer returns only times), but the migration discipline is missing: either deprecate the old name with a one-line forwarder, or document the break in the changelog. The changelog entry only mentions the user-facing field additions.",
+        "file": "vault/expiration.go",
+        "lines": "1700-1740",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "revoke_error field surfaces raw internal error text to API consumers without redaction analysis",
+        "detail": "The PR author flags this themselves: 'Is it safe to display the revoke error? It could contain sensitive information.' RevokeErr is populated from internal revoke paths and may embed backend-specific diagnostics (URLs, credentials in error wrappers, stack-ish strings from third-party SDKs). The invariant that needs to be stated is: RevokeErr contains only operator-safe text. That invariant is not established anywhere in this diff, and no sanitization layer is added. Either prove the invariant by auditing every site that writes RevokeErr, or gate the field behind a redact/allowlist boundary before exporting it via the public lease lookup API.",
+        "file": "vault/logical_system.go",
+        "lines": "2199-2201",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "leaseInfoForExport copies an unexported field (namespace) by value -- aliasing semantics undocumented",
+        "detail": "The new code copies le.namespace into ret.namespace. namespace is an unexported pointer field on leaseEntry; the export copy now shares the pointee with the live lease entry. For a read-only lookup this is fine, but the invariant 'leaseInfoForExport returns a value the caller may not mutate' is not stated in the comment. A one-line literate comment ('returned entry shares immutable namespace pointer with the live entry; do not mutate') would make the contract auditable. Currently the reader has to infer it.",
+        "file": "vault/expiration.go",
+        "lines": "1737-1748",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage for new fields is shallow -- only path is asserted; namespace_path and revoke_error are not exercised",
+        "detail": "TestSystemBackend_leases adds a single assertion for resp.Data[\"path\"]. The two other new response fields (namespace_path, revoke_error) have no tests covering: (a) the omitted case when namespace is root or RevokeErr is empty, (b) the present case with a non-root namespace and a populated revoke error. Knuth's rule: tests complement proofs. The conditional emit logic in handleLeaseLookup (the three `if` guards) is exactly the place where off-by-one-style omission bugs hide.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI schema marks path as Required:true but the response shape does not always include it",
+        "detail": "logical_system_paths.go declares the new `path` field with Required: true. handleLeaseLookup unconditionally sets resp.Data[\"path\"] = leaseInfo.Path, so this holds today. However leaseInfo.Path can be the empty string for some lease shapes (token leases historically have an empty Path on certain code paths). The schema then asserts a required string that may be empty, which is technically allowed but worth a one-line invariant comment confirming Path is always populated for any lease that reaches this handler, or relaxing Required to false to match reality.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixed change: t.Context() introduced in one test but not the sibling test, inconsistent without explanation",
+        "detail": "The diff changes `namespace.RootContext(nil)` to `namespace.RootContext(t.Context())` in TestExpiration_revokeEntry_rejected_fairsharing, but leaves `namespace.RootContext(nil)` in TestExpiration_FetchLeaseTimesIrrevocable. Either the context propagation matters (in which case both should be updated and the rationale stated) or it does not (in which case the drive-by change is scope creep). From a literate review standpoint, the asymmetry is the bug -- the reader cannot tell which form is correct.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450, 3104, 3120",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The change itself is small and largely RIGOROUS: it widens the lease-lookup projection from (issue, expire, last-renew) to also include path, namespace_path, and revoke_error, and renames FetchLeaseTimes/leaseTimesForExport to FetchLeaseInfo/leaseInfoForExport so the name matches the projection. The data-structure choice (extending leaseInfoForExport rather than building a parallel struct) is correct -- the export entry is already a redacted leaseEntry, and adding three more whitelisted fields keeps that invariant intact. Two items deserve attention before merge: the exported method rename is a breaking change with no compatibility shim or changelog note, and revoke_error is exported to API consumers without an established invariant that its contents are operator-safe (the PR author raises this question and the diff does not answer it). Remaining items are NEEDS-LITERATE-COMMENT-class: the aliasing semantics of the copied namespace pointer, the OpenAPI Required:true claim, and asymmetric test-context cleanup. Tests for the new conditional response fields (namespace_path absent vs present, revoke_error absent vs present) are missing -- proofs don't replace tests here."
+  },
+  "raw": ""
+}

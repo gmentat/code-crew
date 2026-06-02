@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "default_response_to_output_transformer raises on non-JSON lines, killing the processor mid-stream",
+        "detail": "json.loads(response_line) will raise JSONDecodeError on any malformed or non-JSON SSE line (heartbeats, comments, partial frames). The exception propagates out of process_frame, aborting the whole invocation and leaving LLMFullResponseStartFrame unmatched. Wrap in try/except and log+skip, or document that the default cannot handle real-world streams.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "65-77",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Public constructor uses camelCase agentArn parameter, violating PEP 8 and Pipecat conventions",
+        "detail": "Every other parameter is snake_case (aws_access_key, aws_region). agentArn breaks consistency in a public API and will be painful to deprecate later. Rename to agent_arn before this ships; once released, fixing it is a breaking change.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104, 138",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Class name mismatch with PR title: AWSAgentCoreProcessor vs AWSBedrockAgentCoreProcessor",
+        "detail": "PR title says AWSBedrockAgentCoreProcessor but the class is AWSAgentCoreProcessor. Either is fine but pick one before release - changing later is a breaking API change. The 'Bedrock' qualifier is also more discoverable for users searching for Bedrock integrations.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "82",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bedrock client created and torn down on every LLMContextFrame",
+        "detail": "The `async with self._aws_session.client(...)` on line 198 re-establishes the bedrock-agentcore client for every invocation, paying TLS handshake + credential refresh costs each turn. For a voice pipeline with frequent turns this is meaningful latency. Create the client once at startup (e.g. in start()) and reuse it.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "198-200",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "asyncio.get_event_loop() is deprecated and emits warnings in Python 3.12+",
+        "detail": "Line 175 calls asyncio.get_event_loop().time() outside a running-loop-aware context. In 3.12+ this emits DeprecationWarning when there is no running loop and will be removed eventually. Use asyncio.get_running_loop().time() since this only runs inside async functions, or just use time.monotonic().",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "175",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No exception handling around invoke_agent_runtime; AWS errors will leave response bookends unclosed",
+        "detail": "If invoke_agent_runtime or the streaming iterator raises (network blip, throttling, auth failure), an already-opened LLMFullResponseStartFrame is never paired with an End frame, corrupting downstream aggregator state. Wrap the AWS call in try/except/finally that ensures the bookend is closed and logs the error.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "197-247",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "summary": "The processor has two release-blocking issues: the default response transformer crashes on any non-JSON SSE line (heartbeats, blanks after stripping prefix would already be filtered, but malformed JSON breaks the stream), and the public parameter `agentArn` violates Python naming conventions in a way that's painful to fix post-release. Several P1 concerns: class name doesn't match PR title (Bedrock prefix), AWS client is recreated per invocation adding latency, deprecated asyncio.get_event_loop() usage, and missing exception handling around the AWS call can leave Start/End frame bookends unmatched. No tests are included in the diff, which is notable for a new public processor but I focused on concrete code defects above."
+  }
+}

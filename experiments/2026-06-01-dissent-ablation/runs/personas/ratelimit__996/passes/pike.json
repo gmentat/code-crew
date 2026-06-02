@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "GetLimit builds two parallel metric-key builders that duplicate the descriptor walk logic",
+        "detail": "detailedMetricFullKey and valueToMetricFullKey are both appended to on every iteration with overlapping rules. The right data structure is one builder plus a per-level decision: 'include value here? yes/no'. Collapse into a single key builder driven by (detailedMetric || descriptor.valueToMetric || matchedUsingValue || matchedViaWildcard). The algorithm becomes self-evident.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical branches in the value_to_metric block collapse to one rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and default-key branches all do the same thing: if valueToMetric or matched-with-value, append key+'_'+value (when value non-empty); else append key. That's four lines, not thirty. The cleverness of distinguishing three match modes here isn't load-bearing for the output.",
+        "file": "src/config/config_impl.go",
+        "lines": "352-388",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Post-hoc RateLimit reconstruction is a workaround for the wrong data flow",
+        "detail": "Building the enhanced key, comparing to FullKey, then calling NewRateLimit just to swap Stats is a smell. The key should be decided once during the walk and passed to a single NewStats call at the end. The extra allocation and the discarded intermediate stats object indicate the data is fighting the algorithm.",
+        "file": "src/config/config_impl.go",
+        "lines": "419-429",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "FullKey is now mutated by detailed_metric path where it previously wasn't",
+        "detail": "Setting rateLimit.FullKey = detailedKey in the detailed_metric branch is a behavior change to FullKey semantics piggybacked onto an unrelated feature. If FullKey-matches-Stats.Key is the intended invariant (the new test asserts it), make that the single source of truth at construction time rather than patching it in two places.",
+        "file": "src/config/config_impl.go",
+        "lines": "413-418",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Else branch appends entry.Key for an unmatched descriptor, producing a key for a limit that won't fire there",
+        "detail": "When nextDescriptor is nil the code still writes '.'+entry.Key to valueToMetricFullKey 'for determinism'. If no limit is returned the key is unused; if a limit was set higher in the tree this trails garbage onto its key. Better: stop appending once nextDescriptor is nil, matching detailedMetricFullKey's existing behavior.",
+        "file": "src/config/config_impl.go",
+        "lines": "384-388",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests cover happy paths but not the unmatched-descriptor and deep-mixed-flag cases the new code introduces",
+        "detail": "The new branches around matchedViaWildcard/matchedUsingValue and the nil-nextDescriptor fallback are not directly asserted. A test where a mid-level lookup fails to find a descriptor (so the walk terminates early) would pin down whether the trailing append is intended or a bug.",
+        "file": "test/config/config_test.go",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature is small and useful, but the implementation runs two parallel key-builders through the descriptor walk with overlapping rules and a post-hoc RateLimit reconstruction. Data dominates: one builder, one per-level decision on whether to include the runtime value, one NewStats call at the end. The three-way match-mode branching collapses to a single rule. FullKey semantics are also being quietly extended in the detailed_metric path. Tests are thorough on happy paths but miss the unmatched-descriptor edge that the new code introduces."
+  }
+}

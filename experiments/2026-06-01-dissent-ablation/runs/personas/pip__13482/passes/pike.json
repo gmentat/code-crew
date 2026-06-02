@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer marks reqs as prepared, leaving needs_more_preparation True across the call boundary",
+        "detail": "The deleted block in resolver.py set req.prepared = True and needs_more_preparation = False after preparation. Now each caller must call prepare_linked_requirements_more itself, and the flags are mutated inside that method (presumably). The contract moved from 'resolver returns prepared reqs' to 'caller must finish prep'. That's an implicit protocol carried by command code. Document it or assert it.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist adds a fourth source-of-truth for the distribution with no precedence doc",
+        "detail": "get_dist now checks _distribution, then metadata_directory, then local_file_path+is_wheel, then editable. Four branches, implicit priority, no comment on why _distribution wins. The data shape is wrong: one InstallRequirement carries multiple representations of 'where the dist lives' and callers mutate them at different times. A small named struct (DistSource) or a single resolved field would make the algorithm self-evident.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info backfill inside _fetch_metadata_only mixes two concerns",
+        "detail": "prepare_linked_requirement now both fetches metadata and synthesizes a download_info as a side effect, guarded by 'if req.download_info is None'. That's a filter (fetch metadata) growing a second output (populate direct_url) because a downstream command needs it. Either make _fetch_metadata_only return both, or set download_info at the single site that knows it's needed. The if-None guard hides ordering bugs.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-545",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "prepare_linked_requirements_more call duplicated across three commands instead of composed once",
+        "detail": "download.py, install.py, and wheel.py each now call preparer.prepare_linked_requirements_more(requirement_set.requirements.values()) at the top of their post-resolve block. That's the same three-line ritual in three places. A small helper finish_preparation(preparer, req_set) (or moving the call to a thin wrapper) would prevent the next command from forgetting it. Copy-paste invites drift.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-425",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no invariant; could be a plain attribute",
+        "detail": "set_dist(self, distribution) just assigns to self._distribution. No validation, no event, no logging. In Go-spirit terms this is a struct field with ceremony. Either give it an invariant worth enforcing (e.g., 'only settable once', 'must match req.name') or drop the method and assign the attribute directly. As written it pretends to be an API.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test or assertion that dry-run actually avoids the download",
+        "detail": "The whole point is 'don't download the wheel in --dry-run'. The diff moves calls around but I see no test that asserts the network/file-fetch did not happen for a PEP-658 case. A small integration test with a mock index that fails on wheel GET would pin the behavior. Otherwise a future refactor silently re-introduces the download.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The change is in the right direction: stop downloading in the resolver, defer the final prep to the commands that actually need installed bits. But it shifts an implicit protocol onto callers without documenting it, and grows the InstallRequirement data shape with a fourth dist source whose precedence lives only in get_dist's if/elif ladder. The download_info backfill inside _fetch_metadata_only entangles two concerns. Strip the ceremony around set_dist, pick one canonical dist field, and add a test that proves no wheel is fetched under --dry-run."
+  }
+}

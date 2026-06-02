@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "PR title/description say `compute_image_publicly_shared` but code/changelog use `compute_image_not_publicly_shared`",
+        "detail": "The CHANGELOG entry, directory, file, class, and metadata CheckID all use `compute_image_not_publicly_shared`, while the PR title and description repeatedly reference `compute_image_publicly_shared`. Verify the intended check name is consistent across docs, metadata `Recommendation.Url` (hub.prowler.com link), and any compliance mappings before merge to avoid broken references.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "2-3, 31",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IAM policy fetch failures are silently treated as 'not publicly shared' (false negatives)",
+        "detail": "In `_get_images`, if `getIamPolicy` raises (e.g., permission denied), the exception is logged but `publicly_shared` remains False and the image is reported as PASS. This produces silent false negatives for images the scanner cannot inspect. Consider skipping the image or surfacing the error rather than asserting a clean PASS. The test fixture (`test-image-3` raising Permission denied) explicitly encodes this behavior.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "555-565",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image model missing IAM bindings detail; only a boolean is exposed",
+        "detail": "The `Image` model only stores `publicly_shared: bool`, discarding which role(s) or members were involved. Other compute resources (Disk, LoadBalancer) store richer context. Without role/member info, status_extended cannot specify the risky binding and remediation guidance can't differentiate roles. Consider storing the offending bindings list for better reporting and future checks.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`_get_images` runs sequentially while other compute resources use `__threading_call__`",
+        "detail": "Every other compute resource enumeration uses `self.__threading_call__` over projects/regions/zones, but `_get_images` iterates `self.project_ids` serially and additionally makes a `getIamPolicy` call per image. On accounts with many projects/images, this materially slows the compute service init. Align with the rest of the service by threading across `project_ids`.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Check may include GCP public/community images, producing noisy findings",
+        "detail": "`images().list(project=project_id)` only lists images owned by the project, which is correct, but the description claims 'custom images' explicitly. If the user has imported public images into their project (common pattern), they will be evaluated too. Consider filtering by image family/source or documenting that all project-owned images are scanned to avoid surprise findings.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-545",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Permissions/IAM scope changes for `compute.images.getIamPolicy` not addressed in checklist",
+        "detail": "The PR checklist asks whether new checks require updated provider permissions. This check newly invokes `compute.images.getIamPolicy`, which requires `compute.images.getIamPolicy` IAM permission. Confirm the documented Prowler GCP role / required permissions list is updated; otherwise scans will silently log permission errors and pass everything (compounding the P1 above).",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "548-553",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "summary": "The new GCP check is well-structured and mirrors existing Prowler patterns, but there is a naming inconsistency between the PR title/description and the actual code (`compute_image_not_publicly_shared` vs `compute_image_publicly_shared`) that should be reconciled, including the metadata recommendation URL. The most important runtime concern is that an IAM policy retrieval failure is silently treated as PASS, producing false negatives \u2014 the tests even encode this behavior. Secondary concerns: the Image model only carries a boolean (loses role/member context), enumeration is not threaded like other compute calls, and the new `compute.images.getIamPolicy` permission requirement isn't acknowledged in the permissions checklist."
+  }
+}

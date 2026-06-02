@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "ratelimit__996",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Shared rateLimit pointer is mutated per-request, causing data races and incorrect stats for concurrent callers",
+        "detail": "rateLimit is retrieved from descriptorsMap (shared state). The new code mutates rateLimit.Stats and rateLimit.FullKey on every GetLimit call based on per-request runtime values. Concurrent requests with different values will race and clobber each other's stats. GetLimit is called per request and must be read-only on the cached descriptor.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-430",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "statsManager.NewStats called on every request creates unbounded stats objects and high cardinality",
+        "detail": "The non-detailed_metric branch unconditionally calls this.statsManager.NewStats(enhancedKey) every GetLimit invocation since rateLimit.FullKey is empty by default (only set in detailed branch). This both leaks stats objects and defeats any caching the stats store does, plus creates per-runtime-value metrics even when no descriptor has value_to_metric set.",
+        "file": "src/config/config_impl.go",
+        "lines": "423-429",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "enhancedKey comparison uses uninitialized FullKey, so override triggers even when no value_to_metric descriptor is set",
+        "detail": "rateLimit.FullKey is only set in the DetailedMetric branch. For all other rate limits FullKey is empty string, so enhancedKey != rateLimit.FullKey is always true. Every request rebuilds rateLimit via NewRateLimit and replaces stats, regardless of whether any descriptor opted in to value_to_metric. TestValueToMetric_NoFlag_Unchanged should fail or expose this.",
+        "file": "src/config/config_impl.go",
+        "lines": "421-429",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wildcard and explicit-value branches behave identically, making valueToMetric check on explicit matches misleading",
+        "detail": "In the matchedUsingValue branch, value is appended regardless of nextDescriptor.valueToMetric. README states value_to_metric only affects unspecified values, but for wildcard matches the flag gates inclusion, while for explicit key+value matches it does not. Either unify the rule or document this asymmetry clearly; the current code's intent is hard to follow.",
+        "file": "src/config/config_impl.go",
+        "lines": "359-380",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NewRateLimit recreation passes old FullKey to NewStats then immediately discards it",
+        "detail": "Line creates new RateLimit with this.statsManager.NewStats(rateLimit.FullKey) and then overwrites .Stats with NewStats(enhancedKey). The intermediate stats object is allocated, registered with the store, and never used. Pure waste and additional stats-store pollution on every call. Just construct once with enhancedKey, or mutate Stats only.",
+        "file": "src/config/config_impl.go",
+        "lines": "425-428",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated key-build logic across three branches could collapse into one helper",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default branches each have the same shape: append key, optionally append '_value' when flag set or unconditionally. Extract a small helper appendKeyMaybeValue(builder, key, value, includeValue bool) for readability and to prevent future drift between branches.",
+        "file": "src/config/config_impl.go",
+        "lines": "357-385",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The feature is a reasonable addition but the GetLimit implementation has serious correctness problems. The shared rateLimit pointer from the descriptor map is mutated on every call, causing concurrency hazards and per-request stats allocation. The enhancedKey != FullKey guard is broken because FullKey is unset outside the detailed_metric branch, so the override path runs unconditionally. The branch logic also conflates explicit-value matches and value_to_metric semantics inconsistently with the documented behavior. Recommend reworking to compute the metric key without mutating shared state, ideally by caching variant stats per resolved key or restructuring how Stats is selected at lookup time."
+  }
+}

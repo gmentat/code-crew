@@ -1,0 +1,64 @@
+{
+  "persona": "dijkstra",
+  "task_id": "openbao__1906",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "RevokeErr exposed without specification of what it may contain",
+        "detail": "The author themselves asks in the PR description whether it is safe to display revoke_error. This is precisely the unreasoned state I refuse: a field is added to a public response with the precondition 'it should not contain sensitive information, because it will get logged.' That is a hope, not an invariant. The frame change (what leaves the trust boundary) demands a stated postcondition on RevokeErr's contents, enforced at the producer side, before this surface is widened. Either prove RevokeErr is sanitized at every write site, or redact/summarize it here.",
+        "file": "vault/logical_system.go",
+        "lines": "2197-2199",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport silently copies the unexported namespace pointer, aliasing internal state",
+        "detail": "The renamed export helper now copies le.namespace by reference into the returned struct. The previous contract of this function was 'a redacted value object safe to hand to outside callers'; the new contract aliases a mutable pointer to the live namespace into that value. No invariant is stated about the lifetime, mutability, or ownership of namespace once exported. If a caller (or a future caller) mutates ret.namespace or retains it beyond the lease's life, the consequences are unspecified. State the frame, or copy the fields you actually need (Path).",
+        "file": "vault/expiration.go",
+        "lines": "1741-1747",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Tested-not-proved: behavior coverage for the new fields is one assertion",
+        "detail": "The only new test is 'resp.Data[\"path\"] == \"secret/foo\"'. There is no test that namespace_path is emitted when and only when namespace.Path is non-empty, no test that revoke_error appears only when RevokeErr is set, and no negative test that these fields are absent when their preconditions fail. The conditional emission logic (three separate if-blocks in the handler) is exactly the kind of control flow that testing-as-substitute-for-reasoning will not catch. Either state the postcondition on resp.Data shape and prove it, or add tests for each branch.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo widens the contract without updating the metric name or callers' mental model",
+        "detail": "The function is renamed and its purpose generalized from 'times' to 'non sensitive information,' but the metric key 'expire.fetch-lease-times' is preserved, and the test function TestExpiration_FetchLeaseTimesIrrevocable is not renamed. Minor, but the discipline is: when a function's specification changes, its name, its metric, and its tests' names should all move together, so a future reader is not misled about which concept is being measured. Also: the comment 'non sensitive information' is asserted, not proved \u2014 see RevokeErr above.",
+        "file": "vault/expiration.go",
+        "lines": "1708-1713",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixed test context construction across renamed call sites",
+        "detail": "One updated call site now passes namespace.RootContext(t.Context()) while two others continue to pass namespace.RootContext(nil). The rename is a mechanical change; the context substitution is a semantic one and is done in only one place. Either both forms are correct (in which case state which is preferred and apply uniformly) or one is wrong. As written, a reader cannot tell whether the t.Context() variant was an intentional fix or an accident of editing.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450, 3104, 3120",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "UNREASONED on the security question that the author themselves raised: RevokeErr is now placed on the response with no stated invariant that it is free of sensitive content, only a hope that it 'should not' contain any. SMUGGLED state-aliasing in leaseInfoForExport, which now copies an unexported namespace pointer out of the trust boundary without stating ownership or mutability rules; the safer move is to copy namespace.Path only. TESTED-NOT-PROVED on the conditional emission of the three new fields \u2014 coverage is a single equality check on path; the namespace_path / revoke_error branches are unexercised. The rename FetchLeaseTimes -> FetchLeaseInfo is fine in spirit but its metric name and test names were not carried along, and one call site was opportunistically changed to t.Context() while siblings were not. REFUSED in current form pending: (1) a stated, enforced postcondition on RevokeErr contents at the producer side or redaction here; (2) field-copy rather than pointer-alias of namespace; (3) tests covering each conditional emission branch."
+  },
+  "raw": ""
+}

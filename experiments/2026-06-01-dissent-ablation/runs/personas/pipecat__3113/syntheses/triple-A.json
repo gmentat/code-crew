@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3113",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer crashes on non-JSON SSE lines, leaving response bookend unclosed",
+        "detail": "json.loads runs without try/except inside the per-line loop. Any heartbeat, keepalive, comment, or malformed chunk raises JSONDecodeError, aborts process_frame, and leaves _output_response_open=True with no matching LLMFullResponseEndFrame. Either guard the parse and return None, or document that transformers must be total.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "73-87",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "bedrock-agentcore client is reconstructed on every LLMContextFrame, paying TLS+auth setup per turn",
+        "detail": "async with self._aws_session.client(...) inside process_frame creates and tears down a fresh client for every invocation. In a streaming voice loop this is hot-path latency the user feels. Create the client once at setup/start and reuse it; this separates connection lifecycle from request handling.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timer-based response close races with deterministic end-of-stream close",
+        "detail": "_close_output_response_after_timeout uses a 1-second asyncio.sleep to emit LLMFullResponseEndFrame, while process_frame also emits one at end-of-stream. Two notions of 'response over' share one boolean and can interleave Start/End frames. Drop the timer: emit Start before the loop, Text inside, End after.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "171-201, 245-253",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates PEP 8 and the surrounding snake_case API convention",
+        "detail": "Every other constructor kwarg is snake_case (aws_access_key, aws_region); agentArn is camelCase because the AWS wire field is. The boto3 field name is incidental transport; the public API is separate. Rename to agent_arn (and _agent_arn) and translate to agentRuntimeArn at the call site before this ships.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "115-152, 207-217",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hand-rolled SSE parsing uses a fixed 6-char slice and naive newline split, mishandling spec-conformant servers",
+        "detail": "The loop splits on '\\n', hardcodes 'data: ' offset 6, warns on anything else, and ignores id:, event:, retry:, comments, and \\r\\n transports. Wire framing and semantic extraction are complected. Decompose into a pure lines -> events function feeding a transformer, or use an SSE parser.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "217-247",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "aioboto3 15.0 -> 15.5 dependency bump bundled into a feature patch",
+        "detail": "pyproject.toml and uv.lock churn for aioboto3/aiobotocore/boto3/botocore/s3transfer affects every AWS consumer in the repo. It belongs in its own commit with justification for whether the new processor actually requires 15.5. Split the patch.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK: the processor's bones are reasonable but it carries removable incidental complexity and three real correctness/perf bugs. Top consensus issues are an unguarded json.loads that crashes the stream on any non-JSON line, a bedrock-agentcore client rebuilt per turn on the hot path, and a timer-based response-end racing the deterministic end-of-stream close. Naming (agentArn vs snake_case) breaks API consistency and should be fixed before ship. Secondary concerns: hand-rolled SSE parsing that mishandles spec-conformant servers, and an aioboto3 version bump that should be its own commit."
+  }
+}

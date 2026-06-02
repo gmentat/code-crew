@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "`needs_more_preparation` and `prepared` flags are no longer reset by the resolver, leaving state semantics ambiguous across commands",
+        "detail": "The old resolver code set `req.prepared = True` and `req.needs_more_preparation = False` after running the extra preparation pass. By deleting that block without moving the reset logic into `prepare_linked_requirements_more`, the boolean flags now drift: a requirement may be fully prepared yet still report `needs_more_preparation == True`. This complects 'prepared-ness' (an identity tracking a state change over time) with the preparation function itself. The value (a prepared distribution) and the identity flag should change together or the flag should be derived from the distribution rather than separately mutated.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist` / `get_dist` / `metadata_directory` / `local_file_path` form a 4-way complected resolution of 'which distribution am I'",
+        "detail": "`get_dist` now branches across four possible sources of the same logical value (cached `_distribution`, `metadata_directory`, `local_file_path` wheel, fallback to `metadata`). Each branch represents a different time-point in the lifecycle of a requirement. This is place-oriented programming: the 'current distribution' is an identity scattered across four mutable fields with implicit precedence rules. A single explicit field (or a small sum-typed value describing 'where the dist came from') would make the time semantics legible. As written, future readers must reverse-engineer the ordering to know which branch wins when.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three callers now duplicate the `prepare_linked_requirements_more(...)` invocation immediately after `resolver.resolve(...)`",
+        "detail": "`commands/download.py`, `commands/install.py`, and `commands/wheel.py` each carry the same incantation: resolve, then call `prepare_linked_requirements_more` on `requirement_set.requirements.values()`. The old code centralized this in the resolver. Moving the call out is correct for the dry-run case, but copy-pasting it three times complects the policy ('when should more preparation happen?') with each command's flow. The essential decision is one fact: 'install/download/wheel need full files; --dry-run and `pip lock` do not.' That fact deserves one home, e.g., a `finalize_for_install()` step the commands call by name, not a repeated line.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Setting `req.download_info` inside `_fetch_metadata_only` mixes 'fetch metadata' with 'record provenance for reporting'",
+        "detail": "`prepare_linked_requirement` is now doing two things in the metadata-only branch: producing a metadata distribution (a value) and recording a `download_info` side-effect on the requirement (an identity update for downstream `pip lock` / `--report` consumers). These are two concerns. The fetch should return a value; whoever needs `download_info` for reporting should derive it from the link. The current shape works but quietly entangles preparation with reporting, which will bite the next person who tries to reuse `_fetch_metadata_only`.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`_distribution` field has no documented invariant relative to `metadata_directory` / `local_file_path`",
+        "detail": "The new `_distribution` cache is introduced as 'the cached metadata distribution that this requirement represents,' but the relationship to the existing fields representing the same concept is not stated. Is `_distribution` authoritative? Is it allowed to disagree with `metadata_directory`? Can `set_dist` be called twice with different values? Without a written invariant the field will accrete uses that violate whatever the author had in mind. A one-line contract above the field would prevent that.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The change is doing the right thing \u2014 pulling the 'download everything' step out of the resolver so `--dry-run` and `pip lock` stop fetching wheels they never use. That is genuine decomposition: resolution and preparation were complected, and this PR separates them. What remains complected, though, is the requirement's notion of 'which distribution am I' \u2014 now spread across `_distribution`, `metadata_directory`, `local_file_path`, and the `needs_more_preparation`/`prepared` booleans, with the resolver no longer resetting the last two. The repeated `prepare_linked_requirements_more` call in three command files is incidental complexity that wants a named step. The fix is small: own the lifecycle flags in one place, document the `_distribution` invariant, and stop calling the metadata-fetch path a side-effect site for `download_info`. COMPLECTED on the distribution identity; otherwise SIMPLE in direction."
+  },
+  "raw": ""
+}

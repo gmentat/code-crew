@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "agents__3909",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "STTv2 violates the STT supertype contract by raising NotImplementedError from recognize",
+        "detail": "The STT supertype promises that _recognize_impl returns a SpeechEvent. STTv2 strengthens preconditions (callers must know not to call recognize) and weakens postconditions (raises instead of returning). This is a textbook LSP violation: any caller treating STTv2 as an STT may break. Either widen the supertype to express capability (e.g., a streaming-only subtype hierarchy) or make recognize fall back to a single-shot stream consumption.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "153-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Sample rate is silently coerced into an audio_format string with no validation against the declared STTAudioFormat ADT",
+        "detail": "STTAudioFormat enumerates exactly six pcm_* literals, but the constructor casts f\"pcm_{sample_rate}\" with typing.cast \u2014 bypassing the type contract. Passing sample_rate=11025 produces \"pcm_11025\", a value outside the ADT, sent to the server. The contract says \"sample rate is one of {8000,16000,22050,24000,44100,48000}\"; the code must enforce that precondition explicitly or accept a Literal directly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "127-128",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Numeric VAD parameter ranges documented in the docstring are not enforced as preconditions",
+        "detail": "The docstring asserts vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_*_duration_ms in [50, 2000]. None of these preconditions are checked; out-of-range values are forwarded to the server. Either validate at the boundary (fail fast with a clear error) or remove the range claim from the contract \u2014 a spec the code does not enforce is worse than no spec.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "92-107",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speech-segment invariant is ambiguous: FINAL_TRANSCRIPT does not flip _speaking, relying on an empty commit as end-of-speech marker",
+        "detail": "The module's hidden state invariant should be \"_speaking is True iff a START_OF_SPEECH has been emitted without matching END_OF_SPEECH.\" Currently a committed_transcript with text keeps _speaking=True, and only an empty committed_transcript ends the segment. If the server never sends the empty terminator (network drop, error), the invariant breaks and downstream consumers never see END_OF_SPEECH. State the protocol contract explicitly or add a timeout-based fallback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-378",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTv2 naming as a parallel class rather than a versioned subtype obscures the abstraction",
+        "detail": "Following the \"Deepgram pattern\" reproduces a known architectural smell: STT and STTv2 are two siblings, not one ADT with versioned implementations. Callers must branch on class identity instead of selecting via a model/version parameter. This is inheritance-or-duplication used for code reuse where composition (a single STT facade delegating to a backend) would preserve substitutability. Worth raising as an architecture-level question even if not blocking this PR.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "53-161",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "audio_format is a public field on STTOptions but is derived from sample_rate, creating two sources of truth",
+        "detail": "STTOptions exposes both sample_rate and audio_format as independent fields, but the constructor derives audio_format from sample_rate. A future caller mutating one and not the other will desynchronize the options object. Either make audio_format a computed property of sample_rate, or accept audio_format as the canonical input and derive sample_rate from it. One field, one truth.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "42-52",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR adds a streaming Scribe v2 client, but several contract-level issues undermine substitutability and the stated ADT. The most serious: STTv2.recognize raises NotImplementedError, which is an LSP violation against the STT supertype \u2014 callers cannot safely treat STTv2 as STT. The STTAudioFormat literal type is bypassed by a typing.cast from a free-form sample_rate, defeating the ADT. Documented numeric ranges for VAD parameters are not enforced, and the speech-segment invariant relies on an empty-commit terminator with no fallback. The STT/STTv2 sibling pattern is itself an architecture smell worth surfacing for the larger plugin family."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "openbao__2362",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "HasParent semantics may invert intended root-ACL scoping, breaking root-token authorization",
+        "detail": "In vault/acl.go AllowOperation, the fast-path checks `ns.HasParent(a.root)`. If HasParent means 'a.root is an ancestor of ns', then a root policy issued in 'ns1' would grant root in 'ns1/child' but not in 'ns1' itself (a node is not its own parent in most implementations). This could either over-grant (descendants) or under-grant (the namespace itself). Add an explicit equality check (`ns.ID == a.root.ID || ns.HasParent(a.root)`) and unit tests for same-namespace and grandchild cases.",
+        "file": "vault/acl.go",
+        "lines": "342-360",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ErrNamespaceSealed string-contains check will misclassify wrapped errors mentioning 'namespace is sealed'",
+        "detail": "AdjustErrorStatusCode uses errwrap.Contains on the literal string 'namespace is sealed'. Because ErrSealed is matched the same way and this is a substring check, any error whose message includes this phrase (e.g., logs or formatted user input echoed in errors) will be converted to 503. Prefer errors.Is(err, consts.ErrNamespaceSealed) for sentinel detection.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed stub silently returns false, masking future seal enforcement assumptions",
+        "detail": "Core.NamespaceSealed always returns false with a TODO. Callers of ListAllNamespaces and others will treat sealed namespaces as unsealed until SealManager lands. If any caller in this PR (e.g., loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector) starts depending on this for correctness, they will silently get the wrong behavior. Either keep this unexported until usable or add a panic-in-test guard / log warning.",
+        "file": "vault/core.go",
+        "lines": "1397-1404",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace restriction on 'root' policy weakens security invariant without policy gating",
+        "detail": "Previously NewACL rejected a root policy outside the root namespace. The PR removes that check entirely so any namespace's ACL can be 'root'. While the intent is per-namespace root tokens, NewACL is now permissive regardless of caller authority. Document and ensure upstream callers (token creation paths) gate who may construct such ACLs; otherwise a misuse elsewhere becomes a silent privilege escalation.",
+        "file": "vault/acl.go",
+        "lines": "100-110",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ExpirationManager.leaseView/tokenIndexView change alters storage path for root namespace",
+        "detail": "Previously root-namespace leases used `systemBarrierView.SubView(expirationSubPath + leaseViewPrefix)`. Now both branches go through `NamespaceView(barrier, ns).SubView(systemBarrierPrefix + expirationSubPath + leaseViewPrefix)`. If NamespaceView for the root namespace does not resolve to the same physical prefix as systemBarrierView, existing leases on upgrade become inaccessible. Verify storage path equivalence and add a migration/compat test for root-ns lease lookup.",
+        "file": "vault/expiration.go",
+        "lines": "448-458",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Switch in AdjustErrorStatusCode changes precedence; HTTPCodedError no longer overrides sealed status",
+        "detail": "The refactor turns sequential `if`s into a `switch` with early case matching. Previously, an error matching both sealed and HTTPCodedError would have its status set to 503 then potentially overridden by the coded value. Now the first matching case wins, so HTTPCodedError will not override sealed/locked statuses. Confirm this behavior change is intended.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-178",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR makes the right shape of changes for per-namespace root tokens, but two correctness concerns stand out: (1) the `ns.HasParent(a.root)` check in the root fast-path likely needs to also handle ns == a.root, otherwise root tokens won't authorize in their own namespace; (2) the substring-based detection of `ErrNamespaceSealed` in response_util can over-match. The `NamespaceSealed` stub returning false is acceptable as scaffolding but risks silent misbehavior in the callers already wired to ListAllNamespaces. The expiration view path change for the root namespace deserves a storage-compat check before merge. The switch refactor in AdjustErrorStatusCode subtly changes precedence between sealed and HTTPCodedError."
+  }
+}

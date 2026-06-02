@@ -1,0 +1,94 @@
+{
+  "persona": "knuth",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Set-membership lookup on changedFiles is O(n) per file; should be O(1) via Set",
+        "detail": "In isIncluded, `this.changedFiles.includes(filename)` performs a linear scan for every candidate file. Combined with the outer file iteration (and uncached calls), the effective filter is O(C * N) where C is candidate files and N is changed files. For large repos this is needlessly quadratic-ish. Use a Set<string> built once in onTestRunStart, and have isIncluded probe it in O(1). The invariant is simple: changedFiles is a membership predicate, so the data structure should be a hash set, not an array. Bad programmers worry about the code; good programmers worry about the data structure.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "~177, ~200",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Path-normalization invariant for changedFiles is not stated or enforced",
+        "detail": "isIncluded now compares `slash(cleanUrl(_filename))` against entries of `this.changedFiles`. Nowhere is it stated (or audited) that VitestGit.findChangedFiles and ctx.config.related return values are already slash-normalized, cleanUrl-equivalent, and absolute in the same way. If even one source produces backslash-separated paths on Windows, or relative paths, the membership test silently returns false and the coverage filter quietly excludes everything. State the invariant in a comment and normalize on ingress in onTestRunStart so the comparison is provably symmetric.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache is reused across inconsistent semantics; clear ordering is fragile",
+        "detail": "isIncluded caches the included/excluded decision keyed only by filename, but the decision now also depends on this.changedFiles. onTestRunStart clears the cache only when changedFiles is set. If isIncluded is ever called before onTestRunStart (e.g., during early config resolution, plugin transform, or in watch mode between runs where changedFiles state changes), the cache may serve a stale answer. The invariant `cache valid iff (options + changedFiles) constant since last clear` should be made explicit, and the cache key should incorporate the changedFiles identity (or the cache should be cleared in every state transition, including back to undefined on re-run).",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-180, 329-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Watch-mode staleness: changedFiles is not refreshed between runs in onTestRunStart's git path",
+        "detail": "onTestRunStart calls VitestGit.findChangedFiles every run start, which is correct in principle, but the result is assigned to a long-lived field (`this.changedFiles`) without clearing it first. If a subsequent run resolves changedFiles to undefined (e.g., git ref disappears, or options.changed toggled off mid-watch), the previous list persists. Either reset `this.changedFiles = undefined` at the top of onTestRunStart, or compute it as a local and assign once. Termination of the staleness invariant should be obvious by reading the function in isolation.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Empty changedFiles array silently excludes every file; semantics are not documented",
+        "detail": "If VitestGit.findChangedFiles returns [] (valid: nothing changed since ref), then `included = this.changedFiles.includes(filename)` is always false and coverage is empty. That may be the desired behavior, but it is indistinguishable from a misconfigured ref. The literate explanation (a one-line invariant comment) is missing. Either log a warning when the set is empty but `options.changed` is truthy, or document explicitly that empty-diff yields empty coverage by design.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "176-180, 329-345",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform accepts only a narrow set of boolean literals; coercion logic is under-commented",
+        "detail": "The transform in cli-config.ts handles 'true'/'yes'/true and 'false'/'no'/false but silently passes everything else through as a string. That is probably the intended polymorphism (boolean | git-ref), but the function would benefit from a one-sentence literate comment stating the invariant: 'returns boolean iff the input is a known boolean literal; otherwise returns the original string treated as a git ref'. Also worth noting: 'no'/'yes' as boolean aliases is unusual for vitest CLI options and may surprise users whose branch is literally named 'no' or 'yes'.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart hook contract is not documented in the type",
+        "detail": "The new CoverageProvider.onTestRunStart? is documented as 'Callback called when test run starts' but the contract that matters is unstated: is it called exactly once per run, before any onAfterSuiteRun, and is it awaited before tests start collecting coverage? The three call sites in core.ts suggest yes, but a custom provider author reading only the type cannot infer the invariant. A one-paragraph literate comment on the interface would let third-party providers implement it correctly without reading the call sites.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "30-33",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl change to isIncluded is correct but the rationale is implicit",
+        "detail": "Wrapping `_filename` in cleanUrl before slash is presumably to strip query params like `?v=hash` introduced by Vite transforms (the new query-param-transforms test confirms this is the motivating case). The behavior change is correct, but the diff has no comment explaining why cleanUrl was added. Future readers may delete it as 'redundant' if they don't realize that without it, transformed module URLs fail to match the changedFiles set. One literate line: '// strip Vite query params so transformed module IDs match canonical paths' would prevent the regression.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The feature is well-motivated and the tests cover the main user-visible cases (inheritance, override, query-param transforms, excludeAfterRemap). The algorithmic content is small but the data-structure choice is wrong in the hot path: changedFiles is treated as a membership predicate and should be a Set, not an Array, because isIncluded is called per candidate file and currently does an Array.prototype.includes scan. The bigger rigor gap is that the path-normalization invariant linking VitestGit output, ctx.config.related, and the slash(cleanUrl(...))-normalized filename is nowhere stated; one source disagreeing silently yields empty coverage. Cache invalidation and watch-mode staleness of this.changedFiles should be made explicit (clear-on-entry, or key the cache by changedFiles identity). None of this is asymptotically wrong; it is UNDER-AUDITED and NEEDS-LITERATE-COMMENT."
+  },
+  "raw": ""
+}

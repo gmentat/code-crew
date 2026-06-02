@@ -1,0 +1,237 @@
+{
+  "task_id": "agents__3909",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "recv_task swallows exceptions raised by _process_stream_event, including APIConnectionError on auth/quota/error frames",
+        "detail": "In recv_task, `_process_stream_event(parsed)` is wrapped in a broad `except Exception: logger.exception(...)`. But _process_stream_event raises APIConnectionError on auth_error / quota_exceeded / transcriber_error / input_error / error messages. That exception is caught and logged but never propagated, so the stream silently continues after an authentication or quota failure with no transcripts ever arriving. The fatal errors should be re-raised (or at minimum break the loop) so the outer reconnect/error machinery can surface them.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~230-238 (recv_task) and ~395-410 (_process_stream_event)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "audio_format is hard-coded from constructor sample_rate and ignores unsupported values, silently producing an invalid format string",
+        "detail": "`audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")` blindly builds the format from whatever int the caller passed. STTAudioFormat is a Literal restricted to {8000, 16000, 22050, 24000, 44100, 48000}, but typing.cast bypasses the check. A user passing sample_rate=44000 will send `pcm_44000` to the API and get a confusing server-side rejection. Validate against the supported set and raise ValueError up front.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~118-119",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect loop never actually reconnects; _reconnect_event is never set anywhere",
+        "detail": "The `while True` loop in _run is structured around `self._reconnect_event` to support reconnection, but nothing in the class ever calls `self._reconnect_event.set()`. Either the reconnect machinery is dead code that should be removed for simplicity, or an intended trigger (e.g., on certain WS closures or recoverable errors) was forgotten. As written, on any WS failure the tasks_group raises and bubbles out \u2014 the loop adds complexity with no benefit.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~243-275",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "language defaults to 'en' on every SpeechData when no language is configured, misrepresenting detected language",
+        "detail": "`speech_data = stt.SpeechData(language=self._language or 'en', text=text)` hard-codes 'en' as a fallback even though Scribe v2 supports many languages and may auto-detect. If the user does not pass language_code, every transcript will be labeled English regardless of what was actually spoken. Prefer passing None / empty / the value returned by the API (if any) over a misleading default.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~340-344",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "tasks_group.exception() may itself raise InvalidStateError if the gather is still pending after cancellation",
+        "detail": "`tasks_group.cancel(); tasks_group.exception()` is called in the finally block. `asyncio.Future.exception()` raises `InvalidStateError` if the future is not done; after `cancel()` it can still be pending until the loop processes the cancellation. This pattern is fragile \u2014 wrap with a try/except or await the gather (with return_exceptions=True) before inspecting.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~270-272",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "keepalive_task swallows all exceptions and returns, masking pings that fail because the socket is dead",
+        "detail": "`except Exception: return` in keepalive_task means if ws.ping() raises because the connection died, the keepalive silently exits while send_task/recv_task may still be looping. Better: let send/recv detect the failure via their own ws operations, and at minimum log the exception. The bare except can also hide CancelledError handling issues across Python versions if it isn't BaseException-aware.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~167-172",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No bounds checking on VAD parameters despite docstring claiming they are constrained",
+        "detail": "The docstring states vad_silence_threshold_secs must be 0.3-3.0, vad_threshold 0.1-0.9, min_speech/silence_duration_ms 50-2000, but no validation enforces these. Out-of-range values silently propagate to the API as query params. If these are real product constraints, validate them in __init__ and raise ValueError.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~91-110 (constructor) and ~285-303 (_connect_ws)",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query string parameters are not URL-encoded",
+        "detail": "`_connect_ws` builds the query string with raw f-strings and `&`.join. If language_code or any future param contains characters that need escaping (e.g., a regional locale 'zh-CN' is fine, but spaces or '&' would break the URL), the request will malform silently. Use `urllib.parse.urlencode` or `aiohttp`'s params= kwarg.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~278-303",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTModels Literal has a trailing comma, defining a single-element tuple-style literal that may confuse readers/tools",
+        "detail": "`STTModels = Literal[\"scribe_v2_realtime\",]` \u2014 the trailing comma is syntactically legal but unusual. More importantly, the type is too narrow: ElevenLabs is likely to add more streaming Scribe models. Either widen the union now or accept `str` to avoid forcing a release for every new model id.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Empty 'committed_transcript' is overloaded as end-of-speech signal without confirming this is the documented protocol contract",
+        "detail": "The code interprets `committed_transcript` with empty text as 'end of speech segment'. The PR description does not cite ElevenLabs documentation confirming this. If the server ever sends a benign empty commit (e.g., heartbeat, keepalive, or interim final with no text), END_OF_SPEECH will fire prematurely, breaking turn detection downstream. Either cite the spec, switch to an explicit server flag (e.g., is_final/segment_end), or guard with additional state.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~376-388",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_recognize_impl raises NotImplementedError instead of falling back to v1 or a clearer API",
+        "detail": "Callers using the generic STT.recognize() path will get NotImplementedError. Consider either (a) implementing one-shot recognize via a short stream, or (b) raising APIError with guidance rather than NotImplementedError so it surfaces correctly through the agent's error handling.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~140-148",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "stt parameter shadows the imported stt module inside SpeechStreamv2.__init__",
+        "detail": "`def __init__(self, *, stt: STTv2, ...)` shadows the imported `stt` module within the constructor scope. Functional today (the module is used elsewhere via SpeechEventType already imported at top), but it's a footgun if someone adds `stt.SpeechData(...)` here later. Rename to `stt_instance` or `parent`.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~155-163",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "commit_strategy is hard-coded to 'vad' but exposed as STTCommitStrategy type publicly",
+        "detail": "PR description mentions a `STTCommitStrategy` type was added, but the diff does not show it in models.py or the public exports \u2014 and the WS hard-codes `commit_strategy=vad`. Either drop the unused type mention or actually parameterize commit_strategy so users can pick (and document VAD-only restriction explicitly in the class docstring).",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~282",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "50ms chunking math truncates for sample rates not divisible by 20",
+        "detail": "`samples_50ms = self._opts.sample_rate // 20` \u2014 for 22050 Hz this gives 1102 samples (~49.97ms), for 44100 gives 2205. Tiny rounding error per chunk; over long sessions the drift is negligible but worth a comment, or use round(sample_rate / 20).",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~177",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No tests added; PR self-reports that existing test suite is broken \u2014 at minimum add a unit test for _process_stream_event state machine",
+        "detail": "The state machine in _process_stream_event (speaking flag transitions, start/end of speech emission, error propagation) is the core risk surface and can be unit-tested without a real ElevenLabs connection by feeding it dicts. Skipping live-integration tests is reasonable, but the message-routing logic deserves a small pure test.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Logging at INFO level on session_started will be noisy in agent processes",
+        "detail": "`logger.info(\"STTv2: Session started with ID: %s\", session_id)` fires on every connect. For long-running agents that reconnect, this is noise. Demote to debug.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "~391-393",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Copyright header says 2023 on a brand-new file added in 2026",
+        "detail": "Cosmetic, but the copyright header for a new file should reflect the current year. Many projects auto-update, but some legal review processes flag stale headers.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether to introduce a parallel STTv2 class or version the existing STT class",
+        "positions": [
+          {
+            "persona": "shippability",
+            "position": "STTv2 as a separate class matches the Deepgram precedent (PR #3245), preserves backward compatibility, and ships fast. Don't refactor existing users on a v2 release."
+          },
+          {
+            "persona": "abstraction-discipline",
+            "position": "Two parallel classes duplicate connection management, options handling, and error mapping. Better to internally dispatch on model_id within one STT class and deprecate the legacy path, otherwise the elevenlabs plugin will accrete STTv3, STTv4."
+          }
+        ]
+      },
+      {
+        "topic": "Severity of the swallowed APIConnectionError in recv_task",
+        "positions": [
+          {
+            "persona": "correctness",
+            "position": "P0 \u2014 silent auth/quota failures are a production landmine. The user sees 'no transcripts' with no signal."
+          },
+          {
+            "persona": "pragmatic",
+            "position": "P1 \u2014 logger.exception still produces an actionable log line; users can debug from logs. Worth fixing pre-merge but not strictly blocking."
+          }
+        ]
+      },
+      {
+        "topic": "Whether 'empty committed_transcript = end of speech' is acceptable heuristic",
+        "positions": [
+          {
+            "persona": "formal-correctness",
+            "position": "Reverse-engineered protocol semantics are a future-break risk. Require a documented field (is_final / segment_end) or version assertion."
+          },
+          {
+            "persona": "pragmatic-shipper",
+            "position": "Matches Cartesia's is_final pattern referenced in the comment; ElevenLabs realtime API is new, the author has tested in a full pipeline, ship it and revisit when the spec is published."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the reconnect_event scaffolding should stay or be removed",
+        "positions": [
+          {
+            "persona": "simplicity",
+            "position": "Dead code lies \u2014 strip the reconnect loop until a real trigger exists. Less to maintain, easier to read."
+          },
+          {
+            "persona": "forward-compatibility",
+            "position": "Keep it; reconnect is a near-term feature and matches the Deepgram skeleton other contributors expect. Document it as a stub."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR adds a reasonable WebSocket-based streaming STT client for ElevenLabs Scribe v2, modeled on existing Deepgram/Cartesia plugins. The structural shape is fine, but there are two merge-blocking correctness issues: (1) recv_task wraps _process_stream_event in a broad except that swallows the APIConnectionError raised on auth/quota/transcriber errors, producing silent failures, and (2) audio_format is constructed via typing.cast from an arbitrary int sample_rate with no validation against the supported Literal set. Additional P1 concerns include unused reconnect_event scaffolding, hard-coded 'en' language fallback, fragile tasks_group.exception() pattern, missing VAD parameter validation despite documented bounds, and unencoded URL query construction. The PR also ships without tests and self-acknowledges the test suite is broken \u2014 a small pure unit test of the message-routing state machine would substantially de-risk merge."
+  },
+  "raw": ""
+}

@@ -1,0 +1,60 @@
+{
+  "name": "liskov",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ServiceSwitcherRequestMetadataFrame.service typed as FrameProcessor leaks implementation through the frame contract",
+        "detail": "The frame's targeting field is typed as a full FrameProcessor reference, but callers only need to identify a target. This couples the frame's ADT to the entire processor abstraction, exposes mutable processor state to any downstream observer, and forces equality semantics on object identity. A stable identifier (service id/name) would preserve substitutability and keep the contract narrow.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Contract for who consumes ServiceSwitcherRequestMetadataFrame is unstated and now split across components",
+        "detail": "Previously the switcher consumed the frame unconditionally; now STTService re-pushes it and the switcher suppresses it only when service == active_service. The postcondition (frame is invisible to downstream) silently weakens for non-active or non-switcher-wrapped services. The docstring must state: services must re-push after handling; suppression is the switcher's responsibility; behavior outside a switcher is undefined.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1723-1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LSP risk: STTService subclasses inheriting process_frame must now satisfy a new postcondition (re-push the request)",
+        "detail": "Any existing STTService subtype that overrides process_frame and previously did not push RequestMetadataFrame now silently violates the new contract that downstream sees the frame. This is a precondition/postcondition shift on the supertype's behavior. Either document the new contract explicitly on STTService or centralize the re-push so subtypes cannot forget.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "264-272",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Suppression key uses object identity equality on FrameProcessor which is brittle as an invariant",
+        "detail": "`frame.service == self.strategy.active_service` relies on identity/equality of processor instances. If active_service is wrapped, proxied, or re-instantiated across switches, the invariant 'request to active service is consumed' breaks silently and the frame leaks downstream. A stable identifier comparison would make the invariant explicit and testable.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module boundary: switcher-internal frame name is in the global frames module",
+        "detail": "The frame is explicitly switcher-internal (the docstring and prefix say so), yet it lives in pipecat.frames.frames alongside public frames. Co-locating it with service_switcher (or a switcher frames submodule) would draw the module boundary around responsibility rather than file, and signal to callers that this is not a general-purpose control frame.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The rename clarifies intent, but the new ADT leaks the FrameProcessor implementation through the frame's `service` field and relies on object identity for the suppression invariant. The contract \u2014 who consumes the frame, who must re-push it, what happens outside a ServiceSwitcher \u2014 is split across switcher and services without being written down, which is a latent LSP hazard for STTService subclasses. Recommend narrowing `service` to a stable identifier, documenting the handler contract on the frame and on STTService, and considering whether this switcher-internal frame belongs in the global frames module."
+  }
+}

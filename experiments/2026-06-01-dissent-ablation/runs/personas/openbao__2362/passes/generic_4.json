@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "openbao__2362",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root check uses HasParent without validating namespace lookup, allowing potential privilege escalation",
+        "detail": "In vault/acl.go AllowOperation, a.root.HasParent(ns) check relies on namespace identity from context. If a.root is set with an unverified namespace (e.g., the test creates one with just Path:'ns1' and no ID), the parent check semantics may misfire. More critically, HasParent on a namespace not actually existing in the store means root tokens minted on deleted/forged namespaces could still grant root privs to descendants.",
+        "file": "vault/acl.go",
+        "lines": "343-360",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub always returns false, defeating the purpose of error sentinel handling",
+        "detail": "Core.NamespaceSealed in vault/core.go is a TODO stub returning false unconditionally. The PR adds ErrNamespaceSealed handling in response_util.go and ListAllNamespaces is described as 'including sealed namespaces' but the sealed check is a no-op. Merging this creates dead code paths and a false sense of seal enforcement until SealManager lands. At minimum gate with a feature flag or document clearly that no namespace-sealing protection exists yet.",
+        "file": "vault/core.go",
+        "lines": "1399-1403",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "response_util.go switch-case changes semantics by making cases mutually exclusive",
+        "detail": "The refactor from sequential if-blocks to a switch statement changes behavior: previously an error containing both ErrSealed AND being an HTTPCodedError would have its status overridden by the HTTPCoded code. Now only the first matching case wins. This is a subtle semantic change that could affect error code propagation for wrapped errors. Verify no callers depend on the prior fall-through behavior.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace restriction on root policy weakens existing invariant without migration story",
+        "detail": "NewACL previously rejected the 'root' policy outside the root namespace ('root policy is only allowed in root namespace'). Removing this check is a security-sensitive change: any code path that constructs ACLs with a 'root' policy under a non-root namespace context now silently produces root-equivalent ACLs scoped to that namespace. Audit all NewACL call sites to confirm context namespace is always trustworthy.",
+        "file": "vault/acl.go",
+        "lines": "101-110",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces replaced with ListNamespaces in metrics/auth/MFA paths may silently change behavior",
+        "detail": "Multiple Core methods (loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, countActiveTokens) switched from namespaceStore.ListAllNamespaces(ctx, true) to c.ListNamespaces(ctx). If ListNamespaces applies ACL filtering or excludes sealed namespaces via the (stubbed) NamespaceSealed check, MFA configs and token counts could become incomplete. Confirm semantic equivalence or document the intentional exclusion.",
+        "file": "vault/core.go",
+        "lines": "3287, 3395",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test uses &namespace.Namespace{Path: \"ns1\"} without ID, masking real namespace semantics",
+        "detail": "TestACL_Root's child namespace test constructs a Namespace literal with only Path set, no ID. This bypasses the namespace store and the HasParent logic may behave incorrectly with empty IDs. Tests should use a properly registered namespace or factory to ensure parent-child relationships are validated as in production.",
+        "file": "vault/acl_test.go",
+        "lines": "163-165",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR lays groundwork for per-namespace sealing and namespace-owned root tokens but ships with stub implementations and a security-sensitive ACL change. The removal of the 'root policy only in root namespace' guard, combined with HasParent-based fast-path root checks, requires careful audit of all NewACL callers. The NamespaceSealed stub returning false makes the new error-handling paths dead code. The response_util switch refactor subtly changes error precedence. Test coverage is thin on the child-namespace root case and uses synthetic namespace literals."
+  }
+}

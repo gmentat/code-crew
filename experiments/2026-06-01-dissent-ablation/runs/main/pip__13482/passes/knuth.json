@@ -1,0 +1,64 @@
+{
+  "persona": "knuth",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer marks requirements as prepared; invariant `req.prepared` is now violated on the resolver exit path",
+        "detail": "The deleted block in resolver.py set `req.prepared = True` and `req.needs_more_preparation = False` after calling `prepare_linked_requirements_more`. The new code shifts the `prepare_linked_requirements_more` call into each command (install/download/wheel), but does not restore the invariant that `req.prepared` is True and `req.needs_more_preparation` is False after preparation completes. Any downstream consumer that reads `req.prepared` (e.g. to gate operations or assert state) will now observe stale values. State the invariant explicitly: after `prepare_linked_requirements_more`, every requirement r satisfies `r.prepared == True and r.needs_more_preparation == False`. Either re-establish it in `prepare_linked_requirements_more` itself (preferred; one site, one truth) or restore the post-call loop at every call site.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185 (deleted)",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`--dry-run` install path is not actually short-circuited; `prepare_linked_requirements_more` is called unconditionally before the dry-run return",
+        "detail": "Reading install.py: the new `prepare_linked_requirements_more(...)` call is inserted before the `pip_req` lookup and before any dry-run early-return. If the dry-run exit lives further down (it typically does in this command, around the install step), then dry-run will still trigger the very downloads this PR claims to avoid. The PR's stated goal \u2014 `pip install --dry-run` does not download full wheels \u2014 depends entirely on the placement of this call relative to the dry-run branch. Show the invariant in code: the `prepare_linked_requirements_more` call must be on the non-dry-run branch only, or guarded by `if not options.dry_run:`. Without that guard, the headline claim is asymptotically-ok-practically-wrong: the metadata-only fetch happens, and then we download anyway.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`set_dist` caches a metadata-only distribution that later silently shadows the real installed distribution",
+        "detail": "`get_dist` now returns `self._distribution` first, before consulting `metadata_directory` or `local_file_path`. Once `set_dist(metadata_dist)` is called during metadata-only fetch, every subsequent `get_dist()` returns the metadata-only distribution, even after the full wheel is downloaded and `metadata_directory` / `local_file_path` are populated. The invariant the caller likely wants is: `get_dist()` returns the most-prepared distribution available. The implementation returns the first-cached one. Either invalidate `self._distribution` in `prepare_linked_requirements_more` once the real distribution is materialized, or invert the priority so `metadata_directory`/`local_file_path` win when present. As written, this is a quiet correctness hazard \u2014 tests that exercise install-after-metadata-fetch may pass while real installs observe stale metadata.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-621",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`download_info` is synthesized from `req.source_dir` which is None during metadata-only fetch",
+        "detail": "`direct_url_from_link(req.link, req.source_dir)` is called inside the metadata-only branch, where the package has not been unpacked and `req.source_dir` is typically None. `direct_url_from_link` then constructs a DirectUrl without local source context, which is the intended dry-run behavior, but the call reads as if `source_dir` matters. A literate-comment-grade fix: either pass `None` explicitly with a comment (`# no source_dir yet; metadata-only fetch`) or assert `req.source_dir is None` here so the reader does not have to chase whether this is a bug. As-is this is `NEEDS-LITERATE-COMMENT`.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three call sites duplicate the same `prepare_linked_requirements_more(...)` line; the invariant lives in three places instead of one",
+        "detail": "download.py, install.py, and wheel.py each grow an identical call to `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` right after `resolver.resolve(...)`. The previous design had a single call site inside the resolver. Three copies means three places to keep in sync, three places where a future contributor can forget the call, and three places where the `req.prepared` invariant has to be re-established. Knuth's preference: one named operation, one call site, or a `finalize_preparation(req_set)` helper that owns both the call and the invariant update. The current shape is a duplication waiting to drift.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED with one real correctness hazard. The PR achieves its headline by deleting the unconditional `prepare_linked_requirements_more` from the resolver and re-issuing it from each command \u2014 but in doing so it (a) drops the post-call invariant that `req.prepared = True` and `req.needs_more_preparation = False`, (b) places the install.py call before the dry-run return, which likely defeats the entire optimization for `pip install --dry-run` unless guarded, and (c) introduces a `_distribution` cache in `InstallRequirement` whose lookup priority shadows the real installed distribution once a metadata-only one has been cached. The data-structure idea (cache the prepared dist on the requirement) is right; the lookup order and cache-invalidation discipline are wrong. Fix: guard the install.py call with `if not options.dry_run`, invert or invalidate the `_distribution` priority in `get_dist`, and re-establish the `prepared` invariant in `prepare_linked_requirements_more` itself so all three call sites stay honest."
+  },
+  "raw": ""
+}

@@ -1,0 +1,201 @@
+{
+  "task_id": "espnet__6325",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Whether duplicate db.sh entries (regular file + symlink) should block merge",
+        "positions": [
+          {
+            "persona": "Strict correctness",
+            "position": "The recipe creates egs2/tal_zh_adult_teach/asr1/db.sh as a symlink to ../../TEMPLATE/asr1/db.sh, which is the standard pattern in all other recipes. The TEMPLATE/asr1/db.sh was also edited to add TAL_ZH_ADULT_TEACH=downloads. This is the correct convention and not a duplication."
+          },
+          {
+            "persona": "Pragmatic shippability",
+            "position": "No conflict \u2014 the recipe-level db.sh is a symlink to the template, which means it picks up the new TAL_ZH_ADULT_TEACH variable from TEMPLATE/asr1/db.sh. This is fine and consistent with other recipes."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the missing exit on unzip-not-installed is a real bug",
+        "positions": [
+          {
+            "persona": "Defensive coder",
+            "position": "In local/download_and_untar.sh the `if ! command -v unzip` branch prints a message but does not `exit`, so the script will continue and the subsequent `unzip` invocations will fail with a less clear error. This should be an exit 1."
+          },
+          {
+            "persona": "Pragmatic",
+            "position": "set -euo pipefail will cause the subsequent unzip call to fail and abort the script. Output will be slightly noisier but behavior is still safe. Worth fixing but not blocking."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "README links to a non-existent config path",
+        "detail": "README.md links the ASR config as ./conf/train/train_asr_branchformer_e24_amp.yaml, but the file is actually at ./conf/train_asr_branchformer_e24_amp.yaml (no train/ subdir). The link is broken and will 404 in the rendered README.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "15",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh prints unzip-missing warning but does not exit",
+        "detail": "The check `if ! command -v unzip >/dev/null; then echo ...` only echoes a message and falls through. Combined with set -euo pipefail the subsequent unzip call will fail with a confusing error rather than the intended clear message. Add `exit 1` inside the branch.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "10-12",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Usage block in download_and_untar.sh missing exit on wrong argc",
+        "detail": "When invoked with the wrong number of arguments, the script prints the Usage block but does not exit, so execution continues with unset or wrong values of $1/$2. Add `exit 1` after the Usage heredoc.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "14-22",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unquoted command substitutions in download_and_untar.sh break on paths with spaces",
+        "detail": "`extract_dir=$(realpath $1)` and `zip_dir=$(realpath ${2:-$extract_dir})` do not quote $1 / $2, so paths containing spaces will be split. Quote as `$(realpath \"$1\")` and `$(realpath \"${2:-$extract_dir}\")`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "24-25",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh sources download_and_untar.sh with `.` instead of executing it",
+        "detail": "`. ./local/download_and_untar.sh \"${TAL_ZH_ADULT_TEACH}\" \"${downloads_dir}\"` sources the script into the current shell. Because download_and_untar.sh sets its own positional args from $1/$2, and contains `set -euo pipefail`, sourcing it changes the parent shell's options and pollutes its environment. Most other ESPnet recipes invoke it with `./local/download_and_untar.sh ...`. This is fragile.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "35",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh ignores --downloads_dir when invoking download_and_untar.sh",
+        "detail": "data.sh accepts a `--downloads_dir` flag (parsed via parse_options.sh) but then calls `download_and_untar.sh \"${TAL_ZH_ADULT_TEACH}\" \"${downloads_dir}\"`. If the user does not pass --downloads_dir, downloads_dir is empty, and download_and_untar.sh receives an empty second arg, which due to the unquoted `realpath ${2:-$extract_dir}` actually still works \u2014 but the script treats argc==2 with an empty string as 2 args and will set zip_dir = realpath of empty string ('.'). The behavior depends on subtle bash positional semantics and should be made explicit (omit the second arg, or pass an explicit default).",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "11, 35",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hardcoded utterance counts make recipe brittle to dataset revisions",
+        "detail": "data.sh enforces exact line counts (22467/3208/6072/29386/38924) via `wc -l != num_wav`. If TAL ever republishes the corpus with even one corrected/dropped transcript the recipe will hard-fail with no easy override. Consider warning instead of erroring, or making the check optional behind a flag.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "53-56, 71-75",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Train/dev/test split deviates from the 7:1:2 ratio claimed in PR description",
+        "detail": "PR says split is 7:1:2 train/val/test. Actual counts in data.sh are train \u2248 90,777 (22467+29386+38924), dev=3208, test=6072, ratio roughly 91:3:6. The README/PR description is inconsistent with the recipe. Either clarify the description or document why dev/test are smaller.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "65-71",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Sed-based transcript cleanup is fragile and undocumented",
+        "detail": "The chain `sed 's/\uff21/A/g' | sed 's/#//g' | sed 's/=//g' | sed 's/\u3001//g' | sed 's/\uff0c//g' | sed 's/\uff1f//g' | sed 's/\u3002//g' | sed 's/[ ][ ]*$//g'` mixes fullwidth normalization, punctuation stripping, and trailing-whitespace trimming with no explanation. Collapsing into one sed -e ... -e ... call or moving to a small python normalizer would be clearer and faster. Also: this strips Chinese punctuation but leaves ASCII punctuation, which seems arbitrary.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "45-48",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Speaker IDs are derived from immediate parent dir, which may collide across the three archives",
+        "detail": "`utt2spk` uses `TALASR$(NF-1)` as speaker ID, where NF-1 is the immediate parent dir of the wav. If two of the three archives (aisolution_data, CH, MA) contain a subdir with the same name (e.g. both have a `wav` dir), distinct speakers would be merged. Worth confirming the corpus structure guarantees uniqueness.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "41-43",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "decode_asr_branchformer.yaml sets lm_weight: 0.7 but run.sh defaults use_lm=false",
+        "detail": "The decode config sets lm_weight: 0.7 which is only meaningful when use_lm=true. The default run path won't use the LM, so this is silently ignored. Either set use_lm=true to match the published LM-rescored results, or note in README that lm_weight applies only with use_lm.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/decode_asr_branchformer.yaml",
+        "lines": "3",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "train_asr_branchformer_e24_amp.yaml has typo-like float values that work but are unusual",
+        "detail": "`self_attention_dropout_rate: 0.` and `src_attention_dropout_rate: 0.` (trailing dot) and `time_mask_width_ratio_range: [0., 0.05]` are valid YAML floats but inconsistent with the rest of the file using `0.0`. Cosmetic.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "35-36, 80-82",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "README header is empty / has stray blank line",
+        "detail": "README.md begins with a blank line before `# Branchformer Results`. Minor formatting nit.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "1",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symlink files lack trailing newline",
+        "detail": "Multiple symlinked entry-point files (asr.sh, db.sh, path.sh, pyscripts, scripts, steps, utils) are flagged `\\ No newline at end of file`. This is harmless for symlinks but inconsistent with other recipes that may end with newlines. Trivial nit.",
+        "file": "egs2/tal_zh_adult_teach/asr1/",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Typos and grammar in YAML comments",
+        "detail": "`max_epoch: 15  # 15epoch is enougth` \u2014 `enougth` -> `enough`, missing space. Cosmetic.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_lm_transformer.yaml",
+        "lines": "16",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No CITATION / LICENSE note for TAL dataset",
+        "detail": "The TAL Open Data has specific usage terms. Other ESPnet recipes (e.g. talromur) include a short note about license/usage. Consider adding a one-liner pointing to the TAL terms in the README.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "This is a standard ESPnet recipe-addition PR (new egs2/tal_zh_adult_teach/asr1) with the typical scaffold of symlinks, configs, and a data prep script. No P0 blockers: the architecture follows the established pattern, results table is plausible, and the changes are scoped to the new recipe plus one line in TEMPLATE/asr1/db.sh. The main P1 issues are in local/download_and_untar.sh (missing exit on bad argc and missing unzip, unquoted realpath args), the sourced-vs-executed invocation of that script from data.sh, a broken README link to the ASR config, and an inconsistency between the PR description's 7:1:2 split claim and the actual ~91:3:6 split implied by the hardcoded counts. P2 items are stylistic/robustness nits: brittle transcript sed chain, possible speaker-ID collisions across archives, lm_weight set despite use_lm=false default, and minor typos."
+  },
+  "raw": ""
+}

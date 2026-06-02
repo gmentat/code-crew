@@ -1,0 +1,80 @@
+{
+  "task_id": "pipecat__3113",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Timer-based Start/End bookend races with deterministic stream completion and shares unlocked mutable state.",
+        "detail": "A 1-second sleep task emits LLMFullResponseEndFrame alongside an explicit close at end of process_frame, with _output_response_open and _close_task unprotected. Overlapping invocations can interleave or drop bookends. Drop the timer: emit Start before the loop, End after. One concept, no race.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "147-201",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Boto client is constructed and torn down per LLMContextFrame inside process_frame.",
+        "detail": "async with self._aws_session.client(...) opens a fresh bedrock-agentcore client on every invocation, leaking aioboto session lifecycle into the hot path and adding latency. The client should be a long-lived processor-owned resource created in setup() and closed in cleanup().",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "203-220",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer calls json.loads with no error handling and will crash mid-stream.",
+        "detail": "Any malformed line, heartbeat, or keepalive raises JSONDecodeError out of process_frame, leaving _output_response_open=True and a dangling close task. Either guard the parse and return None on failure, or specify that transformers must be total functions and wrap at the call site.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "73-89, 240-246",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hand-rolled SSE parsing complects wire framing with content extraction.",
+        "detail": "Inline split('\\n'), startswith('data: '), slice [6:] mixes transport parsing with business logic and assumes exactly one space after the prefix, which SSE does not guarantee. Extract a small generator: bytes-in, response-line-out, then let process_frame just consume lines and call the transformer.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "217-246",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "agentArn parameter violates PEP 8 snake_case used by every sibling kwarg.",
+        "detail": "All other constructor args are snake_case (aws_access_key, aws_region) but agentArn mirrors the AWS wire field. The public Python API should be agent_arn; translate to agentRuntimeArn at the boto3 call site. The wire name is incidental to the processor's contract.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "104-137",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class name AWSAgentCoreProcessor disagrees with PR title AWSBedrockAgentCoreProcessor.",
+        "detail": "The exported class name and PR title diverge. Since the name is the value users import, it is part of the contract. Pick one and align docstring, class name, and PR title.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "87-92",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the processor's core shape is sound but is over-engineered around response framing. The dominant P1 is the timer-based Start/End bookend with unlocked shared state, which races against the deterministic end-of-stream close and can break under overlapping invocations; the fix is to emit Start before the loop and End after, dropping the timer entirely. Two other P1 structural problems: the boto client is built per-frame instead of once at setup, and the default response transformer's unguarded json.loads will crash mid-stream on any non-JSON line. Hand-rolled SSE parsing should be lifted into a small generator. Naming drift (agentArn, class vs PR title) is minor but real spec inconsistency."
+  }
+}

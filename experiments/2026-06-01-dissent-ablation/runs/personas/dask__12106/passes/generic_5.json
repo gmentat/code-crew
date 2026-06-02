@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "dask__12106",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning is semantically wrong and contradicts the docstring/test name",
+        "detail": "The code does `raise PerformanceWarning(msg)` \u2014 but a 'warning' that is raised aborts the write entirely. The test is named `test_zarr_risky_shards_warns` and uses `pytest.raises`, but this is actually a hard error path. If the intent is a warning (so users can opt out), use `warnings.warn(msg, PerformanceWarning)`; if it's a hard stop, raise a real exception class like `ValueError`. Mixing the two is confusing and likely a bug.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3919",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` inside the loop",
+        "detail": "Line `break` immediately follows `raise PerformanceWarning(msg)` \u2014 dead code. More importantly, this signals confused control flow: the author likely intended to either warn-and-break or raise. As written, only the first offending axis ever surfaces, and the break is unreachable. Pick one behavior.",
+        "file": "dask/array/core.py",
+        "lines": "3919-3920",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`safe_chunk_size` computation is wrong for non-byte dtypes and misleading for shards",
+        "detail": "`np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` uses `max(1, itemsize)` \u2014 but `itemsize` is never <1 for real numpy dtypes, so the guard is meaningless and obscures intent. Also `np.prod` returns numpy scalar; embedding it in an f-string yields `np.int64(...)` repr in the suggested `dask.config.set` snippet, which users would copy verbatim and break.",
+        "file": "dask/array/core.py",
+        "lines": "3910-3918",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Divisibility check only inspects `dw[0]`, ignoring uneven trailing chunks and other blocks",
+        "detail": "`normalize_chunks` may produce a tuple where the last chunk is smaller (remainder). Checking only `dw[0] % zw == 0` can miss misalignment in later blocks, or falsely flag arrays where the remainder is the only non-aligned piece (which is actually fine at the array tail). Should validate alignment semantics more carefully, especially for region writes where partial shards at boundaries are legitimately problematic.",
+        "file": "dask/array/core.py",
+        "lines": "3899-3906",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Region branch no longer normalizes `zarr_write_chunks` against `z.shape`",
+        "detail": "Previously the region branch computed `old_chunks = normalize_chunks(write_chunks, z.shape)` before calling `new_blockdim`. Now it passes `dask_write_chunks` directly. `dask_write_chunks` came from `normalize_chunks(..., shape=z.shape, ...)` so it should be normalized, but the semantics changed: previously old_chunks was the zarr granularity, now it's the dask auto-rechunked granularity. Verify `new_blockdim` behaves correctly under the new granularity for partial regions.",
+        "file": "dask/array/core.py",
+        "lines": "3925-3931",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message references shard size but variable name conflates chunk/shard",
+        "detail": "Message says `\"...size in bytes of a single on-disk chunk (or shard)...\"` and the var is `safe_chunk_size`, but the value is computed from `zarr_write_chunks` which is the shard shape when sharding is enabled. The naming/wording could mislead users into thinking the threshold equals an inner chunk. Rename to `safe_write_size` and clarify the message.",
+        "file": "dask/array/core.py",
+        "lines": "3910-3918",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "The PR's core idea (use shard shape as `previous_chunks` for auto-rechunking) is sound, but the implementation has two serious bugs: (1) it `raise`s `PerformanceWarning` instead of `warnings.warn`, turning a warning into a fatal error inconsistent with the docstring/test name, and (2) there's unreachable `break` after the raise. The `safe_chunk_size` computation uses a meaningless `max(1, itemsize)` guard and produces numpy-scalar repr in the user-facing suggestion. The divisibility check inspecting only `dw[0]` is fragile, and the region-branch change drops an explicit normalize step that deserves verification."
+  }
+}

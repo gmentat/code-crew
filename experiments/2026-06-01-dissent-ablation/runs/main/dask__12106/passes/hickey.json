@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "dask__12106",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "`raise PerformanceWarning(msg)` raises a warning class as an exception \u2014 value/identity confusion of the warning concept",
+        "detail": "PerformanceWarning is a Warning subclass. The code raises it as if it were an Exception, then catches it with pytest.raises. That works mechanically (Warning inherits from Exception in CPython), but it complects two distinct concerns: 'this is advisory, the program can proceed' (warning) and 'this is fatal, the program cannot proceed' (exception). The PR description even asks the open question 'Would an exception be appropriate here?' \u2014 the code answers 'both' by picking a name from one category and a control-flow mechanism from the other. Pick one. If the situation is unrecoverable and risks data loss, raise a real Exception (e.g., ValueError) with a clear name. If it is advisory, warnings.warn(...) and let the caller decide. The current shape will surprise every user who has ever filtered PerformanceWarning expecting it to be non-fatal.",
+        "file": "dask/array/core.py",
+        "lines": "~3910-3925",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` \u2014 dead code revealing the loop was not thought through",
+        "detail": "Inside the for-loop, the body does `raise PerformanceWarning(msg)` immediately followed by `break`. The break can never execute. This is a small thing on its own, but it's a tell: the author was thinking of this as 'warn and continue checking other axes' and then switched to 'raise', and the leftover break is the fossil. Decide what the loop means: report the first offending axis and stop (then no break is needed after raise), or collect all offending axes and report them together (then don't raise inside the loop). The current code is in a superposition of both designs.",
+        "file": "dask/array/core.py",
+        "lines": "~3924-3925",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Safety check is COMPLECTED with the rechunk path \u2014 the validation belongs in its own function",
+        "detail": "The added block does three intertwined things in the middle of to_zarr: (1) computes a candidate dask chunking via normalize_chunks, (2) walks the axes checking shard-alignment, (3) constructs a user-facing error message including a recommended config value. None of these are about writing to zarr; they are about validating that a candidate chunking is shard-safe. Pull this out as a pure function: `def _validate_shard_alignment(dask_chunks, zarr_write_chunks, dtype) -> None | AlignmentProblem` that returns data (the offending axis, the offending size, the recommended chunk-size) rather than raising. Then to_zarr decides whether that data becomes a warning, an error, or a silent re-plan. Right now the policy and the mechanism are welded together.",
+        "file": "dask/array/core.py",
+        "lines": "~3892-3925",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`safe_chunk_size = np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` \u2014 time/identity question never asked",
+        "detail": "What value does this number represent? It's billed as 'the size in bytes of a single on-disk chunk (or shard)'. But zarr_write_chunks is the *shard* shape when sharding, else the chunk shape \u2014 the code already overloads that name. The `max(1, z.dtype.itemsize)` is a guard against a zero-itemsize dtype (object?) that should never occur for an array being written, and silently lying about the size if it does is worse than failing. The error message tells the user to set array.chunk-size to *at least* this value, which is presented as the minimum that avoids the trap \u2014 but the actual constraint is 'be a multiple of zw along each axis', which is not the same as 'be at least N bytes total'. A user who sets chunk-size to safe_chunk_size + 1 may still land on a misaligned chunk. Be honest about what the number is and what setting it actually guarantees.",
+        "file": "dask/array/core.py",
+        "lines": "~3911-3923",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The test asserts the error path with `pytest.raises(PerformanceWarning, ...)` \u2014 TDD-as-design fossil",
+        "detail": "The test `test_zarr_risky_shards_warns` is named '...warns' but uses pytest.raises, not pytest.warns. That mismatch is the same value/identity confusion as the production code, surfaced in the test name. The test passes because Warning is an Exception subclass, but the name lies about what's being verified. Either rename to test_zarr_risky_shards_raises and use a real exception class, or switch the production code to warnings.warn and use pytest.warns here. The test should not be the place that papers over the design ambiguity.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~5193-5212",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Open question in the PR description (`What should we do when global config competes with shard shape?`) is the design question, and it has not been answered \u2014 only implemented in one shape",
+        "detail": "The PR author is explicitly asking whether raising is the right behavior. This is the hammock-driven question, and it's been deferred into code. There are at least three coherent policies: (a) global config wins, accept misalignment with a warning; (b) shard shape wins, silently override the user's chunk-size for this write; (c) refuse to write and tell the user to choose. Each is defensible; the code picks (c) but calls it a PerformanceWarning, which suggests the author isn't sure. Pick one with reasoning, document why in the function docstring, and pick a name that matches. Don't ship the ambiguity.",
+        "file": "dask/array/core.py",
+        "lines": "~3892-3925",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`if len(dw) >= 1: nominal_dask_chunk_size = dw[0]` \u2014 only checks the first chunk of each axis",
+        "detail": "normalize_chunks with chunks='auto' typically returns uniform chunk tuples plus a possible remainder, so checking dw[0] is usually fine. But the comment and error message say 'the input Dask array will be rechunked along axis {ax} with chunk size {nominal_dask_chunk_size}' \u2014 which is a simplification. If a future change makes auto produce non-uniform chunks along an axis, this check silently misses misaligned interior chunks. Either assert uniformity, or check `any(c % zw for c in dw[:-1])` and treat the trailing remainder separately. Small thing, but the current check is implicitly trusting an invariant of normalize_chunks that isn't stated nearby.",
+        "file": "dask/array/core.py",
+        "lines": "~3899-3909",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable name `zarr_write_chunks` reused for two different concepts in the message",
+        "detail": "`zarr_write_chunks` is what `_get_zarr_write_chunks(z)` returns \u2014 shard shape if sharding, else chunk shape. The error message refers to it as 'a single on-disk chunk (or shard)'. The parenthetical is doing a lot of work. A user reading this in production with no shards will see 'chunk (or shard)' and have to figure out which one they have. Compute the right noun once based on whether z has shards and put that single word in the message.",
+        "file": "dask/array/core.py",
+        "lines": "~3915-3922",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The mechanical change \u2014 using shard shape as previous_chunks so auto_chunks can grow larger shard-aligned chunks \u2014 is the right direction and is SIMPLE in shape. What's COMPLECTED is the safety-check that follows: it intertwines candidate-chunk computation, axis-walking, policy decision (raise vs warn), and message-construction inside to_zarr, and it uses a Warning class as an Exception, which is a value/identity confusion the PR author is openly unsure about ('Would an exception be appropriate here?'). Pull the validation out as a pure function returning data; then let to_zarr decide whether that data is a warning or a fatal error \u2014 and name the class for whichever it actually is. The leftover `break` after `raise`, the test named `_warns` that uses `pytest.raises`, and the 'chunk (or shard)' parenthetical in the error message are all small fossils of the same unresolved design question. This is EASY-NOT-SIMPLE: the patch is short and familiar in shape, but the concerns inside it are tangled. Hammock first, then decide which one this is."
+  },
+  "raw": ""
+}

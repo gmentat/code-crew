@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "CreateSignedTransaction contract now silently accepts dummy zero-additions, weakening its postcondition",
+        "detail": "The test change passes `[Addition(amount=0, puzzle_hash=zeros)]` to satisfy `__post_init__`'s `len(additions) < 1` check while the real outputs come from `extra_delta`/cat_discrepancy. The ADT's invariant (additions describe the transaction's outputs) is now violated: a zero-amount sentinel must be tolerated by every downstream consumer. State the contract or accept empty additions when cat_discrepancy is present.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1916-1960",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP violation: CATSpend's contract is not substitutable into CreateSignedTransaction",
+        "detail": "send_transaction/cat_spend forward to create_signed_transaction, but the supertype's precondition (`len(additions) >= 1`) is stronger than CATSpend's (which allows `additions=None` with amount/inner_address). The forwarding code must synthesize a fake Addition to satisfy the stronger precondition. Either relax CreateSignedTransaction's precondition or refuse the substitution; do not paper over it with sentinel coins.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation is a free function that duplicates an ADT invariant across two types",
+        "detail": "The validation belongs to a single abstract type 'CatDiscrepancySpec' (the triple extra_delta/tail_reveal/tail_solution) that both CATSpend and CreateSignedTransaction embed. Extracting a free function captures the behavior but not the type; the three fields can still drift apart in either dataclass. Introduce a small ADT (or shared mixin) that owns the invariant, rather than three loose Optional fields on two classes.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1919-1923",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "puzzle_decorator field comment admits a leaky abstraction frozen into the type",
+        "detail": "The comment 'as a slight hack, we'll specify that only Clawback is supported' bakes an implementation detail into the public request type. The abstraction promises 'puzzle decorator' but the type only accepts ClawbackPuzzleDecoratorOverride. Either name the field honestly (`clawback_override`) or define the proper sum/union type. Hacks documented in comments tend to outlive the plan to fix them.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1922-1925",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction's get_wallet call is now dead code preserved only for its side effect of raising",
+        "detail": "The comment '# opportunity to raise' acknowledges that the call's only purpose is precondition validation, but the return value is discarded and create_signed_transaction will redo the same lookup. This couples two modules via a side-effect contract that isn't written down. Either move precondition validation into a named helper (`validate_wallet_type`) or trust the inner call's check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1513, 2012-2014",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cat_discrepancy property silently coerces `int(extra_delta)`, no spec on accepted format",
+        "detail": "The contract says `extra_delta: str | None` 'to support negative ints', but the postcondition of cat_discrepancy is undefined for non-numeric strings \u2014 `int()` will raise ValueError at call time rather than at construction. State the precondition on construction (`__post_init__` validation) so the invariant 'cat_discrepancy is well-formed when set' holds at the type boundary.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "This refactor reduces handler duplication but does so by weakening the contracts at the module boundary. CreateSignedTransaction's precondition (`additions >= 1`) is preserved syntactically while callers synthesize zero-amount sentinel additions to satisfy it \u2014 a classic LSP violation dressed as code reuse. The cat_discrepancy triple (`extra_delta`/`tail_reveal`/`tail_solution`) is now an invariant duplicated across two dataclasses via a free function rather than captured as its own abstract data type. The `puzzle_decorator` field carries a comment admitting it is a hack \u2014 a leaky abstraction frozen into a public request type. Recommend defining the cat-discrepancy ADT, relaxing or honestly naming the additions precondition, and not papering over the substitution gap with sentinel values."
+  }
+}

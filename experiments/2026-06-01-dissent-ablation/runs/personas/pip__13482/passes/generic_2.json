@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "pip__13482",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer marks requirements as prepared, breaking callers that don't invoke prepare_linked_requirements_more",
+        "detail": "The resolver previously set `req.prepared = True` and `req.needs_more_preparation = False` after preparing. Now those flags are never cleared unless a command explicitly calls `prepare_linked_requirements_more`. Any command path (or third-party code) that calls `resolver.resolve` but skips that call will leave requirements in an inconsistent state, potentially re-preparing or asserting elsewhere.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`pip install --dry-run` still calls prepare_linked_requirements_more, downloading wheels and defeating the stated goal",
+        "detail": "install.py unconditionally calls `preparer.prepare_linked_requirements_more(...)` before the dry-run early-return at line ~414 is reached only after this block. If the new call is placed before the dry-run short-circuit, full wheels are downloaded; the PR title claims to avoid this. The placement of the new call relative to the `--dry-run` return needs verification \u2014 the diff suggests it runs in the install path but the dry-run branch must skip it.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-422",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info set from source_dir which may be None for metadata-only fetches",
+        "detail": "In prepare.py, `direct_url_from_link(req.link, req.source_dir)` is called after only metadata was fetched. For metadata-only requirements, `source_dir` is typically not populated (no unpack happened), which may produce an incorrect or null direct URL, or raise. The hash/archive info expected by `pip lock` / `--report` may be missing or wrong.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist overrides metadata_directory path silently, risking divergence between cached dist and on-disk metadata",
+        "detail": "`get_dist()` now prefers `self._distribution` over `self.metadata_directory`. If a later stage populates `metadata_directory` (after a full download during install), the cached metadata-only distribution is still returned, potentially serving stale metadata that doesn't reflect the actual downloaded wheel. There's no invalidation of `_distribution` when full preparation completes.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test coverage demonstrated for the dry-run-avoids-download behavior",
+        "detail": "The PR closes #12603 (dry-run downloading wheels) but the diff includes no new tests verifying that `pip install --dry-run` against a PEP-658-enabled index does not download wheels. Without a regression test, this fix can silently regress. A functional test asserting no full-wheel download occurred is needed.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated `prepare_linked_requirements_more` call pattern across three commands invites drift",
+        "detail": "download.py, install.py, and wheel.py each now invoke `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` right after `resolver.resolve(...)`. Centralizing this (e.g., a helper or moving back into the resolver behind a flag) would prevent future commands from forgetting the call, which is exactly the failure mode introduced by removing it from the resolver.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR achieves its goal by hoisting `prepare_linked_requirements_more` out of the resolver and into each command, but introduces real risk: requirements are no longer flagged `prepared`/`needs_more_preparation = False`, dry-run skip logic in install.py needs verification that the new call doesn't run before the early return, and the new `download_info` derivation relies on `source_dir` which may be unset for metadata-only fetches. The new `_distribution` cache in `InstallRequirement` can shadow a later-populated `metadata_directory` without invalidation. No regression tests are included for the headline behavior change."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "espnet__6325",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh declares set -e but warns about missing unzip and exits 0",
+        "detail": "The script's contract per its name and shebang is: 'either extract the archives successfully, or fail loudly.' Yet when `unzip` is missing it only echoes a warning and continues; when any of the three zips is missing it echoes a hint and continues; and the script ends with `echo ... is ready` regardless. A caller (local/data.sh dot-sources this) cannot distinguish 'data is ready' from 'nothing was extracted'. The postcondition is silently weakened from 'data extracted' to 'maybe data extracted'. Either exit non-zero on missing prerequisites/archives or rename the script to reflect best-effort semantics.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-12, 28-58",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "local/data.sh sources download_and_untar.sh instead of executing it, violating module boundary",
+        "detail": "`local/data.sh` invokes the extractor via `. ./local/download_and_untar.sh ...` (dot-source) rather than executing it as a subprocess. This collapses the module boundary: any `exit` inside the extractor terminates the parent, any variable it sets leaks into the parent's scope, and `set -euo pipefail` state is shared. The extractor's interface should be 'a command with arguments and an exit code', not 'a fragment of shell that mutates my environment.' Run it as `bash ./local/download_and_untar.sh ...` (or `./local/download_and_untar.sh`) and check `$?`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "35",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh contract for train/dev/test partitions is implicit and fragile",
+        "detail": "`prepare_kaldi` takes (name, wav_subdir, transcript, expected_count) but its contract is encoded by side effect: it expects `$wav_dir` to contain *.wav, the transcript to be keyed by basename-of-wav, and the third path component from leaf to encode the speaker. None of this is documented in the function header, and the speaker derivation `TALASR$(NF-1)` silently produces wrong speaker IDs if the directory layout differs by one level (e.g., if a zip extracts with an extra wrapper directory). State the precondition (expected directory depth, transcript key format) at the top of the function and assert it, or compute the speaker from a stable field rather than positional path components.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "37-65",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "README config path is inconsistent with actual file location",
+        "detail": "README links the ASR config as `./conf/train/train_asr_branchformer_e24_amp.yaml` (note the extra `train/` directory), while the file is actually at `./conf/train_asr_branchformer_e24_amp.yaml`. Small but breaks the documented contract between README and repo layout.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "16",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "data.sh usage block prints after argument validation but does not exit on bad arg parsing path correctly",
+        "detail": "`local/data.sh` accepts `--downloads_dir` via `utils/parse_options.sh` but then never uses `${downloads_dir}` anywhere; it is dead. The extractor is instead invoked with `\"${downloads_dir}\"` only through the dot-sourced call (see above), and the default-empty value silently makes `zip_dir=$extract_dir`. State the contract: either remove `--downloads_dir` if it's not honored, or thread it through and document the default.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "11, 34-35",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance-for-reuse via symlinks without spec of which TEMPLATE contract is being adopted",
+        "detail": "The recipe symlinks `asr.sh`, `path.sh`, `pyscripts`, `scripts`, `steps`, `utils`, `db.sh` from `../../TEMPLATE/asr1/`. This is the standard ESPnet pattern (composition by symlink), which is fine. But `local/path.sh` only sets `MAIN_ROOT=$PWD/../../..` and is never referenced by the symlinked `path.sh` \u2014 its purpose is unclear and looks like dead code. Either delete `local/path.sh` or document why both exist; right now the boundary between 'recipe-local path' and 'TEMPLATE path' is ambiguous.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/path.sh",
+        "lines": "1",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "decode YAML sets lm_weight=0.7 but run.sh defaults use_lm=false",
+        "detail": "`conf/decode_asr_branchformer.yaml` contains `lm_weight: 0.7`, while `run.sh` ships with `use_lm=false`. The decoding contract is therefore inconsistent across the two files for the default run: the LM weight is meaningful only when an LM is actually loaded. Either set `use_lm=true` to match the published results table (which clearly reports +LM numbers) or document in README that LM decoding requires `--use_lm true` on the command line.",
+        "file": "egs2/tal_zh_adult_teach/asr1/run.sh",
+        "lines": "14-16",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The recipe follows ESPnet's standard egs2 template (symlinks to TEMPLATE/asr1, conventional conf/ layout, local/data.sh + local/download_and_untar.sh), so its module boundaries are mostly inherited and sound. The main contract problems are at the recipe-local boundary. `local/download_and_untar.sh` advertises an extraction contract but weakens its postcondition to 'maybe extracted, no error' when archives or `unzip` are missing; `local/data.sh` then dot-sources that script, collapsing the module boundary and letting any internal exit terminate the parent. `prepare_kaldi` encodes its preconditions (directory depth, transcript key format, speaker derivation) implicitly in awk field arithmetic rather than stating them. There are also smaller contract mismatches: README points to a non-existent `conf/train/` subdir, `--downloads_dir` is parsed but dead, and decode YAML carries an `lm_weight` that the default `run.sh` never activates. No LSP-style violations because there is no real type hierarchy here; the issues are SPEC-MISSING and a mild WRONG-BOUNDARY between data.sh and its extractor."
+  },
+  "raw": ""
+}

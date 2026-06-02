@@ -1,0 +1,74 @@
+{
+  "task_id": "espnet__6278",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring documents max_steps/val_interval but code reads max_step and ignores val_interval",
+        "detail": "Both reviewers flag that the docstring contract specifies max_steps and val_interval, but __init__ reads trainer_args['max_step'] (singular) and the run loop validates every save_interval rather than val_interval. Callers writing configs to the documented contract will KeyError or get wrong validation cadence. Pick one spelling, validate required keys at init.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-66, 154-167",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint resume has no atomicity guard and silently falls back when explicit resume_path is missing",
+        "detail": "load_checkpoint scans for any 'step_N' directory and picks the highest number with no verification of completeness, so a crashed save resumes from a corrupt directory. Additionally, an explicit resume_path that does not exist silently falls through to start-from-zero. Write a 'latest' marker on successful save, verify completeness, and raise FileNotFoundError on explicit missing paths.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-128",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has surprising frame: mutates tensors in place and rebinds dict entries",
+        "detail": "The function runs in-place all_reduce on the tensors and then reassigns stats[key] = stats[key] / world_size. Callers retaining references to the original tensors see partial mutation, and the docstring's stated frame does not match reality. Make it either purely functional (return a new dict) or cleanly destructive with a documented frame condition.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "124-160",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Validation specifier parser uses whitespace split on a format containing colon-delimited paths",
+        "detail": "args.valid_unregistered_specifier.split() splits on whitespace, but the documented grammar is 'task:name:data_json[:factor]' where data_json is a path that may contain spaces. Train specifiers are passed whole, valid specifiers are split \u2014 inconsistent. Lift the specifier grammar into a typed parser/validator with a single delimiter convention (comma-separated or repeated --flag).",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-79, 187-199",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer leaks a hidden global dependency on wandb.run with no precondition check",
+        "detail": "__init__ mutates wandb.config and run() calls wandb.log unconditionally, yet there is no assert wandb.run is not None and no injected logger sink. The hidden global is part of the contract but not enforced. Either inject a logger or assert the precondition the docstring claims.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "18-25, 88-90, 197-199",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "run() loop boundary semantics are sloppy around max_step and resume",
+        "detail": "The outer loop advances by save_interval, then validates and saves. If global_step already equals max_step on resume the loop exits without a final save; if save_interval does not divide max_step the last window validates and checkpoints at an odd step. Make loop boundaries explicit and validate/save semantics deterministic.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "162-176",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch lands a DeepSpeed trainer and launcher with the right shape but ships with a contract mismatch between the documented trainer_args (max_steps/val_interval) and what the code actually reads (max_step, save_interval substituted for val_interval), which will KeyError or silently misbehave on first run. Checkpoint resume has no atomicity guard against half-written 'step_N' directories and silently falls back when an explicit resume_path is missing. Smaller but real issues include in-place mutation surprises in _all_reduce_stats, whitespace-split parsing of colon-delimited path specifiers, a hidden wandb.run global dependency with no precondition check, and sloppy loop boundary semantics around max_step. NEEDS-WORK before this becomes a long-lived module boundary."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "torvalds",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Storing a live FrameProcessor reference on a control frame is the wrong shape",
+        "detail": "The `service` field is typed as `FrameProcessor` \u2014 a stateful runtime object \u2014 embedded in a dataclass control frame that flows through the pipeline. Frames should carry identity (name, id, str), not live processor handles. This creates surprise lifetime coupling, makes the frame unserializable, and invites identity-vs-equality bugs. Pass `service_name: str` or a stable id and resolve at the switcher.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality check `frame.service == self.strategy.active_service` is fragile",
+        "detail": "`==` on FrameProcessor instances falls back to identity unless overridden. If a wrapper, proxy, or re-instantiated service ever shows up, this silently fails open and the frame leaks downstream. Use `is` to make the identity check explicit, or compare a stable id. Don't pretend `==` means what you want it to mean.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-236",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Behavior change: STTService now leaks the request frame downstream",
+        "detail": "Old code explicitly suppressed `RequestMetadataFrame` past the STT service. New code pushes it downstream and relies on the ServiceSwitcher to swallow it. That works inside a switcher; outside one (STTService used standalone) the frame now escapes into the rest of the pipeline. Document this contract or have the service consume when no switcher is present.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string `\"FrameProcessor\"` hides a missing import",
+        "detail": "The dataclass field is annotated `\"FrameProcessor\"` as a string. If `FrameProcessor` isn't imported in `frames.py`, this only works because dataclasses don't resolve annotations at runtime \u2014 but any `get_type_hints` call or schema introspection will explode. Either import it properly or stop pretending this is typed.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename is a breaking public-API change with no deprecation alias",
+        "detail": "`RequestMetadataFrame` was an exported symbol. Renaming it outright breaks every downstream user on the next version bump. A one-line `RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame` alias with a DeprecationWarning costs nothing and saves the maintainer-six-months-from-now from triaging import errors. The changelog entry alone isn't enough.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Patch does one thing and the diff is readable \u2014 that's the good news. The bad news is taste: stuffing a live `FrameProcessor` into a control-frame dataclass and comparing it with `==` is the wrong shape. Carry an identifier, not a handle. Secondary concerns: the STTService no longer consumes the request frame (relies on switcher to clean up), the forward-ref annotation is unsupported by an import, and the rename has no deprecation alias for downstream users. NEEDS-WORK \u2014 fix the service-reference shape and add a back-compat alias, then this lands."
+  }
+}

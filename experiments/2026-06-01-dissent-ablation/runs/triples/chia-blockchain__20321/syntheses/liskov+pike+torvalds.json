@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests pass a bogus zero-amount/zero-puzhash Addition to satisfy the non-empty additions invariant",
+        "detail": "Tests substitute `additions=[]` with `Addition(amount=0, puzzle_hash=bytes32.zeros)` to get past CreateSignedTransaction's `len(additions) < 1` check, while real outputs come from extra_delta/cat_discrepancy. The test was bent to fit the code, signaling the data model is wrong-shape. Fix the precondition (allow empty additions when cat_discrepancy is set) rather than papering over it with sentinel coins.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP violation: CATSpend forwarding to CreateSignedTransaction requires synthesizing fake additions",
+        "detail": "CATSpend allows `additions=None` (amount/inner_address suffice), but CreateSignedTransaction's precondition demands `len(additions) >= 1`. Forwarding code must fabricate a zero Addition to bridge the gap. Either relax CreateSignedTransaction's precondition or refuse the substitution; do not paper over the contract mismatch with sentinel values.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Silent behavior changes in puzzle_decorator handling between the two endpoints",
+        "detail": "Old send_transaction explicitly forwarded only `puzzle_decorator[0]`; the new code passes the whole list through, changing observable behavior for callers sending multiple entries. Meanwhile cat_spend builds CreateSignedTransaction without forwarding `request.puzzle_decorator` at all. Two endpoints, two different silent semantic changes. Pick one contract and honor it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy triple should be its own ADT, not duplicated fields across two request types",
+        "detail": "Both CATSpend and CreateSignedTransaction now carry the same three loose Optional fields (extra_delta, tail_reveal, tail_solution) plus a derived property, kept in sync by a free validation function. Extract a small CatDiscrepancy value object that owns the invariant and is constructed once, rather than duplicating state across two dataclasses by convention.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1916-1962",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Address-prefix validation semantics changed from network-config string compare to AddressType.XCH enum check",
+        "detail": "Old send_transaction rejected addresses whose bech32 prefix didn't match the network config's `address_prefix`. The new code uses `ensure_valid_address(..., allowed_types={AddressType.XCH})`, a different check. On testnet/simulator where the configured prefix isn't `xch`, this is a behavior change and possibly a regression. Document equivalence, add a pinning test, or restore the original check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1518-1525",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Discarded get_wallet result kept only for side-effect raise is a code smell",
+        "detail": "Calling get_wallet purely so it can raise, marked with a `# opportunity to raise` comment, hides intent and couples modules via an unwritten side-effect contract. Extract a named `validate_wallet_type(id, type)` helper that reads as validation, or trust the inner call's check. The current shape will confuse the next reader.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1513, 2012-2014",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the deduplication idea is right \u2014 send_transaction and cat_spend as thin wrappers over create_signed_transaction is the correct shape \u2014 but the execution leaks contracts. The data model doesn't fit: tests had to fabricate zero-amount Additions to satisfy a precondition the real callers can't meet, which is an LSP violation dressed as code reuse. Two silent behavior changes slipped in (divergent puzzle_decorator handling and a switched address-prefix check). The cat_discrepancy triple should be extracted as its own ADT rather than duplicated across two request types and held together by a free validation function. Recommend fixing the additions invariant, introducing a CatDiscrepancy value object, and pinning the semantic changes explicitly."
+  }
+}

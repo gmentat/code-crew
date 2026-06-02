@@ -1,0 +1,111 @@
+{
+  "task_id": "numba__10276",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Missing `import sys` in numba/cpython/mathimpl.py and numba/np/math/mathimpl.py",
+        "detail": "Both files newly reference `sys.version_info >= (3, 11)` but the diff does not show an `import sys` being added to either. If `sys` is not already imported at module top, this is a NameError at import time on every Python version, including the 3.11+ versions the guard is meant to enable. Verify `sys` is imported in each file, or switch to the project's existing `PYVERSION` constant from `numba.core.utils` (which the test already uses).",
+        "file": "numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": "177-178 (both files)",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Indentation/whitespace bug: version-gated registration is glued to the Math_unary class body in mathdecl.py",
+        "detail": "The diff removes the blank line that separated the `Math_unary` class body from the following decorated class, and places `if sys.version_info >= (3, 11): Math_unary = infer_global(math.exp2)(Math_unary)` at module scope immediately adjacent to the class. The structural placement makes it ambiguous whether the conditional is part of the class body and invites future edits to pull it inside accidentally. Additionally, rebinding the module-level name `Math_unary` to the return of `infer_global(...)` complects the registration side-effect with name reassignment; prefer `infer_global(math.exp2)(Math_unary)` as a bare statement. Restore the blank line separating the class from the conditional.",
+        "file": "numba/core/typing/mathdecl.py",
+        "lines": "40-46",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Version-gate predicate is inconsistent and duplicated across four sites; unify on PYVERSION",
+        "detail": "The same fact ('math.exp2 exists on Python >= 3.11') is expressed four times: `sys.version_info >= (3, 11)` in mathdecl.py, cpython/mathimpl.py, and np/math/mathimpl.py, but `PYVERSION >= (3, 11)` in the test file. The project already exposes `numba.core.utils.PYVERSION` as the canonical version predicate. Pick one \u2014 preferably `PYVERSION` \u2014 and use it everywhere so a future Python-version bump is a single edit. Mixing the two idioms is a consistency defect and obscures the single source of truth.",
+        "file": "numba/core/typing/mathdecl.py, numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Release note file missing trailing newline",
+        "detail": "`docs/upcoming_changes/10276.new_feature.rst` ends with `\\ No newline at end of file`. POSIX text files end with a newline; many lint/CI tools will flag this. Trivial one-byte fix.",
+        "file": "docs/upcoming_changes/10276.new_feature.rst",
+        "lines": "4",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test x_values are copy-pasted from test_exp and do not exercise exp2-distinguishing behavior",
+        "detail": "`x_values = [-2, -1, -2, 2, 1, 2, .1, .2]` was cloned from test_exp; it contains `-2` and `2` twice and omits inputs where exp2 produces clean integer results (e.g., 0, 1, 10 giving 1, 2, 1024). Add at least one such value so the test would actually catch a wrong-intrinsic regression (e.g., accidental wiring to `llvm.exp`). Consider also adding 0.0, +/-inf, and NaN to strengthen the contract test against CPython's math.exp2.",
+        "file": "numba/tests/test_mathlib.py",
+        "lines": "267-273",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Release note body is uninformative and omits the Python 3.11+ requirement",
+        "detail": "The body of 10276.new_feature.rst restates the title (\"Support for math.exp2 is added.\") and tells the reader nothing they don't already know. Add a sentence noting that this is available on Python 3.11+ (where math.exp2 was added to the standard library). Optionally annotate the same constraint in `docs/source/reference/pysupported.rst` so 3.10 users do not file bugs.",
+        "file": "docs/upcoming_changes/10276.new_feature.rst",
+        "lines": "1-4",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No comment explains why exp2 is version-gated at the three gate sites",
+        "detail": "A one-line comment such as `# math.exp2 was added in Python 3.11` at each of the three guarded registration sites would turn a puzzle into a fact for future maintainers, who would otherwise have to look up why the gate exists.",
+        "file": "numba/core/typing/mathdecl.py, numba/cpython/mathimpl.py, numba/np/math/mathimpl.py",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this is a small, well-shaped feature patch \u2014 math.exp2 slots into the existing `unary_math_intr` / `Math_unary` registration pattern cleanly \u2014 but it was not run before submission and has two blocking defects. First, `numba/cpython/mathimpl.py` and `numba/np/math/mathimpl.py` reference `sys.version_info` without a visible `import sys` in the diff, which will NameError at import time if `sys` is not already imported. Second, the conditional registration in `mathdecl.py` is jammed against the `Math_unary` class body with the separating blank line removed, and unnecessarily rebinds the module-level `Math_unary` name. The version predicate is also expressed four times across four files using two different idioms (`sys.version_info` vs `PYVERSION`); the project's canonical `PYVERSION` from `numba.core.utils` should be used everywhere. Minor nits: missing trailing newline on the release note, uninformative release-note body, and a test vector copy-pasted from `test_exp` that contains duplicates and omits inputs where exp2 produces clean integer results."
+  },
+  "raw": ""
+}

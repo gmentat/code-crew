@@ -1,0 +1,166 @@
+{
+  "task_id": "espnet__6325",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh warns about missing unzip but does not exit, leading to a cryptic failure downstream",
+        "detail": "The `command -v unzip` check echoes a message and then falls through. The script under `set -e` proceeds to invoke `unzip` and dies with 'command not found' instead of the intended preflight error. Add `exit 1` after the warning so the precondition is actually enforced.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-11",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh usage block prints help but does not exit, so bad invocations fall through to `realpath $1`",
+        "detail": "With argc 0 or >2 the script cats a usage heredoc and continues. Under `set -u` it then dereferences an unset `$1` in `realpath $1`, producing a confusing 'unbound variable' error instead of the helpful usage message just printed. Add `exit 1` after the heredoc.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "13-22",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unquoted command substitutions in realpath calls break on paths with spaces",
+        "detail": "`extract_dir=$(realpath $1)` and `zip_dir=$(realpath ${2:-$extract_dir})` are unquoted. Paths with whitespace silently split arguments and the script picks the wrong directory (or errors confusingly under `set -u`). Quote them: `\"$1\"` and `\"${2:-$extract_dir}\"`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "21-24",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical extraction blocks should be factored into a single function or loop",
+        "detail": "Lines 28-58 contain three copy-pasted 12-line stanzas for TAL_ASR-1/2/3 differing only in archive name and sentinel directory. This invites drift \u2014 any bugfix must be repeated three times. Refactor into one helper `extract_if_needed <zip_name> <sentinel_subdir>` invoked three times, or loop over a small table of (archive, subdir) pairs.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "28-58",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Completion sentinel `.complete` is touched inside extracted directories whose existence is assumed, not verified",
+        "detail": "`touch \"$extract_dir/aisolution_data/.complete\"` (and the CH/MA variants) assumes each zip extracts to a specific top-level directory name. If the archive layout drifts, `touch` fails under `set -e` leaving a partial extraction that subsequent runs cannot detect. Verify the expected directory exists post-unzip with a clear error, or place the sentinel at `$extract_dir/.<archive>.complete` so the marker does not depend on archive internals.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "32, 43, 54",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Transcript normalization is an undocumented chain of sed substitutions with no stated invariant",
+        "detail": "`sed 's/\uff21/A/g' | sed 's/#//g' | sed 's/=//g' | sed 's/\u3001//g' | sed 's/\uff0c//g' | sed 's/\uff1f//g' | sed 's/\u3002//g' | sed 's/[ ][ ]*$//g'` spawns seven processes and encodes a hand-picked normalization rule with no comment explaining why these characters and not others (e.g. \u300c\u300d\uff01\uff1a\uff1b). The list is order-sensitive and almost certainly incomplete, and it directly affects CER comparability across recipes. Collapse into a single `sed -e ... -e ...` (or a tiny normalize_text helper) and document the normalization policy as a stated postcondition.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "47-54",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hard-coded utterance counts in data.sh are magic numbers without provenance",
+        "detail": "The heredoc asserts exact wav counts (22467, 3208, 6072, 29386, 38924) per split with no comment citing source, dataset version, or how to update if the upstream corpus is revised. Counts are derived data, not inputs to the recipe \u2014 encoding them as literal `exit 1` checks complects the recipe with one snapshot of the corpus and gives misleading diagnostics (counts text lines rather than wav files). Either compute expected counts from a shipped manifest, downgrade to a warning, or at minimum add a comment with dataset version and verification date.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "70-81",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh sources download_and_untar.sh with `.` instead of executing it as a subprocess",
+        "detail": "`. ./local/download_and_untar.sh ...` dot-sources the extractor into the current shell. Any `exit` inside the extractor terminates `data.sh`, variables leak into the parent scope, and `set -euo pipefail` state is shared \u2014 collapsing the module boundary. Every other egs2 recipe executes `download_and_untar.sh` as a subprocess. Replace with `./local/download_and_untar.sh \"${TAL_ZH_ADULT_TEACH}\" \"${downloads_dir}\"` and check `$?`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "35-37",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "README link to the ASR training config is broken",
+        "detail": "README writes `[./conf/train_asr_branchformer_e24_amp.yaml](./conf/train/train_asr_branchformer_e24_amp.yaml)` \u2014 the display text is correct but the link target has a non-existent `train/` subdirectory. The actual file lives at `conf/train_asr_branchformer_e24_amp.yaml`. Fix the link target.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "15-16",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Decoder dropout and SpecAugment ratios use bare `0.` rather than `0.0`",
+        "detail": "`self_attention_dropout_rate: 0.`, `src_attention_dropout_rate: 0.`, and `time_mask_width_ratio_range: - 0.` parse fine in PyYAML but are visually ambiguous and inconsistent with the rest of the codebase. Write `0.0`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "30-33, 80-83",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Decode YAML carries lm_weight: 0.7 but run.sh defaults use_lm=false",
+        "detail": "`conf/decode_asr_branchformer.yaml` sets `lm_weight: 0.7` while `run.sh` ships with `use_lm=false`, so the LM weight is dead on the default path. The README's reported +LM numbers imply the recipe is meant to be run with use_lm=true. Either flip the default in run.sh or document in README that LM decoding requires `--use_lm true`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/run.sh",
+        "lines": "13-16",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "local/path.sh duplicates MAIN_ROOT already provided by the TEMPLATE path.sh symlink",
+        "detail": "The recipe symlinks `path.sh` from TEMPLATE/asr1, yet also contains `local/path.sh` that only sets `MAIN_ROOT=$PWD/../../..` and is never referenced. Two sources of truth for the same value with no documented precedence. Either delete `local/path.sh` or document why both exist.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/path.sh",
+        "lines": "1",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a NEEDS-WORK verdict for a standard ESPnet egs2 recipe addition. The model-side YAML and the conventional symlink farm are fine; the rigor problems concentrate in two shell scripts. `local/download_and_untar.sh` has half-finished error handling (an `unzip`-missing check and a usage block that both print and then fall through), unquoted realpath substitutions, three copy-pasted extraction stanzas, and sentinel `.complete` files placed inside archive-internal directories whose existence is assumed rather than verified. `local/data.sh` sources the extractor instead of executing it (collapsing the module boundary), encodes hard-coded magic utterance counts without provenance, and applies an undocumented order-sensitive sed chain for Chinese-punctuation normalization that directly affects CER comparability. Documentation issues (broken README config link, lm_weight vs use_lm mismatch, bare `0.` YAML floats, duplicate path.sh) round out the list. Fixing the P1 shell-glue and normalization issues makes this mergeable."
+  },
+  "raw": ""
+}

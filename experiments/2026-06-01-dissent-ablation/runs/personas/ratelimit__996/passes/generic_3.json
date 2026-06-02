@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Redundant NewRateLimit call creates throwaway Stats before override",
+        "detail": "In the non-detailed override path, the code calls NewRateLimit which internally creates a Stats struct using rateLimit.FullKey, then immediately overwrites Stats and FullKey with the enhanced key. This allocates an unused Stats counter for every request that triggers the enhanced path, causing duplicate stat registration and wasted allocation. Just update Stats and FullKey on the existing rateLimit.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-428",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rateLimit.FullKey may be empty/unset when compared against enhancedKey",
+        "detail": "The override block compares enhancedKey != rateLimit.FullKey, but FullKey is only set when DetailedMetric is true elsewhere or not initialized in the base path shown. If FullKey is empty by default for non-detailed limits, the condition will almost always be true, triggering the expensive recreate+override path even when keys are semantically identical to the default. Verify FullKey initialization for the standard case.",
+        "file": "src/config/config_impl.go",
+        "lines": "418-428",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wildcard branch duplicates logic identical to default-key branch",
+        "detail": "In GetLimit, the three branches (matchedViaWildcard, matchedUsingValue, default) for building valueToMetricFullKey contain near-identical code. The wildcard and default-key branches are functionally identical: both check valueToMetric and append key_value or just key. This duplication invites drift bugs. Consolidate into a single helper that takes a bool flag.",
+        "file": "src/config/config_impl.go",
+        "lines": "350-388",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literals for rateLimitDescriptor are fragile",
+        "detail": "The change uses positional initialization `&rateLimitDescriptor{map[...]{}, rateLimit, nil, descriptorConfig.ValueToMetric}` rather than named fields. Adding another field to the struct will silently break or require touching every call site. Use named field initialization to make future additions safe and self-documenting.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stats struct created twice in override path leaks counter registrations",
+        "detail": "Within the value_to_metric override, statsManager.NewStats is invoked twice: once inside NewRateLimit with the old FullKey, then again with enhancedKey. Depending on the stats backend, the first call may register a counter that's never used but persists, causing metric pollution. Coalesce to a single NewStats invocation.",
+        "file": "src/config/config_impl.go",
+        "lines": "425-427",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing test for non-leaf rate limits with value_to_metric",
+        "detail": "Tests cover leaf descriptors with rate_limit defined, but rate limits can also be defined at intermediate descriptors. The interaction between value_to_metric at a parent and a rate_limit at that same parent (where traversal stops mid-path) isn't tested. The valueToMetricFullKey computation continues iterating but the limit was found earlier \u2014 verify behavior matches expectations.",
+        "file": "test/config/config_test.go",
+        "lines": null,
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "summary": "The PR adds a useful, backward-compatible feature with strong test coverage. However, the GetLimit implementation has structural issues: duplicated logic across three branches that could be consolidated, fragile positional struct initialization, and an awkward override path that constructs a throwaway RateLimit and Stats before overwriting them. The reliance on FullKey for the override-vs-default comparison needs verification since FullKey may not be initialized in the standard non-detailed path. No P0 correctness bugs spotted, but the override logic should be tightened before merge."
+  }
+}

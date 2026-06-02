@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "server__8569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig violates LSP: vLLM subtype requires only `name`; TRT-LLM subtype requires `task_id`/`path` and mutates `is_registered`.",
+        "detail": "One dataclass with all-Optional fields encodes two distinct ADTs sharing a name. Callers cannot rely on the contract: `_create_trtllm_generate_request` indexes `lora_config.task_id` and `lora_config.path` without precondition checks, while vLLM ignores them. Split into a sealed hierarchy (VllmLoraConfig, TrtllmLoraConfig) or tagged union so substitution is total and required fields are non-Optional.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "60-67",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`is_registered` mutation inside request builder breaks the postcondition that request construction is side-effect-free.",
+        "detail": "`_create_trtllm_generate_request` mutates `lora_config.is_registered = True` before the request has succeeded. If the inference call fails or the model is reloaded, the cache flag lies and subsequent requests will omit weights the engine no longer holds. Registration state belongs to a LoRARegistry ADT keyed by (model, task_id), updated on confirmed server-side caching, not on the in-memory config dataclass.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-242",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`_parse_lora_configs` return-type annotation lies: declared `List[tuple[str,str]]` but returns `List[TritonLoraConfig]`.",
+        "detail": "The signature claim is part of the contract; a wrong annotation is a spec violation visible to every caller and to type checkers. Either update to `Optional[List[TritonLoraConfig]]` or, better, return a typed `LoraCatalog` value object that also carries the backend kind so downstream code stops re-deriving it.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Function name `_parse_lora_configs` hides a backend dispatch; the abstraction leaks via the `backend: str` parameter.",
+        "detail": "The function is two ADTs in one: parse-vllm-lora-catalog and parse-trtllm-lora-catalog, selected by a stringly-typed flag. The module boundary should be a `LoraCatalogProvider` protocol with per-backend implementations registered by name. The current shape forces every call site to know the backend string and the function to grow a new branch per backend.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-715",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`_get_lora_config` postcondition contradicts its return type annotation (`-> TritonLoraConfig` but returns `None`).",
+        "detail": "It returns `None` when `lora_name` is None or `lora_configs` is None, and also crashes with AttributeError if `model_metadata` is None (no guard after `.get`). Either narrow the signature to `Optional[TritonLoraConfig]` and handle missing metadata explicitly, or split into `require_lora_config` and `maybe_lora_config` with distinct contracts.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1089-1098",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stray `print(f\"backend: {backend}\")` and `print(traceback.format_exc())` calls leak implementation through stdout instead of structured logging.",
+        "detail": "Diagnostic prints in `_parse_lora_configs` and the three FastAPI routers are part of the observable contract once shipped. Replace with a logger so verbosity is controlled by the operator, and remove the per-iteration `print(f\"backend:\")` left from debugging. Otherwise production logs get noisy and the abstraction's error-reporting contract is undefined.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "688, 712",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR threads multi-LoRA through TRT-LLM but collapses two distinct abstract data types (vLLM LoRA name vs. TRT-LLM LoRA with task_id/path/registration state) into one all-Optional `TritonLoraConfig`, producing a clear LSP violation: TRT-LLM call sites rely on fields the vLLM subtype never sets. Registration state is mutated in the request-builder, breaking the postcondition that constructing a request is side-effect-free and creating a stale-cache hazard across model reloads. The new `_parse_lora_configs` has a wrong return annotation and a stringly-typed backend dispatch where a `LoraCatalogProvider` per backend would be the right module boundary. Debug `print` and `traceback.print` calls have leaked into production paths. The contract \u2014 preconditions on fields, postconditions of parsing, invariants of registration \u2014 needs to be written down and enforced by the type system before this lands."
+  }
+}

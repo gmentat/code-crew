@@ -1,0 +1,266 @@
+{
+  "task_id": "sqlfluff__7499",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "ALTER TABLE refactor: removing outer Delimited(OneOf(...))",
+        "positions": [
+          {
+            "persona": "Torvalds",
+            "position": "Regression dressed up as a refactor \u2014 T-SQL ALTER TABLE supports comma-separated ADD/DROP actions per MS docs; the deleted fixture was working and was silently removed to make the grammar pass. Either cite the doc proving it invalid or restore the Delimited wrapper."
+          },
+          {
+            "persona": "Liskov",
+            "position": "Silent contract narrowing from 'delimited list of actions' to 'exactly one top-level action'. The supertype contract has been weakened to a subtype contract; either restore the Delimited or document why the removed form was invalid."
+          },
+          {
+            "persona": "Dijkstra",
+            "position": "TESTED-NOT-PROVED: the diff narrows the accepted language without proof that the removed inputs are illegal in T-SQL, and no negative test asserts the new boundary. Specification must be stated before this lands."
+          },
+          {
+            "persona": "Knuth",
+            "position": "T-SQL does in fact reject mixing ADD and DROP in one statement, so the change is likely correct in practice \u2014 but the invariant 'one clause per ALTER TABLE; multiple targets are delimited inside each clause' is not literately documented and the deleted fixture should have been reclassified rather than removed."
+          },
+          {
+            "persona": "Pike",
+            "position": "Matches MS docs for most cases and is probably intentional scope reduction, but verify it isn't accidental regression (T-SQL does allow some mixed forms); a one-line comment near the grammar would suffice."
+          },
+          {
+            "persona": "Hickey",
+            "position": "Likely a real simplification if T-SQL never allowed top-level comma chaining there, but the PR should state the source explicitly rather than leaving the reader to verify."
+          }
+        ]
+      },
+      {
+        "topic": "Severity of the IDENTITY grammar accepting a sign on the increment",
+        "positions": [
+          {
+            "persona": "Dijkstra",
+            "position": "P1 \u2014 the grammar admits unary minus on values that semantically cannot/should not be negative; loosening an invariant farther than the bug requires is a violation of structured-programming hygiene."
+          },
+          {
+            "persona": "Knuth",
+            "position": "P1 \u2014 grammar-widening choice that should be either intentional and tested (add IDENTITY(1, -1) fixture) or narrowed to the seed only; PR is broader than advertised."
+          },
+          {
+            "persona": "Liskov",
+            "position": "P1 \u2014 but the deeper problem is the sign is treated as a freestanding optional rather than fused to its literal; needs a SignedNumericLiteral ADT, not just tighter constraints."
+          },
+          {
+            "persona": "Pike",
+            "position": "P2 \u2014 probably harmless and arguably correct (T-SQL does allow negative increment); just needs a one-line comment so future readers know the symmetry is intentional."
+          },
+          {
+            "persona": "Hickey",
+            "position": "P2 \u2014 the issue isn't acceptance per se but that 'a signed number' is split across two grammar slots; introduce SignedNumericLiteralGrammar to say what's meant in one place."
+          },
+          {
+            "persona": "Torvalds",
+            "position": "P2 \u2014 bad-taste duplication; either factor a SignedNumericLiteralSegment helper or accept this pattern will be copy-pasted forever."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the PR should be split",
+        "positions": [
+          {
+            "persona": "Torvalds",
+            "position": "THREE-PATCHES (really four) submitted as one \u2014 hostile to bisect and review. Each feature lands cleanly on its own and can break independently. Split it before resubmit."
+          },
+          {
+            "persona": "Knuth",
+            "position": "Treats the changes as a coherent set of small, well-scoped TSQL grammar extensions; no objection to bundling."
+          },
+          {
+            "persona": "Hickey",
+            "position": "Mostly a clean parser-grammar PR with four small T-SQL surface features; no objection to bundling."
+          },
+          {
+            "persona": "Pike",
+            "position": "Tidy diff with adequate fixture coverage per branch; no objection to bundling."
+          },
+          {
+            "persona": "Liskov",
+            "position": "Reviews each contract change independently; no objection to bundling."
+          },
+          {
+            "persona": "Dijkstra",
+            "position": "Reviews each grammar production independently; no objection to bundling."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ALTER TABLE refactor silently drops outer Delimited, narrowing accepted language with no documented invariant or proof",
+        "detail": "The previous grammar wrapped the action list in Delimited(OneOf(...)), permitting comma-separated multi-action statements like `ALTER TABLE t ADD ..., DROP COLUMN ..., DROP COLUMN IF EXISTS ...`. The new grammar uses a bare OneOf, so each ALTER TABLE statement accepts exactly one top-level action. The PR deletes the fixture that exercised the chained form, calling it 'invalid' without citation. Reviewers disagree on whether T-SQL actually rejects this form, but all agree the new contract is undocumented and unproven; no negative test asserts the new boundary.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "4727-4895",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IdentityGrammar accepts a stray sign on the increment without semantic guard or stated invariant",
+        "detail": "The patch adds `Ref(\"SignedSegmentGrammar\", optional=True)` before both the seed and the increment numeric literals. The PR's stated goal is negative seed only, but the change also opens the increment to a sign. Either the symmetry is intentional (then add an IDENTITY(1, -1) fixture and a comment) or the grammar should be narrowed to the seed only. As written, the new grammar's contract is not literately documented and the test set doesn't cover the widened surface.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "5109-5126",
+        "flagged_by": [
+          "Knuth",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR description claims the deleted ALTER TABLE fixture was 'invalid' without citation or MS docs reference",
+        "detail": "The description says 'Removed invalid delimited section in alter table and invalid alter table example' with no link to MS docs proving it. T-SQL ALTER TABLE supports comma-separated ADD/DROP actions in many cases per MS documentation. Either cite the doc that says the deleted example is invalid, or restore the Delimited wrapper. 'Trust me, it was invalid' is not a review-able claim.",
+        "file": "test/fixtures/dialects/tsql/alter_table.sql",
+        "lines": "8-10 (removed)",
+        "flagged_by": [
+          "Torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR bundles four unrelated grammar features into a single diff",
+        "detail": "This patch does four distinct things: table variable indexes in DECLARE, CREATE LOGIN identifier/nstring tweaks, negative IDENTITY seed, and ALTER TABLE multi-DROP refactor. Each lands cleanly on its own and each can break independently. A maintainer bisecting a future regression in one area will have to untangle it from the others. Split it.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": null,
+        "flagged_by": [
+          "Torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IdentityGrammar leaks lexer's two-token sign representation through the parse tree instead of presenting a single signed-number value",
+        "detail": "Each SignedSegmentGrammar is an independent optional Ref rather than fused to its NumericLiteralSegment via a Sequence or SignedNumericLiteral ADT. The grammar does not express the real invariant that the sign belongs to the number; downstream rules will see sign_indicator + numeric_literal as siblings rather than a single signed-number value. The right abstraction is a SignedNumericLiteral used in both seed and increment positions, mirroring how negative literals are handled elsewhere.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "5116-5128",
+        "flagged_by": [
+          "Liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Negative-identity change splits 'a signed number' across two grammar slots rather than introducing one SignedNumericLiteralGrammar value",
+        "detail": "The same pattern \u2014 optional sign followed by a number \u2014 will appear everywhere T-SQL allows negative numerics (DEFAULT values, CHECK constraints, etc). Gluing an optional sign in front of each NumericLiteralSegment in two places complects 'this token is a sign' with 'these two values are signed numbers'. A SignedNumericLiteralGrammar used once for seed and once for increment would say what's meant in one place and compose anywhere else a signed number is allowed. Either factor the helper or accept the pattern will get copy-pasted forever.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "5116-5125",
+        "flagged_by": [
+          "Hickey",
+          "Torvalds",
+          "Pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CREATE LOGIN DEFAULT_LANGUAGE now accepts NumericLiteralSegment with no rationale, citation, or test fixture",
+        "detail": "The _default_language grammar was widened to accept NumericLiteralSegment alongside QuotedLiteralSegment and NakedIdentifierSegment. The PR description mentions only the unquoted identifier case, and the added create_login.sql fixture only exercises 'DEFAULT_LANGUAGE=us_english'. SQL Server's documented syntax for DEFAULT_LANGUAGE in CREATE LOGIN is an identifier or quoted string; numeric language IDs appear in sp_configure, not CREATE LOGIN. Either add a fixture for the numeric LCID form and cite the source, or drop NumericLiteralSegment to keep the grammar tight.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "7984-7991",
+        "flagged_by": [
+          "Knuth",
+          "Hickey",
+          "Torvalds",
+          "Liskov",
+          "Pike",
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DROP CONSTRAINT inner Sequence wraps an optional CONSTRAINT keyword, allowing bare object references",
+        "detail": "The new DROP branch is `Sequence(Sequence(\"CONSTRAINT\", IfExistsGrammar, optional=True), ObjectReferenceSegment)` inside a Delimited. Because the inner CONSTRAINT sequence is optional, the grammar accepts `ALTER TABLE t DROP foo, bar;` with no CONSTRAINT keyword \u2014 not valid T-SQL for this form (you must say either `DROP CONSTRAINT name` or `DROP COLUMN name`). Either drop `optional=True` on the inner sequence or comment why permissiveness is acceptable. The companion DROP COLUMN branch correctly requires the COLUMN keyword.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "4770-4783",
+        "flagged_by": [
+          "Knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New IDENTITY test fixtures lack a negative-increment case despite grammar permitting it",
+        "detail": "The grammar now permits `IDENTITY(<signed>, <signed>)` but the only new fixture is `IDENTITY(-2147483648, 1)`. If allowing a signed increment is intentional, add a fixture like `IDENTITY(1, -1)` to lock in the behavior; if not, the grammar should be tightened. The test set should cover the full surface of what the grammar now accepts.",
+        "file": "test/fixtures/dialects/tsql/create_table_constraints.sql",
+        "lines": "45",
+        "flagged_by": [
+          "Knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing fixture for table variable with named index plus a column-level inline index in the same DECLARE",
+        "detail": "The DeclareStatementSegment now permits TableIndexSegment alongside columns and constraints. The new fixture covers the standalone `index idx (id)` form. A second case mixing a column-level inline `index _name (name)` with a table-level `index idx (...)` in the same DECLARE would harden the grammar against ambiguity between the two index forms. Optional but cheap.",
+        "file": "test/fixtures/dialects/tsql/declare_table_type.sql",
+        "lines": "30-34",
+        "flagged_by": [
+          "Knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DROP COLUMN / DROP CONSTRAINT branches admit shapes (e.g. DROP COLUMN a, b, COLUMN c) that the fixtures do not pin down",
+        "detail": "The DROP COLUMN branch is Sequence('DROP', Delimited(Sequence('COLUMN', IfExists?, Delimited(ColumnReferenceSegment)))). The inner Delimited(ColumnReferenceSegment) inside a Delimited of Sequences allows shapes that the test does not assert and that may or may not be intended T-SQL. The grammar shape does more than the documented case ('multiple delimited DROP COLUMN' where each item is COLUMN <name>). Pin the shape with a fixture or tighten the grammar; same observation applies to DROP CONSTRAINT.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "4756-4795",
+        "flagged_by": [
+          "Hickey",
+          "Pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DeclareStatement table-body OneOf adds TableIndexSegment without specifying ordering/multiplicity invariants",
+        "detail": "TableIndexSegment is appended to the OneOf inside the table-body Delimited. The implicit contract is now 'any interleaving of columns, constraints, computed columns, and indexes, in any order, any count'. The invariant should be stated explicitly in a comment \u2014 at minimum that index entries are siblings of column definitions rather than nested inside them. Without a stated invariant, future contributors will not know whether to add inline-index syntax under ColumnDefinitionSegment or here.",
+        "file": "src/sqlfluff/dialects/dialect_tsql.py",
+        "lines": "3174-3180",
+        "flagged_by": [
+          "Liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No negative parse-failure test for the now-rejected multi-action ALTER TABLE form",
+        "detail": "If the multi-action ALTER TABLE form is genuinely invalid T-SQL \u2014 the implicit claim of removing the outer Delimited and deleting the fixture \u2014 then a parse-failure fixture should assert it remains rejected. Otherwise a future refactor could silently reintroduce the broader grammar without any test catching it. Testing shows the presence of bugs, not their absence; here there isn't even a test.",
+        "file": "test/fixtures/dialects/tsql/alter_table.sql",
+        "lines": "8-10",
+        "flagged_by": [
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New fixtures exercise the happy path only; no boundary cases",
+        "detail": "The added fixtures cover one shape per feature: one table variable index, one CREATE LOGIN with all three new forms at once, one negative seed (INT_MIN), one multi-DROP COLUMN, one multi-DROP CONSTRAINT. There are no cases with mixed positive/negative increment, no DROP that mixes CONSTRAINT and COLUMN in one statement, no DEFAULT_DATABASE as a delimited-identifier, and no PASSWORD with the bare N prefix alone. The fixtures demonstrate correct behavior on chosen inputs; they do not establish the boundary of the accepted language.",
+        "file": "test/fixtures/dialects/tsql/create_login.sql",
+        "lines": "35-37",
+        "flagged_by": [
+          "Dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "New declare-table-index test fixture is missing a statement terminator",
+        "detail": "`declare @var table (...) ` has no semicolon at the end. Matches the rest of the file's loose style, but the surrounding fixtures are inconsistent about terminators and this adds another one. Minor.",
+        "file": "test/fixtures/dialects/tsql/declare_table_type.sql",
+        "lines": "30-33",
+        "flagged_by": [
+          "Torvalds"
+        ]
+      }
+    ],
+    "summary": "All six reviewers agree the ALTER TABLE refactor \u2014 replacing the outer Delimited(OneOf(...)) with a bare OneOf and deleting a multi-action fixture as 'invalid' \u2014 is the most consequential change in the PR, but they split on severity and intent: Torvalds, Liskov, and Dijkstra call it a P1 regression/contract-narrowing that lacks citation and negative tests, while Knuth, Pike, and Hickey believe it's probably correct in practice but undocumented. Five of six reviewers also flag the IDENTITY grammar widening, with Dijkstra/Knuth treating the unjustified acceptance of a signed increment as P1 (loosening invariants farther than the bug requires) while Pike/Hickey/Torvalds treat the underlying duplication as a P2 abstraction issue (no SignedNumericLiteral ADT). Unanimous P2: DEFAULT_LANGUAGE silently gained NumericLiteralSegment with no rationale, citation, or test. Torvalds adds a unique structural critique that the PR should be split into four separate patches for bisectability. The strongest preserved disagreement is whether the ALTER TABLE change is a legitimate scope reduction matching MS docs (Knuth/Pike/Hickey) or a silent regression masquerading as cleanup (Torvalds/Liskov/Dijkstra)."
+  },
+  "raw": ""
+}

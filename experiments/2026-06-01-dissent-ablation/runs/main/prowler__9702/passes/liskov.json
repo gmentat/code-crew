@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "prowler__9702",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Check class name and metadata CheckID do not match the directory/file naming convention",
+        "detail": "The PR description, branch name, and CHANGELOG entry refer to 'compute_instance_multiple_network_interfaces', but the directory, files, class name, and metadata CheckID are all 'compute_instance_single_network_interface'. The framework's contract for a check requires that the directory name, the .py filename, the class name inside it, and metadata.CheckID all agree \u2014 this is the substitution point the loader relies on. Here they do agree internally (good), but the PR title/description disagree. Confirm which naming is intended and align CHANGELOG plus PR title; otherwise downstream consumers searching for the documented CheckID will not find it.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "MANUAL status is undocumented in metadata and contract; introduces a third state without spec",
+        "detail": "The check's docstring promises three outcomes (PASS / MANUAL / FAIL), but the metadata.json describes only PASS/FAIL semantics and the framework's Check contract historically returns PASS/FAIL. Introducing a MANUAL status changes the postcondition of execute() \u2014 callers and downstream aggregators that switch on status may not handle MANUAL. Either state MANUAL explicitly in metadata and verify Check_Report_GCP/aggregation supports it as a first-class status, or replace the GKE branch with PASS plus a clarifying status_extended.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "30-37",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection by name prefix is a leaky, brittle heuristic embedded in the check",
+        "detail": "Identifying a 'GKE-managed instance' by `instance.name.startswith('gke-')` leaks naming convention from one Google product into the abstract data type of Instance. Users can name any VM 'gke-foo', and real GKE node-pool prefixes are configurable. The right boundary is to add an `is_gke_managed` (or a label/metadata-derived) attribute on the Instance ADT computed once in compute_service, with the rule stated as a postcondition; the check then queries the abstraction rather than re-implementing detection. As written, every future check that wants to exempt GKE will re-derive this rule inconsistently.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NetworkInterface ADT is anemic relative to data already parsed in _get_instances",
+        "detail": "The new NetworkInterface model captures name/network/subnetwork but discards accessConfigs/natIP, which _get_instances already iterates to compute `public_ip`. This creates two parallel representations of the same upstream object: a derived boolean (`public_ip`) and a partial list (`network_interfaces`). Future checks (public IP per NIC, NAT presence, alias IP ranges) will either re-parse the raw API or duplicate this loop. Recommend extending NetworkInterface with `access_configs` / `has_public_ip` and deriving the instance-level `public_ip` from the list, so the ADT is the single source of truth.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "105-135, 603-612",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Invariant on network_interfaces is not stated; zero-NIC branch silently passes",
+        "detail": "The check handles `interface_count == 0` by leaving status=PASS with a 'has no network interfaces' message. Whether a GCE Instance can have zero network interfaces is a real invariant question (the API does not normally allow it). Either state the invariant on the Instance ADT (`len(network_interfaces) >= 1`) and treat zero as an internal error, or define the postcondition explicitly. Silently passing an impossible state hides bugs in the service layer.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "38-41",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface.network/subnetwork lose the URL frame without documenting it",
+        "detail": "The service strips network/subnetwork to the last path segment (`.split('/')[-1]`). That is a lossy transform on the ADT: project and region context are discarded, and two subnetworks named 'default' in different VPCs become indistinguishable. If this is intentional for display, document it as a postcondition on the field; if checks will need fully qualified URIs (e.g., cross-VPC reasoning), preserve the original `self_link` form and let consumers shorten when rendering.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "117-128",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test for zero network interfaces is missing",
+        "detail": "The test suite covers single, two, multi, mixed, GKE-multi, and no-instances, but does not exercise the `interface_count == 0` branch in the check. Given that branch is reachable in the code and changes status_extended, the contract is under-tested. Add a test or remove the branch in favor of an asserted invariant.",
+        "file": "tests/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface_test.py",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The check is internally consistent \u2014 directory, filename, class, and CheckID all agree on 'compute_instance_single_network_interface' \u2014 but the PR title, description, and CHANGELOG narrative use 'multiple_network_interfaces', so the documented contract and the shipped artifact disagree at the boundary callers will search. Below that, the abstraction has two real weaknesses: a new MANUAL status is introduced without being stated in metadata or (visibly) supported by the Check_Report contract, and the 'is this a GKE node' rule is encoded as a name-prefix string match inside the check rather than as a property of the Instance ADT \u2014 a leak that the next check will duplicate inconsistently. The new NetworkInterface model is a good move toward a richer Instance ADT, but it is anemic: accessConfigs/natIP are still being collapsed into a separate `public_ip` boolean in the service layer, leaving two parallel views of the same upstream data. Recommended changes: align naming and CHANGELOG; specify MANUAL in metadata or drop it; move GKE-detection onto the Instance ADT as `is_gke_managed`; enrich NetworkInterface to subsume the public-IP derivation; document or remove the zero-NIC branch and test it."
+  },
+  "raw": ""
+}

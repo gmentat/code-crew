@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "vega__4219",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Silent contract change: coerceNumber masks null/NaN inputs as 0, weakening the previous postcondition",
+        "detail": "The original panLinear/zoomLinear used `toNumber` directly as `lift`, propagating null/NaN to the result (callers could detect bad input via NaN). The new `coerceNumber: x => toNumber(x) ?? 0` silently substitutes 0 for null. This is an LSP-style violation at the function level: same signature, weaker postcondition \u2014 non-numeric domain entries now produce a plausible-but-wrong domain instead of NaN. The contract should either reject non-numeric entries (precondition + error) or preserve NaN propagation. The comment 'Unlike toNumber, coerceNumber always returns a number (never null)' acknowledges the divergence but does not justify why 0 is a safe identity for an arbitrary domain.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "30-31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: parameter type `number[]` understates the actual precondition",
+        "detail": "The exported functions declare `domain: number[]` but the body requires `isNonEmpty(domain)` and additionally reads `domain[0]` and `peek(domain)` assuming at least two meaningful endpoints. The type system was just upgraded \u2014 this is the moment to encode the precondition. Use `NonEmptyArray<number>` (already defined locally) or `readonly [number, number, ...number[]]` in the public signature so callers cannot pass `[]` and get a runtime throw. The runtime check is a safety net, not a contract; the contract should live in the type.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 41-55, 57-71",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LSP-VIOLATION in peek overload: non-empty overload returns `T` but implementation can still return `undefined`",
+        "detail": "The new overload `peek<T>(array: readonly [T, ...T[]]): T` promises a non-undefined return, but the implementation `array[array.length - 1]` returns `T | undefined` at runtime if `T` itself includes undefined, or if a caller passes a sparse array typed as non-empty. The overload narrows the postcondition based on a structural type the runtime cannot verify. This is a soundness gap in the abstract data type: the type says 'I promise T', the implementation cannot enforce it. Acceptable in practice, but the spec should note that `peek` trusts its caller's claim of non-emptiness; otherwise document it as a checked precondition.",
+        "file": "packages/vega-util/src/peek.ts",
+        "lines": "4-7",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inconsistent precondition enforcement: pan/zoom check emptiness, but panLog/zoomLog read domain[0] before delegating",
+        "detail": "`panLog` and `zoomLog` compute `Math.sign(domain[0])` before calling `pan`/`zoom`, so on an empty domain they execute `Math.sign(undefined) = NaN` and only then hit the internal emptiness check. The contract is enforced in the wrong layer. Either move the `isNonEmpty` check to each public entry point, or have the public functions accept `NonEmptyArray<number>` so the precondition is established at the boundary and internal helpers can trust it. As written, the module boundary leaks the check inward.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "45-47, 62-64",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Behavioral change in error path is undocumented in PR description",
+        "detail": "The PR says 'Everything else should have same runtime behavior as before, I just added types' but also introduces a new throw on empty domain (previously these would silently return `[NaN, NaN]` or similar). That is a real, observable behavior change for any caller that passed `[]` and depended on the non-throwing path. It is almost certainly the right change, but it deserves explicit mention in the changelog/PR description so downstream consumers reading release notes see it as a breaking change, not a pure refactor.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 57",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`Domain = [number, number]` codifies a tight postcondition; verify all helpers honor it",
+        "detail": "Declaring the return type as the tuple `[number, number]` is a strong promise \u2014 exactly two numbers. Good. But this should be checked against downstream consumers in vega-scale and elsewhere that may have treated the return as `number[]`. If any consumer indexed beyond [1] or spread it expecting variable length, the type narrowing is fine but worth a deliberate sweep. This is the kind of contract tightening that pays off across team boundaries only if the boundary is consistently respected.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "7",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The refactor is a sound first step toward typing vega-util, and the introduction of `NonEmptyArray`, `TransformFn`, `Domain`, and `Anchor` correctly identifies the abstract data types in play. However, the contract is stated partly in types and partly in runtime checks, and they disagree: public signatures accept `number[]` while internals demand non-empty input, so the precondition lives in the wrong place. The `coerceNumber` adapter silently weakens the prior postcondition by mapping null to 0, which is an LSP-style regression masquerading as a type cleanup. The `peek` overload makes a promise the runtime cannot fully verify, which is acceptable but should be documented as a trusted precondition. Tighten the public types to `NonEmptyArray<number>`, decide whether non-numeric entries are a precondition violation or should propagate NaN, and call out the new throw as a behavior change in the PR description."
+  },
+  "raw": ""
+}

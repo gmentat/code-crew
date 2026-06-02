@@ -1,0 +1,93 @@
+{
+  "task_id": "pipecat__3113",
+  "arm": "generic-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Public constructor parameter `agentArn` uses camelCase, violating PEP 8 and Pipecat conventions",
+        "detail": "All other constructor params are snake_case (aws_access_key, aws_region) but `agentArn` is camelCase. This is a public API surface; renaming after release is a breaking change. Rename to `agent_arn` before merging and keep camelCase only at the AWS API boundary.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "115-143",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer raises on non-JSON lines, killing the processor mid-stream",
+        "detail": "`json.loads(response_line)` is unguarded. AgentCore streams include keepalives, comments, and malformed lines; any one raises JSONDecodeError out of process_frame, leaving LLMFullResponseStartFrame unmatched and aborting the pipeline. Wrap in try/except and log+skip.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "70-78",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bedrock client recreated per LLMContextFrame, adding latency and connection churn",
+        "detail": "`async with self._aws_session.client(...)` opens a fresh aioboto3 client on every invocation, paying TLS handshake and credential resolution costs each turn. For a streaming voice pipeline this is meaningful latency. Create the client once at startup and reuse it, with cleanup on stop.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "198-217",
+        "flagged_by": [
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Class name (AWSAgentCoreProcessor) mismatches PR title (AWSBedrockAgentCoreProcessor) and wildcard export leaks helpers",
+        "detail": "PR title advertises AWSBedrockAgentCoreProcessor but the class is AWSAgentCoreProcessor. The module is re-exported via `from .agent_core import *` with no `__all__`, leaking helpers and stdlib imports into the public namespace. Pick the canonical name and define `__all__` before release.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78",
+        "flagged_by": [
+          "generic_1",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Response-end bookend race: timeout task can fire mid-stream or after next Start frame",
+        "detail": "_close_output_response_after_timeout sleeps 1s then pushes LLMFullResponseEndFrame. If a new context arrives within the window or chunks gap >1s, the stale timer emits End mid-response or splits one turn into multiple, corrupting downstream aggregator state. Cancel the close task on new context frames and rely on the explicit close.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "162-202",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unhandled AWS/streaming exceptions leave LLMFullResponseStartFrame unmatched",
+        "detail": "invoke_agent_runtime and the async iteration over the streaming response are unguarded. On ClientError, throttling, or cancellation after Start is pushed, no End frame is emitted and downstream aggregators stall. Wrap the streaming loop in try/except/finally that always emits End and cancels the close task.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "197-251",
+        "flagged_by": [
+          "generic_2",
+          "generic_4",
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "The new AWSAgentCoreProcessor has solid intent but ships with several pre-merge defects all six reviewers converged on. The most pressing public-API issues are the camelCase `agentArn` parameter and the class-name mismatch with the PR title (plus a wildcard re-export with no `__all__`), both painful to fix after release. Runtime correctness concerns dominate the rest: an unguarded `json.loads` that crashes on any non-JSON SSE line, per-frame Bedrock client construction that adds latency, a timeout-based bookend that races with new context frames, and missing exception handling that can leave LLMFullResponseStartFrame unmatched. None are security issues, but all should be addressed before this becomes a stable public processor."
+  }
+}

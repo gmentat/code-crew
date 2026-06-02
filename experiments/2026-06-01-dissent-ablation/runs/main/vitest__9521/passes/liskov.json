@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "CoverageProvider interface adds optional onTestRunStart without specifying the contract or substitution guarantees",
+        "detail": "The new lifecycle hook onTestRunStart is added to the CoverageProvider interface as optional with only a one-line comment. The contract is unstated: when is it called relative to onTestRunStartFiles vs onAfterSuiteRun, what is the precondition (must options be resolved? must specifications already be filtered?), and what is the postcondition (the provider may have mutated internal state used by isIncluded). Any custom provider implementing CoverageProvider must now satisfy this contract by substitution (LSP) but cannot, because the contract is not written. SPEC-MISSING: state precondition/postcondition/invariants, document ordering relative to other lifecycle callbacks, and clarify whether implementations may assume options.changed has been normalized.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "28-34",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BaseCoverageProvider.onTestRunStart mutates shared cache state, breaking the isIncluded invariant for re-entrant callers",
+        "detail": "isIncluded had an implicit invariant: results are cached in globCache and stable for the life of the provider. onTestRunStart now mutates the changedFiles field and clears globCache mid-lifecycle. This is a LEAKY-ABSTRACTION because callers of isIncluded cannot tell from the interface that the predicate's answer can change across calls within a single Vitest run, nor that isIncluded depends on hidden state populated only after onTestRunStart fires. If any caller (including reporters or custom providers) calls isIncluded before onTestRunStart resolves, they get the wrong answer silently. State the invariant explicitly: 'isIncluded is only valid after onTestRunStart has completed,' or move the changedFiles resolution into the constructor/_initialize phase so the invariant holds for the whole lifecycle.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "148-180, 332-348",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart is called from three sites in core.ts with no guarantee of consistent ordering or single-invocation semantics",
+        "detail": "Vitest.runFiles, the empty-specifications branch in collectTests, and the main test run path each independently invoke this.coverageProvider?.onTestRunStart?.(). The contract does not state whether onTestRunStart is idempotent, whether it may be called multiple times per logical run, or whether the caller must guarantee it is called exactly once before any onAfterSuiteRun. This is a WRONG-BOUNDARY issue: the responsibility for 'ensure onTestRunStart runs exactly once before file collection' is smeared across three call sites in core.ts rather than encapsulated in the provider's own lifecycle. Centralize the invocation (e.g., gate it inside _startCoverage or a single Vitest._beginCoverageLifecycle method) so the contract has one enforcement point.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-754, 880-886",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "coverage.changed semantics diverge from test.changed in a way the contract does not document",
+        "detail": "test.changed uses Vitest's existing related-files resolution (config.related, populated by the test-file resolver). The new coverage.changed branch in onTestRunStart bypasses that path entirely and re-invokes VitestGit.findChangedFiles directly with the user-provided ref. The two paths can return different file sets for the same input (e.g., test.changed honors the related graph; coverage.changed returns the raw git diff against the ref). The public type signature `boolean | string` and the docstring 'Inherits the default value from test.changed' imply substitutability between the two options, which does not hold. Either document the asymmetry explicitly in the type doc and CLI help, or route both through a single resolver so the contract is uniform.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isIncluded silently changes its predicate semantics when changedFiles is set, with no spec change",
+        "detail": "Before this PR, isIncluded answered: 'does this filename match coverage.include and not coverage.exclude.' After this PR, when changedFiles is populated, the same method also answers 'and is in the changed set.' The method name and signature did not change. The postcondition has been strengthened (fewer files return true) but no caller is informed. This is a classic LSP concern at the method level: callers relying on the prior postcondition (e.g., reports listing all configured files) now see a narrower result. Rename to includesForCoverage or split into isConfigured(filename) and isChanged(filename), and have callers compose them explicitly; or document the new postcondition in the method's comment.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl is now applied inside isIncluded without documenting the input contract",
+        "detail": "isIncluded now applies cleanUrl(_filename) before slash. The parameter name _filename suggests a filesystem path, but the implementation now accepts URL-like strings with query params. The contract for what callers may pass is widened de facto but not in the type or doc. State the precondition explicitly: 'accepts filesystem paths or module URLs with query/hash; the query/hash is stripped before matching.'",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "148-152",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CustomProviderOptions picks 'changed' from BaseCoverageOptions but custom providers are not required to honor it",
+        "detail": "The Pick adds 'changed' to CustomProviderOptions, exposing it in the config type. But there is no requirement in CoverageProvider that a custom provider actually implement the filtering \u2014 onTestRunStart is optional and the changedFiles field lives on BaseCoverageProvider, not on the interface. A user configuring coverage.changed with a custom provider that does not extend BaseCoverageProvider will get silent no-op behavior. Either move changedFiles handling into a default/mixin that custom providers can opt into, or document that coverage.changed is honored only by providers extending BaseCoverageProvider.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "292-297",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is useful and the user-facing surface is clean, but the abstract data type underlying coverage.changed is under-specified. The new CoverageProvider.onTestRunStart hook is added without a written contract (preconditions, postconditions, ordering, idempotence), and three call sites in core.ts invoke it independently \u2014 the responsibility for 'run this exactly once before file collection' is not encapsulated. BaseCoverageProvider.isIncluded silently changes its postcondition when changedFiles is populated, and depends on hidden state initialized only after onTestRunStart resolves, which breaks substitutability for any caller that touched the prior interface. coverage.changed and test.changed are typed as if interchangeable but use different resolvers under the hood, an asymmetry the spec hides. Recommend: write the contracts on the interface, centralize the lifecycle invocation, and either unify the changed-file resolution path or document the divergence explicitly."
+  },
+  "raw": ""
+}

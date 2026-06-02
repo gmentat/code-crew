@@ -1,0 +1,94 @@
+{
+  "persona": "liskov",
+  "task_id": "openbao__2362",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root field overloads two meanings (is-root + ancestor namespace) without a stated contract",
+        "detail": "The `root *namespace.Namespace` field replaces a clean boolean with a value that simultaneously means 'this ACL is a root policy' and 'here is the namespace that owns the root scope'. The contract is never written down: callers must know that nil means 'not root' and non-nil means 'check HasParent'. This is a classic LEAKY-ABSTRACTION \u2014 the implementation detail (which namespace) leaks into every reader of the struct, and the invariant ('a.root != nil iff the single policy was named root') is enforced only by NewACL's construction logic, with no spec. Either introduce an explicit method `IsRoot() bool` plus `RootNamespace() *namespace.Namespace` with documented preconditions, or wrap in a small type whose contract is stated.",
+        "file": "vault/acl.go",
+        "lines": "35-39, 100-109, 339-360",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP violation: NamespaceSealed stub silently weakens the postcondition that callers depend on",
+        "detail": "`(*Core).NamespaceSealed` is introduced with the documented postcondition 'returns true if any ancestor namespace is sealed', but the implementation always returns false. Any caller written against the contract (e.g. `ListAllNamespaces` filtering sealed namespaces, or any future gate that refuses operations under a sealed parent) will behave incorrectly the moment a real SealManager is wired in elsewhere \u2014 because the stub already satisfies the type but not the contract. This is a subtype-strengthens-precondition-by-pretending pattern: the method exists, callers may already gate on it, and the truth value is wrong. At minimum the stub must either (a) panic/return an error indicating 'not yet implemented' when called in a context where the answer matters, or (b) be guarded by a build tag or feature flag so it cannot be silently relied on. A SPEC-MISSING comment ('TODO: implement with seal manager') is not a contract.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent semantics not specified \u2014 substitutability of root ACL across namespaces depends on it",
+        "detail": "The new fast-path in `AllowOperation` reads `if !ns.HasParent(a.root) { return ret }`. The correctness of namespace-owned root tokens hinges entirely on the contract of `HasParent`: is it reflexive (does a namespace have itself as a parent)? Is it strict-ancestor or ancestor-or-self? Does it include the root namespace as parent of every namespace? The test `testACLRoot` only checks (a) ns equals itself grants root, and (b) root context against an ns-owned root token denies \u2014 but does not assert behavior for sibling namespaces, deeper descendants, or the root-namespace-owns-everything case. The contract must be stated at the call site or the function renamed (e.g. `IsAncestorOrSelf`) so future modifications to HasParent do not silently change ACL semantics.",
+        "file": "vault/acl.go",
+        "lines": "350-355",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace check in NewACL widens precondition without test coverage of misuse",
+        "detail": "Previously NewACL refused a root policy attached in any non-root namespace. The diff removes that guard and now records whatever namespace is on the context as the root scope. This is a substitution-relaxation: every caller that constructs an ACL from policies + ctx now silently grants root within whatever namespace the context carries. Callers that previously relied on the error (e.g. policy-store code paths that build ACLs from untrusted policy bundles) now produce a working namespace-root ACL instead of erroring. The PR should enumerate which call sites construct ACLs with non-root contexts and confirm none of them can be fed a policy named 'root' by an untrusted source. The contract change deserves a comment on NewACL stating the new precondition: 'caller is responsible for ensuring the ctx namespace is the intended root scope for this policy bundle'.",
+        "file": "vault/acl.go",
+        "lines": "100-109",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces contract change (now includes sealed namespaces) is not reflected in callers",
+        "detail": "The PR description states ListAllNamespaces now includes sealed namespaces in its response, and several call sites were migrated to `c.ListNamespaces(ctx)` instead. This is a postcondition change to a widely-used method: callers that iterated results to drive operations against each namespace (loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, countActiveTokens) may now attempt operations on sealed namespaces and either fail mid-loop or silently skip. The contract of ListAllNamespaces (does it return sealed? does the caller filter? what's the invariant on the returned slice?) must be written down on the method, and the migration to `ListNamespaces` should be justified: are these the call sites that *should* see sealed namespaces, or the ones that *shouldn't*? Both interpretations are plausible from the diff and the answer is the entire point.",
+        "file": "vault/core.go",
+        "lines": "3287, 3395",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "namespaceMountEntryView removal collapses a root-vs-namespace branch into one path \u2014 verify invariant",
+        "detail": "ExpirationManager.leaseView and tokenIndexView previously branched on `ns.ID == RootNamespaceID`, returning a SubView of systemBarrierView for root and namespaceMountEntryView for child namespaces. The diff unifies both into `NamespaceView(m.core.barrier, ns).SubView(...)`. For substitutability this is desirable (one path, one contract), but only if `NamespaceView(barrier, RootNamespace).SubView(prefix)` produces the *same* underlying storage path as the old `systemBarrierView.SubView(expirationSubPath + leaseViewPrefix)`. If the prefixes differ by even one byte, every existing root-namespace lease becomes unreadable after upgrade. The PR should include a migration test or an assertion that the two paths produce byte-identical keys for the root namespace.",
+        "file": "vault/expiration.go",
+        "lines": "450-456",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ErrNamespaceSealed status mapping uses string-contains check, conflating with ErrSealed",
+        "detail": "The new switch in `AdjustErrorStatusCode` checks `errwrap.Contains(err, consts.ErrSealed.Error()) || errwrap.Contains(err, consts.ErrNamespaceSealed.Error())`. Because the two sentinel messages share no substring ('Vault is sealed' vs 'namespace is sealed'), this works today, but the contract is fragile: any future rewording that makes one a substring of the other will silently merge their handling. Prefer `errors.Is(err, consts.ErrSealed) || errors.Is(err, consts.ErrNamespaceSealed)` once the wrap chain supports it, and document that both map to 503 by intent, not by accident of string-matching.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-167",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength derivation hard-codes a separator byte without naming the invariant",
+        "detail": "The description introduces `NSTokenLength` as `(TokenLen + \".\"[1] + nsID)`. The expression `\".\"[1]` reads the second byte of a one-byte string \u2014 this is either a typo for `len(\".\")` (=1) or a deliberate compile-time obfuscation. Either way, the invariant that namespace-scoped tokens have the shape `<token>.<nsID>` should be stated as a contract on the type, with the separator as a named constant (`NSTokenSeparator = '.'`) and a helper `SplitNSToken(s string) (token, nsID string, ok bool)`. Otherwise every site that parses these tokens must reimplement the spec from scratch.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "This PR is laying foundation for per-namespace sealing, and the foundational pieces are exactly where the contracts must be most precise \u2014 and they are not. The `ACL.root` field overloads two meanings without a written spec; `Core.NamespaceSealed` is a stub whose postcondition lies; `ListAllNamespaces` quietly changes what it returns; and `NewACL` drops its root-namespace precondition without documenting the new one. The structural moves (collapsing leaseView/tokenIndexView, switch-statement refactor of AdjustErrorStatusCode, context propagation in tests) are good housekeeping. But foundation code earns the right to ship only by stating its contract \u2014 and this PR ships interface changes ahead of their specs, which is the order of operations that bites multi-team codebases later. Recommend: write the contracts on `ACL.root`, `NamespaceSealed`, `HasParent`, and `ListAllNamespaces` before merging, and confirm root-namespace storage paths are byte-identical post-refactor."
+  },
+  "raw": ""
+}

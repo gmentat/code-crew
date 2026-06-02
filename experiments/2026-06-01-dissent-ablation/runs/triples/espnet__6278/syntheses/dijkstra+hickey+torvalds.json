@@ -1,0 +1,75 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring says max_steps but code reads max_step",
+        "detail": "Docstring documents max_steps/val_interval, but code reads trainer_args['max_step'] and never reads val_interval. This is a runtime KeyError on first launch, or worse a silently wrong config. Pick one name, fix the other, and validate required keys at __init__ time.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "47-77",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery parses 'step_' substrings with no atomicity or name validation",
+        "detail": "_load_checkpoint uses split('step_')[-1] on any matching directory and trusts the highest number. A half-written save from a prior crash, or a directory named 'step_3_backup', is silently selected. Validate names by regex full-match and write a 'latest' marker only on completed saves.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "run() loop has no progress invariant and conflates three cadences under save_interval",
+        "detail": "The outer while loop trusts train() to advance global_step by save_interval, but an empty iterator spins forever re-saving. val_interval is documented yet never read; save_interval drives training-chunk, validation, and checkpoint cadence at once. Boundary cases (max_step on resume, non-divisible intervals) are also undefined.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-188",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Collective-call discipline in _all_reduce_stats and valid() is unstated and unsafe",
+        "detail": "_all_reduce_stats iterates per-key all_reduce, requiring every rank to call identical collectives in identical order on matching shapes. valid() does the same per-batch. If ranks see different keys or different batch counts (empty shard), NCCL hangs or corrupts. State and enforce the precondition that stats keys and iteration counts are globally identical.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-194",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stringly-typed 'task:name:data_json[:factor]' specifiers parsed inconsistently across files",
+        "detail": "The data specifier is a string repeatedly re-split downstream, and train.py's whitespace split breaks if data_json paths contain spaces. Parse once at the edge into a small dataclass {task, name, path, factor} and pass the value, or pick an unambiguous repeated --flag convention and document it.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-199",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer complects engine, wandb global, checkpoint scan, dtype, and reduction",
+        "detail": "Five separable concerns live in one class, and behavior depends on a module-level wandb singleton initialized in train.py. Pull each into a pure function (precision_from_config, discover_checkpoint, all_reduce_stats) and pass a logger object explicitly so non-zero ranks get a no-op and the value flow becomes testable.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "20-243",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a NEEDS-WORK verdict. Three P0 defects will bite immediately: a docstring/code key mismatch on max_step(s) that KeyErrors on first launch, a checkpoint discovery routine that parses substrings with no atomicity guard, and a run() loop whose progress invariant is unstated while save_interval secretly controls three cadences at once. P1 concerns center on undisclosed collective-call preconditions in _all_reduce_stats and valid(), stringly-typed specifier parsing that disagrees across files, and a trainer class that complects engine, wandb, checkpointing, dtype, and reduction. Fix the keys, harden checkpoint discovery, separate the cadences, and make the collective and logger contracts explicit before merging."
+  }
+}

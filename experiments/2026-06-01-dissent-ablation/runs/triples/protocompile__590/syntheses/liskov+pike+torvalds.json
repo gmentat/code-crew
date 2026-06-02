@@ -1,0 +1,77 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() relocates the nil-deref to callers instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. Callers downstream assume *result is non-nil, so the panic-induced nil-deref is just pushed one frame up. The leader-panic cleanup should produce a sentinel failed *result with a closed done channel and a Fatal error, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment contradicts code: says 'did see a result' on a branch that fires when result is nil",
+        "detail": "The comment reads 'Leader panicked but we did see a result' yet the branch fires precisely when output is nil. Comments are part of the spec; an inverted comment on a subtle concurrency branch will mislead maintainers about whether returning nil is intended. Either the comment or the logic is wrong \u2014 fix one.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test reproduces the panic-while-waiting race",
+        "detail": "The diff adds zero tests for the leader-panic-then-waiter-reads path. A concurrency fix without a deterministic reproducer (inject leader panic, N waiters, assert sensible error rather than nil or panic) is folklore and will regress. Lock the invariant down with a test.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Overloading nil in t.result is the wrong data structure for leader-failure state",
+        "detail": "t.result uses nil to mean 'not started', 'in-progress-leader-died', and now 'caller should bail'. Overloading nil is what surfaced this race. A sentinel failed-result with a pre-closed done channel and Fatal error would let waitUntilDone work uniformly and delete the new nil-check branch entirely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle check skipped on CAS-failure slow path where it previously ran",
+        "detail": "Previously cycle detection ran whenever t.result.Load() was non-nil at entry. After the refactor, when CAS fails control jumps to waitUntilDone without checkCycle. A caller in a cycle that races into this branch will deadlock on output.done instead of erroring with ErrCycle. Reinstate checkCycle on the slow path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowed `output` variable inside run() reduces readability",
+        "detail": "Inside the CAS-failure branch, `output := t.result.Load()` shadows the named return `output`. Both are *result but represent different roles (this goroutine's vs. the leader's). Renaming the inner one (e.g., `leader`) would make the substitution explicit and prevent accidental misuse in future edits.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the checkCycle extraction and threading *result through waitUntilDone are good cleanups, but the core race fix is half-done. Returning bare nil from run() relocates the nil-deref one frame up to every caller, and the comment annotating that branch contradicts the code. The underlying smell is overloading nil in t.result to mean too many things \u2014 a sentinel failed-result would be the right shape. The cycle check is also now skipped on the CAS-failure path, and no regression test locks down the panicking-leader scenario."
+  }
+}

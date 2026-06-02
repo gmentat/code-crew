@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "pip__13482",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer sets req.prepared/needs_more_preparation=False, leaving state inconsistent for any caller that doesn't reach the new prepare_linked_requirements_more call site.",
+        "detail": "The resolver used to mark requirements prepared after the 'more' step. Now it just returns. The three call sites (install/download/wheel) each re-add the call, but anything else consuming RequirementSet (extensions, tests, future commands) inherits a half-prepared state. That's the kind of invariant move that bites the maintainer six years from now. Either keep the flag flip near prep, or document the contract loudly.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Same prepare_linked_requirements_more call copy-pasted into three commands instead of a single shared helper.",
+        "detail": "download.py, install.py, wheel.py each grew the identical line. That's three places to forget when a fourth command (lock, the very thing this PR mentions) needs the same dance. Either push it back into resolve() behind a flag (dry_run=True), or add one helper. Don't sprinkle the same incantation across the call sites and call it decoupling.",
+        "file": "src/pip/_internal/commands/",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist caches the metadata-only distribution but nothing invalidates it after the full download lands.",
+        "detail": "_fetch_metadata_only stuffs a metadata_dist into self._distribution. Later prepare_linked_requirements_more does the real download. get_dist() now short-circuits on the cached metadata-only dist forever, regardless of whether a real wheel is on disk. If the two ever diverge (RECORD, file list, install paths) you get silent wrong behavior. Invalidate on full prep, or assert equivalence.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info populated via direct_url_from_link(req.link, req.source_dir) when source_dir may not exist in dry-run.",
+        "detail": "In dry-run we deliberately skipped downloading, so req.source_dir is likely unset or empty. direct_url_from_link's behavior with a missing source_dir is the kind of thing that works in CI and explodes on a user's machine with a VCS URL. Needs a test that actually exercises dry-run + VCS + --report, not just PyPI wheels.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Patch is doing two things: the dry-run fix and a download_info side-channel for pip lock/--report.",
+        "detail": "The news entry admits it: 'pip lock or pip install --dry-run'. These are two behaviors. Split into two patches. One removes the eager prepare from the resolver and moves it to install. The second adds download_info population for metadata-only fetches. Easier to review, easier to revert when one of them regresses.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage visible in the diff for the actual behavior change.",
+        "detail": "The whole point is 'dry-run no longer downloads full wheels.' That is a one-line assertion in a functional test: run --dry-run against a wheel with PEP-658 metadata, assert the wheel bytes were not fetched. The diff has zero tests. Show me the test that fails without this patch and passes with it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The intent is right and the resolver cleanup is overdue \u2014 eager full-download inside resolve() was the bug. But the execution sprinkles the replacement call across three commands instead of one helper, and a fourth caller will forget. The set_dist cache has no invalidation story when the real download eventually happens, which is a correctness landmine. The patch is also doing two jobs (dry-run fix + download_info plumbing for lock/--report) and ships with no visible test for the headline behavior. NEEDS-WORK: split it, add the test, fix the cache invariant, consolidate the call site."
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__3113",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "FrameProcessor contract violated: input frames not always forwarded downstream",
+        "detail": "The FrameProcessor superclass contract is that non-consumed frames must be passed along the pipeline (the else branch does this). However, when an LLMContextFrame/OpenAILLMContextFrame arrives, the processor never forwards it downstream even after handling it. Other downstream processors that depend on observing the context frame (aggregators, loggers, telemetry) will silently miss it. Either document explicitly that this processor consumes context frames, or call push_frame(frame, direction) after processing. Right now the contract is ambiguous and the behavior diverges from sibling LLM services in the codebase.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "194-251",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LSP violation: agentArn parameter breaks Python naming contract used by sibling processors",
+        "detail": "Every other FrameProcessor in pipecat exposes snake_case constructor parameters (aws_access_key, aws_region, etc.). Introducing camelCase `agentArn` strengthens the implicit naming precondition that callers and factories rely on (e.g. config loaders that splat **kwargs from YAML/JSON). A subtype/sibling of FrameProcessor must remain substitutable under the project's keyword-argument convention. Rename to `agent_arn` and keep the AWS API field name (`agentRuntimeArn`) confined inside the implementation where it belongs.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "112-128",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: transformer contract under-specified and exception behavior undefined",
+        "detail": "The public contract for context_to_payload_transformer and response_to_output_transformer is only described by prose example. The default response transformer calls json.loads with no try/except; a malformed line from AgentCore will raise and abort the entire async-for loop mid-stream, leaving _output_response_open=True and a dangling close_task. Either (a) state in the contract that transformers must not raise and document the failure mode, or (b) wrap calls in try/except and log+skip. Today the abstraction promises 'returns Optional[str]' but the implementation also implicitly promises 'never raises' without saying so.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "62-75, 226-249",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Invariant not preserved across concurrent invocations: _output_response_open / _close_task shared state",
+        "detail": "The processor maintains instance state (_output_response_open, _close_task, _last_text_frame_time) intended to manage one logical response's start/end bookends. If a second LLMContextFrame arrives while a prior invocation's async-for is still draining, both invocations mutate the same state and can interleave LLMFullResponseStart/End frames out of order, or one can cancel the other's close task. The invariant 'exactly one Start frame is matched by exactly one End frame in order' is not enforced. Either serialize process_frame for context frames (queue or lock) or scope the state per-invocation.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "152-191",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Boundary leak: aws_session_token postcondition silently changed by os.getenv fallback",
+        "detail": "The constructor advertises `aws_session_token: Optional[str] = None` with semantics 'session token for temporary credentials.' But internally it falls back to os.getenv(\"AWS_SESSION_TOKEN\"). A caller that explicitly passes None to mean 'do not use a session token' silently gets one from the environment. Same pattern applies to access_key/secret_key but those at least have a documented 'uses default credentials' fallback; the session_token doc does not. Make the contract explicit: either always fall back to env, or never. Currently the abstraction's postcondition disagrees with its docstring.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "115-145",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module boundary: client created per invocation rather than per processor lifetime",
+        "detail": "An aioboto3 client context manager is entered and exited on every LLMContextFrame. This is correct for cleanup but conflates session lifetime with request lifetime. The right module boundary is: the processor owns a long-lived client, opens it on setup(), closes it on cleanup() / __aexit__. This also makes the invariant 'one client per processor' explicit. Today the contract is implicit and pays connection overhead per call.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "210-213",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Spec missing: 'multi-part response' vs 'single-part' distinction is implementation-defined, not contract",
+        "detail": "The detection key (`'text/event-stream' in contentType`) and the line-stripping protocol (`data: ` prefix) are AgentCore wire-format details visible inside process_frame. A future change to AgentCore's framing breaks process_frame directly. Extract a small parser ADT (e.g. `_iter_response_lines(response) -> AsyncIterator[str]`) with a stated contract; the public process_frame becomes implementation-agnostic. This is the ADT discipline: the abstract operation here is 'yield response chunks,' not 'detect text/event-stream and slice strings.'",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "215-249",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Frame-export contract: `from .agent_core import *` with no __all__",
+        "detail": "agent_core.py defines no __all__, so the star-import publishes everything module-level including `asyncio`, `json`, `os`, `aioboto3`, `logger`, `Callable`, `Optional`, and both default transformer functions. The package's public contract becomes accidentally large and fragile. Either define __all__ = [\"AWSAgentCoreProcessor\", \"default_context_to_payload_transformer\", \"default_response_to_output_transformer\"] or import the symbol explicitly in __init__.py.",
+        "file": "src/pipecat/services/aws/__init__.py",
+        "lines": "11",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Naming mismatch with PR title: class is AWSAgentCoreProcessor, PR says AWSBedrockAgentCoreProcessor",
+        "detail": "Minor, but the contract a user reads from the PR title differs from the symbol they import. Pick one and align docs, class name, and PR title. If 'Bedrock' is dropped, ensure docstrings still anchor the reader to 'Amazon Bedrock AgentCore Runtime' (which they currently do \u2014 good).",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "77",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The processor is a reasonable first cut, but several contracts are under-specified. The most important issue is that the FrameProcessor substitution contract is partially violated: context frames are consumed without being forwarded, and the camelCase `agentArn` parameter breaks the snake_case convention every sibling processor follows. State invariants for the Start/End response bookends are not preserved under concurrent invocations, and the transformer contract does not say whether transformers may raise \u2014 the default JSON parser can in fact raise and leave the processor in an inconsistent state. The boundary between 'AgentCore wire format' and 'pipecat frame protocol' should be drawn as a small parser ADT so process_frame stops carrying AWS streaming-format details. Fix the naming, document the transformer contract (including failure mode), serialize or scope the bookend state, and add __all__ to the module."
+  },
+  "raw": ""
+}

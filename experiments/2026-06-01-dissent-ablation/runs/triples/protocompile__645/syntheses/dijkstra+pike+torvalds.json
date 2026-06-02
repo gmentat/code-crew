@@ -1,0 +1,77 @@
+{
+  "task_id": "protocompile__645",
+  "triple_key": "dijkstra+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Defensive nil/IsZero boilerplate copy-pasted across ~20 accessors instead of one helper",
+        "detail": "Every getter now opens with the same `var x T; if f != nil { x = f.field }; return seq.NewFixedSlice(x, ...)` ritual across ir_file.go, ir_type.go, and ir_imports.go. The fix should live once \u2014 a nil-tolerant helper, a slice helper on *File, or making seq.NewFixedSlice tolerate the zero indexable \u2014 not smeared across twenty methods.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "180-365",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "imports.Directs/Transitive closures still capture i and read i.publicEnd on nil receiver",
+        "detail": "The nil guard sets slice to empty so the Indexer body never runs today, but the captured closure dereferences i.publicEnd/i.weakEnd/i.importEnd. One refactor that drops the length short-circuit re-introduces the panic. Either bail out earlier returning an empty Indexer, or assert the invariant explicitly.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-245",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex returns sentinel -1, inventing a new postcondition inconsistent with the rest of the API",
+        "detail": "Every other zero accessor returns the type's zero value; ValueNodeIndex returns -1. Callers doing e.Value().MessageKeys().At(e.ValueNodeIndex()) will index by -1 and panic \u2014 the failure is merely relocated. Return (int, bool) or an Index type with Ok(), so the zero behavior is visible in the signature.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two nil-zero idioms coexist in the same package: `f == nil` for *File, `IsZero()` for value types",
+        "detail": "*File methods guard with `f == nil` while Type, Member, Oneof guard with `!t.IsZero()`. Both are reasonable, but mixing them forces every maintainer to remember which type uses which. Pick one convention \u2014 define `(*File).IsZero()` as `f == nil` and use IsZero everywhere.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven zero test silently skips methods with parameters and special-cases names ad hoc",
+        "detail": "testZeroAny filters NumIn()==1, so accessors taking arguments (e.g. ImportFor) escape the sweep, and any return type with a Len() method is treated as a container. IsZero/Context/ValueNodeIndex are special-cased by name. A boring explicit table of (name, func(T) any) would catch regressions when new accessors sneak past the heuristic.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "85-137",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Behavioral nil-guard fixes and the new zero test are bundled into one commit",
+        "detail": "The patch is at least two changes glued together: adding the reflective zero test, and spraying ~20 guards across IR accessors. Land the test first (red), then each panic fix as its own diff. As submitted, future bisects on regressions in File.Imports() will point at 'add zero test' \u2014 useless for the maintainer six years out.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the patch fixes a real class of zero-value panics but resolves it with the wrong shape: the same defensive boilerplate is copy-pasted across roughly twenty accessors instead of pushed into one helper or the data structure itself. Two nil-zero idioms (`f == nil` vs `IsZero()`) now coexist in the same package, and ValueNodeIndex's new -1 sentinel quietly invents a postcondition inconsistent with every other accessor \u2014 callers will still panic. The reflection-driven test is valuable but too clever: it skips parameterized methods and leans on name-based special cases where an explicit table would be more durable. Imports.Directs/Transitive still capture the nil receiver in closures, surviving today only by accident of empty-slice short-circuiting. Land the test separately, lift the guards into one helper, and pick a single nil convention before merging."
+  }
+}

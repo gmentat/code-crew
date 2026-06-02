@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__2362",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed stub returns false unconditionally while live callers depend on it",
+        "detail": "Core.NamespaceSealed always returns false with a TODO, yet ListAllNamespaces and other callers are already wired against it. The seal-aware path is dead until SealManager lands, and a permanently-false security predicate masquerading as a real check invites silent misuse. Gate callers behind a build tag, return ErrNotImplemented, or land both halves together.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL.root overloads a *Namespace pointer to encode both is-root and owning-namespace",
+        "detail": "The root field is now a *namespace.Namespace where nil means not-root and non-nil means root-scoped-to-this-namespace. That sentinel-pointer trick complects two concerns (authorization decision and namespace identity) into one nillable value. A small struct or RootScope type would make AllowOperation self-evident instead of relying on an unstated convention.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 339-360",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-namespace error detection uses substring matching instead of errors.Is on the sentinel",
+        "detail": "AdjustErrorStatusCode dispatches via errwrap.Contains(err, consts.ErrNamespaceSealed.Error()), a substring search of error text. Errors are values, not strings: errors.Is on the sentinel is robust and survives wrapping. The current form will false-positive on any error whose text happens to contain the substring and false-negative on translated variants.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently broadened from boolean to ancestor-namespace check without spec update",
+        "detail": "The root field changed from bool to *namespace.Namespace, and AllowOperation now grants root privileges when ns.HasParent(a.root) holds. The previous contract was root-only-in-root-namespace; the new one grants root in N and all descendants. This authorization-boundary change ships with no doc comment, no migration note, and thin test coverage (only ns1 vs root).",
+        "file": "vault/acl.go",
+        "lines": "38-39, 100-110, 339-360",
+        "flagged_by": [
+          "liskov",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces swapped to ListNamespaces at multiple call sites without contract clarity",
+        "detail": "Calls in loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, and countActiveTokens were moved from ListAllNamespaces(ctx, true) to ListNamespaces(ctx). The PR says ListAllNamespaces now includes sealed namespaces, yet these callers were moved off it. Risk: MFA enforcement, locked-user updates, and token counts now silently skip sealed namespaces. Document each method's postcondition.",
+        "file": "vault/core.go, vault/core_metrics.go, vault/counters.go",
+        "lines": "3287, 3395, core_metrics 416, counters 31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength built via byte indexing of a string literal is cute rather than clear",
+        "detail": "NSTokenLength = TokenLen + \".\"[1] + nsID extracts a separator byte by indexing a literal. Name the separator (const NSTokenSeparator = '.') and derive lengths from that. The current arithmetic leaks the namespaced-token format through literal indexing and confuses future readers; any delimiter change touches many files.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR moves in a simpler direction overall \u2014 collapsing namespaceMountEntryView into NamespaceView().SubView() and tightening the response_util switch are real wins. The central concern is the silent broadening of the ACL root contract: root field changed from bool to *Namespace and AllowOperation now grants root via HasParent across descendants, with no spec, doc comment, or adequate tests. NamespaceSealed shipping as a permanently-false stub with live callers is a footgun, and substring matching on error text for sealed detection should use errors.Is on the sentinel. Multiple ListAllNamespaces-to-ListNamespaces swaps need their postconditions clarified before merge. Land the ACL.root spec, gate or implement NamespaceSealed, and treat errors as values."
+  }
+}

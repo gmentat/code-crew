@@ -1,0 +1,79 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "dijkstra+pike+torvalds",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil *result from run() relocates the nil-deref one frame up instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil. Callers treat *result as non-nil, so the nil-deref is pushed upstream rather than resolved. The leader's panic-cleanup path needs a sentinel failed result with a pre-closed done channel and a Fatal error, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race between Load and use of t.result is patched inconsistently, not actually fixed",
+        "detail": "The pending-output branch at the top of run() still loads t.result and hands it onward without the same guard as the CAS-failed branch. The lifecycle of t.result across leader panic, CAS failure, and waiter contention is never stated. Two call sites handle the same race differently; document the invariant or use a single atomic snapshot path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code it annotates",
+        "detail": "The branch fires precisely when output is nil, i.e. we did NOT see a result. Either the comment is a typo for 'did not see' or the logic is wrong. Comments that lie to the next maintainer are worse than no comments. Fix the words or fix the code.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test reproduces the leader-panic-while-waiting race",
+        "detail": "A concurrency fix without a deterministic reproducer is folklore. Inject a panic in the leader, have N waiters, assert they all receive a sensible error rather than nil or panic. Without this, the fix rests on inspection of code whose invariants are unstated and will regress.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "t.result overloads nil to mean too many states; encode 'leader failed' as data",
+        "detail": "t.result's nil currently means not-started, in-progress-leader-died, and now caller-should-bail. Overloading nil is why this race surfaced. A sentinel failed-result with a pre-closed done channel and a Fatal error would let waitUntilDone work uniformly and delete the new nil-check branch entirely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR conflates a pure refactor (checkCycle extraction) with a race fix",
+        "detail": "The checkCycle extraction is a clean composition win, but bundling it with the race fix makes the actual behavior change harder to bisect and review. Split into two patches: one pure refactor with zero behavior change, one minimal race fix with its test. The author already plans follow-up work, so they know how to split.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "NEEDS-WORK. All three reviewers converge on the same core verdict: the race fix relocates the nil-deref one frame up by returning a bare nil *result from run(), while the pending-output branch handles the same race inconsistently. The comment 'Leader panicked but we did see a result' contradicts the code beneath it. The checkCycle extraction is a fine composition win and should ideally land as its own patch. No test reproduces the leader-panic-while-waiting race, leaving the fix unverified. The right shape is a sentinel failed-result with a pre-closed done channel, not nil-as-tombstone."
+  }
+}

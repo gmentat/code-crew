@@ -1,0 +1,60 @@
+{
+  "name": "generic_1",
+  "task_id": "agents__3608",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Close message type mismatch with Deepgram API requirement",
+        "detail": "The PR description states Deepgram requires {\"type\": \"CloseStream\"}, but _CLOSE_MSG sends {\"type\": \"Close\"}. This likely will not be recognized by Deepgram, defeating the purpose of the fix. The STT implementation referenced as the model uses CloseStream. Verify against Deepgram Speak v1 docs and align the message type.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single receive() call may consume only one frame, not drain final messages",
+        "detail": "ws.receive() with a 1s timeout returns after the first frame (which could be a small audio chunk or control message), not after the server signals end-of-stream. To actually wait for final audio, loop on receive() until a CLOSE/CLOSED type or timeout occurs. As written, this barely helps and may discard data that arrives after the first frame is read.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-139",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reading frames in _close_ws races with the main receive loop",
+        "detail": "If the synthesize stream has a concurrent task reading from the same WebSocket, calling ws.receive() here will steal a frame from that consumer, potentially losing audio or breaking framing assumptions. Confirm _close_ws is only invoked after the reader task has exited; otherwise this introduces a subtle data-loss race.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-139",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Sending Flush on close may be redundant or harmful",
+        "detail": "Flush forces synthesis of buffered text and triggers more audio output, but we are immediately closing. If the goal is graceful shutdown, Close alone may suffice; Flush could cause the server to emit data we no longer want. Confirm whether Flush is required here or only on intentional mid-stream boundaries.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "131",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Broad Exception catch swallows cancellation-related errors",
+        "detail": "The outer try/except Exception logs and continues for any error, including unexpected ones. Consider narrowing to ConnectionError/aiohttp.ClientError, and let CancelledError propagate (in Python 3.8+ it does not inherit from Exception, so this is fine, but a comment would help future readers).",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140-141",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The intent of the fix is correct and aligns with Deepgram's stated requirement, but the actual message type sent ({\"type\": \"Close\"}) does not match the documented CloseStream control message cited in the PR description \u2014 this likely makes the fix ineffective. Additionally, the single receive() call after sending Close does not robustly drain final frames and may race with any existing reader task on the WebSocket. The Flush-then-Close sequence and broad exception handling deserve a second look. Recommend verifying the exact JSON payload Deepgram Speak v1 expects and either loop-draining until a close frame is received or ensuring _close_ws is the sole reader at shutdown."
+  }
+}

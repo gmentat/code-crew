@@ -1,0 +1,88 @@
+{
+  "task_id": "pipecat__3410",
+  "arm": "generic-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Renaming audio_packet_bytes to fixed_audio_packet_size is a breaking API change without a deprecation alias.",
+        "detail": "The changelog notes the rename but FastAPIWebsocketParams only exposes the new field. Existing user code passing audio_packet_bytes will silently break or fail Pydantic validation. Add a deprecated alias that forwards to the new field with a warning for at least one release cycle.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Real-time pacing claimed but not implemented for chunked sends.",
+        "detail": "The PR advertises real-time pacing but the packetization branch sends chunks back-to-back in a tight while loop with no respect for _send_interval or _next_send_time. Vonage Audio Connector expects 20ms cadence; bursts will overrun. Enforce pacing per emitted chunk.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "498-510",
+        "flagged_by": [
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Buffered audio remainder is never flushed on EndFrame, CancelFrame, or disconnect.",
+        "detail": "_audio_send_buffer is only cleared on InterruptionFrame. Trailing bytes smaller than packet_bytes are silently dropped at stream end, truncating utterance tails, and stale bytes leak across sessions if the transport is reused. Flush (with optional silence padding) on stop/cleanup and clear on StartFrame.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "366-372, 495-512",
+        "flagged_by": [
+          "generic_1",
+          "generic_2",
+          "generic_3",
+          "generic_4",
+          "generic_5",
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization branch keys off payload type, not frame type, risking corruption of non-audio binary payloads.",
+        "detail": "The buffering branch triggers whenever payload is bytes/bytearray regardless of whether the source frame is audio. Any binary control payload would be sliced into fixed-size chunks and mangled. Gate explicitly on isinstance(frame, AudioRawFrame).",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-512",
+        "flagged_by": [
+          "generic_2",
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "VonageFrameSerializer can run with _sample_rate=0 if deserialize fires before setup.",
+        "detail": "_sample_rate defaults to 0 and is only assigned in setup(). An early binary frame from Vonage would invoke the resampler with target rate 0, producing errors or garbage and yielding InputAudioRawFrame with sample_rate=0. Guard against pre-setup invocation or initialize lazily.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "57-72, 119-133",
+        "flagged_by": [
+          "generic_3",
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Copyright header uses 2024-2025 on a new 2026 file.",
+        "detail": "The new vonage.py header reads Copyright (c) 2024-2025, Daily but the file is being added in 2026. Align with the repo convention for new files added this year and use ASCII hyphen for license-scanner compatibility.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "1-4",
+        "flagged_by": [
+          "generic_1",
+          "generic_4",
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The PR cleanly adds a VonageFrameSerializer and an opt-in fixed-size PCM packetization path to FastAPIWebsocketTransport, but several issues should be resolved before merge. The rename from audio_packet_bytes to fixed_audio_packet_size is a hard break without a deprecation alias, the advertised real-time pacing is not actually wired into the chunked send loop, and the trailing buffer is never flushed at end-of-stream (causing tail truncation and cross-session leakage). The packetization branch also over-broadly applies to any bytes payload rather than audio frames, and the Vonage serializer has a latent zero-sample-rate failure if deserialize runs before setup."
+  }
+}

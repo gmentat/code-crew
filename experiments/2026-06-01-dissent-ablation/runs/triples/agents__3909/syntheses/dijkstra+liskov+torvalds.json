@@ -1,0 +1,78 @@
+{
+  "task_id": "agents__3909",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "audio_format is derived from sample_rate via f-string with no validation against STTAudioFormat literal",
+        "detail": "The constructor casts f\"pcm_{sample_rate}\" to STTAudioFormat via typing.cast, bypassing the ADT. A caller passing sample_rate=11025 produces \"pcm_11025\", a value outside the declared Literal, which is then sent to the server. Validate sample_rate against the allowed set at construction and raise, or accept audio_format as the canonical input.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "82-128",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Fatal stream errors are raised inside recv_task but swallowed by a bare except, leaving the session spinning on a dead connection",
+        "detail": "_process_stream_event raises APIConnectionError on auth_error/quota_exceeded, but recv_task wraps the call in `except Exception: logger.exception(...)` and continues. The fatal error is both raised and suppressed. Re-raise APIConnectionError specifically (or set a termination flag) so the session can fail or reconnect deterministically.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-232, 396-412",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect loop has no termination function and never actually triggers on task failure",
+        "detail": "The outer while-True only loops when _reconnect_event is set, but nothing sets it on send/recv task failure. tasks_group.exception() is called to suppress errors with no backoff, no documented invariant, and no condition under which the loop terminates versus reconnects forever. Either wire reconnect to task failure with backoff or delete the scaffolding.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "208-273",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented VAD and duration parameter ranges are not enforced at construction",
+        "detail": "The docstring promises vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], and min_*_duration_ms in [50, 2000], but none are validated. Out-of-range values reach the server and surface as opaque WebSocket disconnects. Validate at __init__ and raise ValueError with the actual bounds, or remove the range claim from the docstring.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "76-107",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speech-segment invariant is fragile: END_OF_SPEECH depends on an empty committed_transcript that may never arrive",
+        "detail": "_speaking is mutated from _process_stream_event with no documented invariant. A committed_transcript with text keeps _speaking=True, and only an empty commit ends the segment; if the server drops or reconnect happens mid-segment, the flag survives and END_OF_SPEECH never fires. State the protocol contract and add a timeout-based fallback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-394",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No tests added; stateful streaming protocol shipped on a single manual run",
+        "detail": "The PR concedes tests were skipped because the suite has been broken since May 2025. For a WebSocket state machine (partial/committed/empty-commit, speaking flag, reconnect) this is exactly the surface that regresses silently. Add at least one unit test feeding canned WS messages through _process_stream_event and asserting the emitted event sequence.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is not ready to land. Two P0 bugs dominate: sample_rate is cast into the STTAudioFormat literal without validation, letting invalid pcm_* strings reach the server; and fatal APIConnectionErrors raised from _process_stream_event are swallowed by a bare except in recv_task, leaving the session spinning on a dead connection. Beyond those, the reconnect loop is effectively dead code with no termination condition, documented VAD/duration ranges are unenforced, the speech-segment invariant depends on an empty-commit terminator that may never arrive, and no tests were added for a stateful streaming protocol. Fix the validation, fix the error propagation, decide whether reconnect is real or scaffolding, and add at least one focused state-machine test before merging."
+  }
+}

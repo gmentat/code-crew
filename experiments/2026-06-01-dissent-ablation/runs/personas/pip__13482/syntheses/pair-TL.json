@@ -1,0 +1,74 @@
+{
+  "task_id": "pip__13482",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver.resolve() postcondition silently weakened; returned requirements may no longer be fully prepared.",
+        "detail": "The resolver used to guarantee every requirement had prepared=True and needs_more_preparation=False. That guarantee is removed and the obligation shifted to callers without documenting the new contract. Any caller (third-party, plugin, future command like lock) inheriting the old assumption gets a half-prepared state. Document the new postcondition on resolve() and on RequirementSet.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identical prepare_linked_requirements_more call copy-pasted into three commands instead of a shared helper.",
+        "detail": "download.py, install.py, and wheel.py each grew the same line, creating an implicit, unenforced precondition on every consumer of resolve(). A fourth command (e.g. lock) will forget. Push it back into resolve() behind a flag (dry_run=True) or extract one helper so the contract is enforced in one place.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-423",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist caches a metadata-only distribution that is never invalidated after the full download lands.",
+        "detail": "_fetch_metadata_only stores a metadata_dist in self._distribution. After prepare_linked_requirements_more performs the real download, get_dist() still returns the cached metadata-only dist. If the two diverge (RECORD, file list, install paths) callers get silently wrong behavior. Invalidate _distribution on full prep, or document that the cache wins and assert equivalence.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist/get_dist introduced without preconditions, postconditions, or invariants documented.",
+        "detail": "set_dist accepts any BaseDistribution with no docstring, no constraints on when calling is valid, and no statement of what callers may assume afterward. For a mutable cache touched by resolver, preparer, and installer, the spec is the contract. At minimum, document that it stores a metadata-only view, may be superseded, and is not thread-safe.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info now has two producers with no documented precedence, and the metadata path may use an unset source_dir.",
+        "detail": "direct_url_from_link(req.link, req.source_dir) populates download_info in _fetch_metadata_only when None, but in dry-run source_dir may be unset, especially for VCS URLs. Two producers (metadata path and full-download path) may also yield subtly different hashes/archive_info that pip lock and --report consumers depend on. Document precedence and test dry-run with VCS + --report.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage in the diff for the headline behavior change.",
+        "detail": "The point of the patch is that --dry-run no longer downloads full wheels. That is a one-line assertion in a functional test: run --dry-run against a wheel with PEP-658 metadata and assert the wheel bytes were not fetched. The diff ships zero tests. Add a test that fails without the patch and passes with it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the performance intent (defer full preparation out of resolve() so --dry-run and lock/--report can use metadata-only fetches) is sound, but the execution weakens contracts without writing them down. Resolver.resolve()'s postcondition is silently relaxed and the replacement step is copy-pasted across three commands instead of consolidated, creating an unenforced precondition future callers will forget. The new set_dist/get_dist cache has no invalidation when the real download lands \u2014 a correctness landmine \u2014 and download_info now has two producers with no documented precedence. The headline behavior also ships with no visible test. NEEDS-WORK: document the new contracts, invalidate the metadata-only dist on full prep, consolidate the call site, and add a dry-run regression test."
+  }
+}

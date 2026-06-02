@@ -1,0 +1,76 @@
+{
+  "task_id": "protocompile__645",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Same nil-guard boilerplate copy-pasted into ~20 accessors instead of pushed into one helper or the data structure",
+        "detail": "Every getter now opens with `var x T; if f != nil { x = f.field }; return seq.NewFixedSlice(x, ...)`. A single helper (e.g. `sliceOrNil(f, func(*File)[]T)`) or making the receiving types nil-tolerant would collapse each accessor to one line and state the 'nil receiver yields empty' invariant once. The panics were removed by adding a special case everywhere instead of removing the special case.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "180-365",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflection-driven zero test is too clever and silently skips methods that take arguments or expose Len()",
+        "detail": "testZeroAny walks NumMethod, filters to NumIn==1, and name-special-cases IsZero/ValueNodeIndex/Context. Accessors with parameters are never exercised, and any return type with a Len() int method passes the heuristic regardless of semantics. A boring explicit table of (name, func(T) any) cases would be longer but durable; at minimum add an allowlist so new accessors cannot silently escape coverage.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "92-137",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Imports.Transitive/Directs closures capture i and rely on empty-slice guard instead of bailing out on nil",
+        "detail": "When i==nil the slice is empty so the Indexer body never runs, but the mapper closures still capture i and dereference i.publicEnd / i.importEnd. The next refactor that drops the length guard will crash. Bail out early returning an empty Indexer when i==nil, or assert non-nil at the top, and document the 'last element is implicit descriptor.proto' invariant that Transitive's max(0,len-1) depends on.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-245",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex sentinel -1 on zero is inconsistent with the rest of the zero-value convention",
+        "detail": "Every other zero accessor returns the zero value of its return type; ValueNodeIndex returns -1, forcing callers to know two sentinels and the test to hard-code a name-based exception. Either encode the optionality in the type (an Index with Ok(), or (int, bool)) or return 0 and require IsZero checks. Pick one convention.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test mixed with ~20 behavioral nil-guard fixes in one commit makes future bisect useless",
+        "detail": "The change is at least two patches: add the zero-sweep test (red), then land each panic fix as its own diff. As submitted, a bisect on any future regression in File.Imports or similar accessors lands on 'add zero test', which is not the actual change. Split the commit.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two nil-zero idioms (`f == nil` vs `IsZero()`) coexist in the same package",
+        "detail": "*File methods guard with `f == nil`; value types like Type, Member, Oneof guard with `!t.IsZero()`. Both are reasonable but mixing them forces every maintainer to remember which type uses which convention. Pick one (e.g. always IsZero, with *File.IsZero defined as `f == nil`) so the rule is stated once.",
+        "file": "experimental/ir/ir_file.go, experimental/ir/ir_type.go",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the change is directionally correct and the new zero-value reflection test is a valuable structural check, but the implementation needs cleanup before landing. The dominant complaint (all three reviewers) is that the same nil-guard boilerplate was copy-pasted into ~20 accessors instead of pushed into one helper or the receiving types. The reflection test itself is too clever \u2014 it silently skips methods with arguments and trusts any Len() method as a length probe. Imports.Transitive/Directs rely on an empty-slice guard while their closures still capture and dereference the nil receiver, which is fragile. Verdict: needs-work \u2014 split the commit, unify the nil idiom behind one helper, and tighten the test from reflection-discovery to an explicit table."
+  }
+}

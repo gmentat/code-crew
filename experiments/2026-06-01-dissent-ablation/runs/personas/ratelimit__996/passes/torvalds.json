@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Stats counters allocated but discarded on every GetLimit call \u2014 leaks/inflates the stats store per request",
+        "detail": "When the enhanced key differs from FullKey, the code calls statsManager.NewStats twice (once via NewRateLimit with the old FullKey, then again for enhancedKey) and throws the first away. GetLimit runs on the hot path per request; this allocates a Stats struct and registers counters in the store every call. That's not a metric \u2014 that's a leak. Build the right key once, allocate once.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared RateLimit's Stats field on every request, which is a data race",
+        "detail": "rateLimit is a pointer pulled from the loaded config tree and shared across concurrent requests. Reassigning rateLimit.Stats and rateLimit.FullKey inside GetLimit without a lock is a textbook race. Two requests with different runtime values will stomp each other's Stats pointer. Stats must be resolved per-call into a local, not written back into config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three branches of the value_to_metric builder collapse into one \u2014 bad taste, special cases everywhere",
+        "detail": "The matchedViaWildcard / matchedUsingValue / default-key arms all do the same thing: if valueToMetric or matched-with-value, append key + '_' + value; else append key. That's a six-line block, not thirty. The current shape special-cases what should be general. This is the linked-list-head case \u2014 eliminate it, don't decorate it.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature duplicates detailed_metric with awkward precedence rules instead of generalizing it",
+        "detail": "detailed_metric already does 'put runtime value into the metric key.' This adds a parallel mechanism with its own state, its own builder, and a rule that detailed_metric wins. Two flags doing nearly the same job is how config surfaces rot. Either extend detailed_metric with a per-level scope, or state precisely why a second axis is required. The README hand-waves it.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile \u2014 use field names",
+        "detail": "Two call sites construct rateLimitDescriptor{map{}, rateLimit, nil, descriptorConfig.ValueToMetric} positionally. Adding any field in the future silently shifts arguments and breaks both sites with no compile error if types align. Use named fields. The maintainer six years from now will thank you.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead 'No next descriptor found' branch appends to a key that is then discarded",
+        "detail": "If nextDescriptor is nil at this level, the loop returns earlier with rateLimit unchanged, so the trailing append to valueToMetricFullKey is never observed. Either remove the branch or document why the deterministic append matters. Right now it's noise that suggests the author wasn't sure of the control flow.",
+        "file": "src/config/config_impl.go",
+        "lines": "383-387",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The feature is reasonable but the implementation has two real bugs: GetLimit allocates a throwaway Stats on every request and mutates a shared config object's Stats/FullKey without locking, which is a race under concurrent traffic. The key-builder is also bad-taste \u2014 three branches that compute the same thing, which collapse to one. Worse, this is a near-duplicate of detailed_metric with a hand-waved precedence rule; the right patch probably extends detailed_metric rather than adding a parallel axis. Fix the race, fix the allocation, collapse the special cases, and justify why this isn't just detailed_metric with scope."
+  }
+}

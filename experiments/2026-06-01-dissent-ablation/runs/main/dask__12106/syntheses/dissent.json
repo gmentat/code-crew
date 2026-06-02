@@ -1,0 +1,329 @@
+{
+  "task_id": "dask__12106",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "Whether the shard-misalignment condition should warn or raise (and what class to use)",
+        "positions": [
+          {
+            "persona": "knuth",
+            "position": "Decide before merging: either `warnings.warn(msg, PerformanceWarning)` with pytest.warns, or raise a real Exception class (e.g., ValueError or a dedicated subclass). The current `raise PerformanceWarning` is a category error."
+          },
+          {
+            "persona": "hickey",
+            "position": "The policy is the design question; the code picks 'raise' but names the class 'Warning', revealing unresolved design. Pull validation into a pure function that returns data; let to_zarr decide policy. Don't ship the ambiguity."
+          },
+          {
+            "persona": "torvalds",
+            "position": "Pick one \u2014 warn or error \u2014 and name the class accordingly. The patch isn't ready until the question is answered deliberately with a doc note and a matching name."
+          },
+          {
+            "persona": "liskov",
+            "position": "Decide the contract first (warn-and-proceed vs raise-real-exception), document it on to_zarr, then align implementation, exported-symbol status, and test names. Raising a Warning subclass strengthens postcondition without spec."
+          },
+          {
+            "persona": "pike",
+            "position": "Pick one: warn and continue with shard-aligned chunks, or raise a real Exception with a clear name. Don't conflate them. Convention (and rest of dask) is warnings.warn for PerformanceWarning."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "REFUSED until policy is stated: choose (a) shard shape wins silently with warning, (b) config wins with warning, or (c) conflict is hard ValueError. Choose, document, then implement."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the patch should be split into separate commits/PRs",
+        "positions": [
+          {
+            "persona": "torvalds",
+            "position": "The diff does two things \u2014 hoisting dask_write_chunks out of both branches is an unambiguous cleanup that should land independently; the error/warning behavior is the part that needs the design argument and should be its own patch. THREE-PATCHES \u2014 or at least TWO."
+          },
+          {
+            "persona": "hickey",
+            "position": "Pull the validation out as a pure function returning data; then let to_zarr decide whether that data is a warning or fatal error. (Refactoring/separation suggested but not framed as splitting the PR.)"
+          },
+          {
+            "persona": "pike",
+            "position": "Lift the alignment logic into one small filter function \u2014 (dask_chunks, zarr_write_chunks, dtype) -> (aligned_chunks, optional_warning_or_raise). (Refactoring suggested but not framed as splitting the PR.)"
+          }
+        ]
+      },
+      {
+        "topic": "Whether the region branch is correctly covered by the alignment check",
+        "positions": [
+          {
+            "persona": "dijkstra",
+            "position": "The region branch silently skips the audit \u2014 the check runs on dask_write_chunks derived from z.shape, but the region branch then computes a different chunking via new_blockdim. Verify the postcondition on the chunking that will actually be written."
+          },
+          {
+            "persona": "knuth",
+            "position": "The region branch happens to work because dask_write_chunks is already keyed to z.shape, but the contract is under-stated \u2014 needs a comment restating that dask_write_chunks is the desired full-array chunking that gets carved into a region."
+          }
+        ]
+      },
+      {
+        "topic": "Whether `safe_chunk_size` formula is correctly computed and presented",
+        "positions": [
+          {
+            "persona": "knuth",
+            "position": "Formula ignores broadcasting nuances; np.prod returns numpy scalar that may embed `np.int64(...)` in user-facing config advice; the check is per-axis divisibility but the recommendation is total bytes \u2014 they should agree and be stated."
+          },
+          {
+            "persona": "hickey",
+            "position": "The formula is dishonest about what it guarantees \u2014 setting chunk-size to safe_chunk_size + 1 may still land on a misaligned chunk because the actual constraint is per-axis divisibility, not total bytes."
+          },
+          {
+            "persona": "torvalds",
+            "position": "np.prod gives elements then multiplied by itemsize gives bytes (fine), but `array.chunk-size` is parsed as a units string like '128MiB', not a raw int \u2014 the suggested copy-pasteable fix is the wrong shape."
+          },
+          {
+            "persona": "liskov",
+            "position": "Per-axis violation conflated with whole-shard byte size \u2014 invariant being checked is per-axis but remediation is global; message must explicitly say safe_chunk_size is whole-shard size."
+          },
+          {
+            "persona": "pike",
+            "position": "zarr_write_chunks is a tuple-of-tuples shaped for normalize_chunks; np.prod over that may misbehave or produce wrong-meaning value. Number printed will be incorrect or confusing."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "Dimensionally incoherent: per-axis loop emits a per-axis complaint but the recommendation is total bytes across all axes. State the postcondition first, then write the formula."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "raise PerformanceWarning(msg) raises a Warning subclass as a hard exception \u2014 semantically wrong / contract-confused",
+        "detail": "PerformanceWarning is a Warning subclass; the convention (and rest of dask/numpy/pandas) is to emit it via warnings.warn, not raise it. The PR description itself asks 'Would an exception be appropriate here?' \u2014 the author has not decided. Either use warnings.warn(msg, PerformanceWarning) with pytest.warns, or raise a real Exception class (e.g., ValueError or dedicated subclass). The current form lies about whether callers can proceed and strengthens to_zarr's failure postcondition without specification.",
+        "file": "dask/array/core.py",
+        "lines": "~3905-3925",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Unreachable `break` after `raise` \u2014 dead code revealing unstated loop invariant / confused intent",
+        "detail": "Inside the per-axis loop, `raise PerformanceWarning(msg)` is immediately followed by `break`. The break can never execute. This is a fossil of an unresolved design: 'warn-and-continue checking other axes' vs 'fail-fast on first misaligned axis'. State the loop invariant and remove the dead statement \u2014 or restructure to collect all misalignments and report once.",
+        "file": "dask/array/core.py",
+        "lines": "~3922-3925",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "safe_chunk_size math/units are wrong-shape: np.prod over zarr_write_chunks + max(1, itemsize), formatted into a units-parsed config key",
+        "detail": "`safe_chunk_size = np.prod(zarr_write_chunks) * max(1, z.dtype.itemsize)` has multiple problems: (a) zarr_write_chunks may be a tuple-of-tuples from _get_zarr_write_chunks, making np.prod produce a wrong-meaning value (Pike); (b) max(1, itemsize) is cargo-cult defense against an impossible zero-itemsize case (Torvalds, Liskov, Dijkstra); (c) the suggested `dask.config.set({'array.chunk-size': N})` snippet uses a raw int where dask config parses byte strings like '128MiB' (Torvalds, Knuth); (d) the printed number will likely be incorrect or misleading. Compute and format bytes correctly with units, or drop the copy-pasteable fix.",
+        "file": "dask/array/core.py",
+        "lines": "~3909-3923",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "SPEC-MISSING: to_zarr's contract under shard/config conflict is undefined; PR description openly asks the policy question and code answers ambiguously",
+        "detail": "The PR author explicitly asks what should happen when global array.chunk-size config competes with shard shape. Downstream callers (xarray, CI pipelines) need to know whether to_zarr may now raise, warn, or silently proceed. Document the precondition (config-derived chunk size must be >= shard size, or shard size wins) and the postcondition (what the rechunk guarantees) in the docstring. Pick a policy (warn-and-continue, refuse-and-raise, or silent override) and align the class name, control flow, test name/assertion, and docstring.",
+        "file": "dask/array/core.py",
+        "lines": "~3870-3935",
+        "flagged_by": [
+          "liskov",
+          "hickey",
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Boolean precedence: `not nominal_dask_chunk_size % zw == 0` reads backwards / forces operator-precedence reasoning",
+        "detail": "Parses as `not ((X % Y) == 0)`, which happens to be intended, but the reader has to consult operator precedence. Write `nominal_dask_chunk_size % zw != 0` or parenthesize. Same precedence, same result, but obviously what it means.",
+        "file": "dask/array/core.py",
+        "lines": "~3902-3911",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Only `dw[0]` is audited per axis \u2014 under-stated invariant, ignores non-uniform chunks",
+        "detail": "`nominal_dask_chunk_size = dw[0]` assumes uniform-prefix chunks with possible smaller tail; normalize_chunks does not formally promise this. If future auto_chunks changes or pre-rechunked input produce non-uniform tuples, interior misaligned chunks would be silently missed. Either check `all(c % zw == 0 for c in dw[:-1])` (excluding the final remainder), assert uniformity, or document the precondition. The current check is weaker than the safety argument requires.",
+        "file": "dask/array/core.py",
+        "lines": "~3899-3911",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Safety check is COMPLECTED with the rechunk path \u2014 validation should be a pure function returning data, not policy",
+        "detail": "The added block does three intertwined things inline in to_zarr: computes candidate dask chunking, walks axes checking shard-alignment, and constructs user-facing error message with recommended config value. Extract as a pure function (e.g., `_validate_shard_alignment(dask_chunks, zarr_write_chunks, dtype) -> AlignmentProblem | None`) that returns data; then to_zarr decides whether that becomes a warning, an error, or a silent re-plan. Pike suggests `_align_dask_chunks_to_shards(...) -> (aligned_chunks, optional_warning)` as a small filter. Right now policy and mechanism are welded together.",
+        "file": "dask/array/core.py",
+        "lines": "~3892-3925",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "safe_chunk_size conflates per-axis violation with whole-shard byte size \u2014 dimensional/scope mismatch",
+        "detail": "The loop iterates per axis complaining axis `ax` is misaligned with `zw`, but safe_chunk_size is np.prod across all axes times itemsize \u2014 the size of one whole shard. Either the postcondition is `array.chunk-size >= one full shard in bytes` (and the loop should not be per-axis), or it's per-axis (and the formula is wrong). Also, setting chunk-size to safe_chunk_size + 1 may still land on misaligned chunks since the real constraint is per-axis divisibility, not total bytes. State the postcondition, then write the formula.",
+        "file": "dask/array/core.py",
+        "lines": "~3905-3923",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Region branch may escape the alignment audit \u2014 the check runs on chunks different from what is actually written",
+        "detail": "The per-axis audit runs before the `if region is None` split against dask_write_chunks derived from z.shape, but the region branch then computes its own chunking via new_blockdim(s, c, r). The very property the warning is supposed to guarantee \u2014 that chunks written to the store are shard-aligned \u2014 is being checked against a sibling computation, not the writes. Verify the postcondition on the chunking that will actually be written (Dijkstra), or at least restate the contract in a comment that dask_write_chunks is the full-array chunking carved into a region (Knuth).",
+        "file": "dask/array/core.py",
+        "lines": "~3889-3935",
+        "flagged_by": [
+          "dijkstra",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test asserts via pytest.raises on a class named *Warning* \u2014 codifies the contract confusion",
+        "detail": "`test_zarr_risky_shards_warns` uses `pytest.raises(PerformanceWarning, ...)`. The test name says 'warns'; the assertion is 'raises'; the class is 'Warning'; the PR description says 'performance warning'. Three or four stories disagree. Either rename to `_raises` and use a real exception class, or switch production code to warnings.warn and use pytest.warns. The test pins down the wrong contract.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~5193-5216",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch does two things \u2014 hoist dask_write_chunks out of both branches (cleanup) and add the alignment check (policy) \u2014 should be split",
+        "detail": "The diff cleanly hoists `dask_write_chunks` out of the region/no-region branches (an unambiguous win) and introduces a new error path (the part that needs design resolution). Splitting would let the cleanup land while the warning-vs-error question gets sorted.",
+        "file": "dask/array/core.py",
+        "lines": "3889-3933",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Error message buries the lede / mis-attributes the cause and remedy",
+        "detail": "The misalignment only happens when global `array.chunk-size` is smaller than the shard. The message should lead with the cause ('Your dask config array.chunk-size of X bytes is smaller than the Zarr shard size of Y bytes') then the remedy (Pike). Additionally the message uses 'chunk (or shard)' \u2014 compute the right noun once based on whether z has shards (Hickey). And the suggested numeric value should match the per-axis divisibility check it claims to fix (Knuth).",
+        "file": "dask/array/core.py",
+        "lines": "~3915-3922",
+        "flagged_by": [
+          "pike",
+          "hickey",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test asserts only `chunksize` (first block) \u2014 same under-statement as production check",
+        "detail": "`assert all(c % s == 0 for c, s in zip(result.chunksize, zarr_shard_shape))` only checks the nominal block size on each axis. Assert the full property: for every axis, every block except possibly the last is a multiple of the shard size, and the last block is <= shard size or aligned to array edge. That's the invariant the production code should guarantee.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~5197-5212",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test imports PerformanceWarning from dask.array.core \u2014 boundary not stated as public API",
+        "detail": "If this symbol is intended public API, it should be exported via __all__ and documented; if internal, the test reaches across the module boundary. Decide the boundary or use the standard warnings/exception machinery so the test doesn't pin an internal name.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "~35",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing literate comment explaining why `previous_chunks=zarr_write_chunks` is the load-bearing trick",
+        "detail": "The PR description explains the key insight \u2014 auto_chunks 'nearly always concatenates the previous_chunks argument', so passing the shard shape yields shard-multiple chunks. This insight belongs in a comment above the normalize_chunks call. A future reader will see `previous_chunks=zarr_write_chunks` and wonder why the *shard* shape is being labeled 'previous'. One sentence resolves it.",
+        "file": "dask/array/core.py",
+        "lines": "~3892-3897",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable-name thicket: zarr_write_chunks / dask_write_chunks / nominal_dask_chunk_size / zw / dw / zarr_chunk_shape / zarr_shard_shape",
+        "detail": "Within ~30 lines the code carries four near-synonyms, plus single-letter zw/dw in the loop body and additional names in the tests. Consider `target_chunks` (what dask will rechunk to) and `shard_chunks` (the zarr write granularity); reused name `zarr_write_chunks` is overloaded between 'shard shape' and 'chunk shape' depending on whether sharding is enabled, making the 'chunk (or shard)' message ambiguous.",
+        "file": "dask/array/core.py",
+        "lines": "~3892-3925",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`max(1, z.dtype.itemsize)` defends against an impossible case (cargo-cult guard)",
+        "detail": "itemsize is never zero for any real numpy dtype that zarr can write. The max(1, ...) is defensive coding without a stated precondition; if a zero-itemsize dtype somehow appeared the formula would silently claim 1 byte is enough \u2014 which is worse than failing. Drop the guard or document the precondition it protects.",
+        "file": "dask/array/core.py",
+        "lines": "~3906-3911",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`if len(dw) >= 1:` guard is always true for non-empty arrays \u2014 dead code",
+        "detail": "normalize_chunks never returns an empty tuple for an axis with shape > 0. The guard either protects nothing or protects a zero-shape case the rest of the function doesn't handle. Drop it or replace with an explicit precondition.",
+        "file": "dask/array/core.py",
+        "lines": "~3900-3909",
+        "flagged_by": [
+          "torvalds",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Error message gives bytes as a raw int but `array.chunk-size` is typically a units-parsed string",
+        "detail": "`dask.config.set({'array.chunk-size': {safe_chunk_size}})` interpolates a bare integer. dask's config typically expects strings like '128MiB' parsed by parse_bytes. Show the human-readable form (format_bytes) or state the unit literally (e.g., '7200B'), or just say 'set array.chunk-size to at least N bytes' without the copy-paste line.",
+        "file": "dask/array/core.py",
+        "lines": "~3915-3922",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "All six reviewers unanimously flag the same P0: `raise PerformanceWarning(msg)` raises a Warning subclass as a hard exception, followed by an unreachable `break`, while the PR description itself openly asks 'Would an exception be appropriate here?' \u2014 the test compounds the confusion by being named `_warns` but asserting `pytest.raises`. The panel demands the author choose a policy (warn-and-continue vs raise-real-exception) and align the class name, control flow, test, and docstring to it before merge. Multiple reviewers (Torvalds, Pike, Hickey, Liskov, Dijkstra) also find the `safe_chunk_size` recommendation wrong-shape \u2014 dimensionally per-axis-vs-whole-shard incoherent, possibly computed over a tuple-of-tuples, formatted into a raw int where dask config expects a units string, and guarded by a cargo-cult `max(1, itemsize)`. The strongest preserved disagreement is on remediation: Torvalds wants the patch *split* (the dask_write_chunks hoist is a clean win that should land independently from the disputed alignment check), Hickey and Pike want the validation *extracted* into a pure function returning data so to_zarr decides policy, Dijkstra wants the *spec* written first then code aligned to it, and Knuth/Liskov want the *invariant* (only dw[0] is audited, region branch may escape) stated and verified against the chunks actually written. The core algorithmic insight \u2014 pass shard shape as `previous_chunks` to normalize_chunks \u2014 is endorsed by the panel; what fails review is the safety branch that surrounds it."
+  },
+  "raw": ""
+}

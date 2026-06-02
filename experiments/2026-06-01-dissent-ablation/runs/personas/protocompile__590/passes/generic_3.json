@@ -1,0 +1,70 @@
+{
+  "name": "generic_3",
+  "task_id": "protocompile__590",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panicked likely propagates a nil result to callers expecting non-nil",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the code returns nil. The run() signature returns *result and callers downstream almost certainly dereference it (e.g., output.done, output.Fatal). This swaps a nil-deref in waitUntilDone for a nil-deref in the caller of run(). The leader-panic recovery needs to synthesize a Fatal result, not return nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race still exists between CompareAndSwap failure and t.result.Load()",
+        "detail": "After CompareAndSwap(nil, output) fails, another goroutine could store a non-nil result and then the leader could panic and Store(nil) before this goroutine's Load() runs. The check `output == nil` would pass, but if the leader stores nil between Load() and use elsewhere, the race window is merely narrowed, not closed. A proper fix needs synchronization, not a single Load snapshot.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection path lost its closed(output.done) precondition logic in the pending branch",
+        "detail": "Previously the cycle check ran only when output.done was not yet closed (pending). The new code preserves that guard, but checkCycle is now a method that could be called incorrectly from future callers without that guard. Document the precondition or assert it inside checkCycle to prevent misuse.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' appears to have a typo (did \u2192 didn't)",
+        "detail": "The comment should read 'Leader panicked but we did NOT see a result' \u2014 the condition is `output == nil`, meaning no result was observed. This is load-bearing documentation for the race fix; the typo will confuse future readers debugging this exact race condition.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "First branch passes t.result.Load() but waitUntilDone signature changed; output may still be racy",
+        "detail": "At line 443 (pending branch), the call `t.waitUntilDone(caller, output, async)` uses the `output` variable captured at line 442 via `t.result.Load()`. If the leader panics and Stores nil between that Load and the select on output.done, the captured `output` is still valid (non-nil), but its `done` channel may never close. The select also waits on caller.ctx.Done(), so it won't deadlock forever \u2014 confirm this is the intended semantics.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-447",
+        "flagged_by": [
+          "generic_3"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowed variable `output` in run() reduces readability",
+        "detail": "Inside the failed-CAS branch, `output := t.result.Load()` shadows the outer named return `output`. While the inner scope is short, shadowing a named return inside a function that uses defer/recover patterns elsewhere in the file is fragile. Rename to `existing` or `winner` for clarity.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "generic_3"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR attempts to fix a nil pointer dereference race when a leader goroutine panics and resets t.result to nil. The fix narrows the race window by snapshotting t.result.Load() before passing into waitUntilDone, but two serious concerns remain: returning nil from run() likely just moves the nil-deref to the caller's frame, and the race between CAS-fail and Load is narrowed but not eliminated. A comment typo (\"did\" vs \"did not\") in the load-bearing recovery path will mislead future debuggers. The cycle-detection refactor itself looks clean and behavior-preserving."
+  }
+}

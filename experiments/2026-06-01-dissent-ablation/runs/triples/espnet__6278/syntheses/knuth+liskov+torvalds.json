@@ -1,0 +1,78 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring documents max_steps/val_interval but code reads max_step and never honors val_interval",
+        "detail": "The constructor docstring promises keys max_steps, log_interval, val_interval, save_interval, but __init__ reads trainer_args['max_step'] (singular) and validation runs every save_interval. Callers writing configs to the documented contract will KeyError on launch or get the wrong cadence. Reconcile names, honor val_interval, and assert required keys at __init__.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-75",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery is fragile: name-based sort with no atomicity guard and brittle int() parse",
+        "detail": "load_checkpoint filters any directory containing 'step_' and parses int(name.split('step_')[-1]), which crashes on names like 'step_100_backup' and silently resumes from half-written directories after a mid-save crash. Tighten the predicate (startswith('step_') or regex) and write a 'latest' marker on successful save so resume verifies completeness.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "run() training loop has no inner max_step check; overshoots or mis-saves at boundary",
+        "detail": "The outer while loop advances global_step by save_interval inside train() with no inner check, so it overshoots max_step by up to save_interval-1 when the interval does not divide evenly. On resume at exactly max_step the loop exits without saving final state. State the loop invariant and enforce the bound inside train().",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-176",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has confusing ownership: mutates tensors in place and also rebinds dict entries, with no key-set consistency check across ranks",
+        "detail": "The function divides tensors in place then reassigns stats[key] = stats[key] / world_size, so callers holding the original tensor see partial mutation. Worse, SUM/world_size is only a correct mean if every rank contributes every key; a missing key on one rank silently produces wrong values. Make the contract pure or destructive (not both) and assert key alignment.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-160",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid_*_specifier parsing uses whitespace split with no grammar validation, despite paths embedded in tokens",
+        "detail": "train.py calls .split() on valid specifiers whose documented format is 'task:name:data_json[:factor]' where data_json is a path that may contain spaces. The grammar lives only in --help text with no parser. One space in a path produces two bogus specs keyed by raw strings. Lift the grammar into a small typed parser and validate at startup.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "187-217",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_load_checkpoint silently falls through when an explicit resume_path is missing",
+        "detail": "If the caller passes a resume_path that does not exist, the code falls through to 'start from step 0' rather than raising. A user expecting to resume a long training run will silently retrain from scratch and only notice hours later. Raise FileNotFoundError when resume_path is explicit and missing; only fall through when no resume was requested.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-122",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel converges on three blocking correctness issues: a docstring/code key mismatch (max_steps vs max_step, plus an unused val_interval) that will KeyError or mis-schedule on first run; checkpoint discovery that parses directory names fragilely with no atomicity guard against half-written saves; and a training loop with no stated max_step invariant that overshoots or skips the final save. Secondary but worth fixing before this becomes a long-lived module boundary: _all_reduce_stats has confusing ownership and an unchecked cross-rank key precondition, the valid specifier parser whitespace-splits path-bearing tokens with no grammar validation, and _load_checkpoint silently retrains from scratch when an explicit resume_path is missing."
+  }
+}

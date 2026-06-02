@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Client is recreated per invocation inside async with \u2014 wasteful and slow.",
+        "detail": "Every LLMContextFrame opens a fresh bedrock-agentcore client via aioboto3 Session().client(...). That's TLS setup, credential resolution, and teardown on every turn. Create the client once at startup (or lazily on first use) and reuse it. This is hot-path code in a voice pipeline.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-207",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates PEP 8 and the surrounding codebase's snake_case voice.",
+        "detail": "Every other arg in __init__ is snake_case (aws_access_key, aws_region, etc.). agentArn is camelCase because the AWS API uses it. Match the codebase's voice \u2014 name it agent_arn and pass it through as agentRuntimeArn at the call site. The diff is supposed to look like it belongs.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "120, 152, 207",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer crashes on non-JSON lines.",
+        "detail": "json.loads(response_line) has no try/except. A malformed SSE line, an error payload, or a keepalive comment from the agent kills the whole invocation with an unhandled JSONDecodeError. The warning above logs and continues for bad prefixes; this should do the same. Either catch or return None on parse failure.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "85-87",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout-based response close is fragile and racy.",
+        "detail": "_push_text_frame schedules a 1-second timer to emit LLMFullResponseEndFrame, then process_frame also emits one at end-of-stream. If the timer fires between the last text frame and end-of-stream cleanup, you double-close or interleave Start/End frames on the next chunk. The stream has a real end signal \u2014 use it, don't paper over it with sleep(1.0).",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "175-201, 245-249",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bumping aioboto3 from 15.0 to 15.5 is bundled into a feature patch \u2014 should be its own commit.",
+        "detail": "pyproject.toml + uv.lock churn for aioboto3/aiobotocore/boto3/botocore/s3transfer is a dependency bump that affects every aws consumer in the repo. It belongs in a separate patch with its own justification (does the new processor actually require 15.5? say so). THREE-PATCHES.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reading env vars in __init__ hides configuration and silently defaults region to us-east-1.",
+        "detail": "The boto session resolves credentials and region on its own \u2014 passing aws_access_key_id=None etc. is fine; manually os.getenv-ing and defaulting region to us-east-1 overrides AWS_DEFAULT_REGION and ~/.aws/config behavior users expect. Let boto resolve, or document the override clearly.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "157-162",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The patch does a real thing and the code is mostly readable, but it has the smell of a first cut: a new AWS client built per invocation, a camelCase argument bolted onto a snake_case codebase, an unguarded json.loads on streamed responses, and a sleep-based end-of-response timer fighting with the actual end-of-stream cleanup. Bundling a multi-package aioboto3 bump into the same patch is THREE-PATCHES \u2014 split it. Fix the client lifecycle, rename agentArn to agent_arn, harden the JSON parsing, replace the timeout dance with deterministic bookends, and resubmit."
+  }
+}

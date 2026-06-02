@@ -1,0 +1,124 @@
+{
+  "persona": "torvalds",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "sample_rate is trusted blindly and concatenated into the audio_format literal",
+        "detail": "`audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")` will happily produce 'pcm_12345' if someone passes 12345. The type declares a finite set of formats; the runtime doesn't enforce it. The docstring claims 8k-48k support but nothing rejects 11025 or 32000 or garbage. Validate sample_rate against STTAudioFormat options at __init__ and fail loud, or the server will reject mid-stream and the user gets a useless error.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "118-120",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Range constraints in the docstring are not enforced in code",
+        "detail": "Docstring says vad_silence_threshold_secs must be 0.3-3.0, vad_threshold 0.1-0.9, min_speech/silence_duration_ms 50-2000. None of that is checked. If the caller passes 0.0 or 99 it gets sent to the server as a query param and you get whatever the server decides. Either check the ranges and raise, or stop lying in the docstring. Pick one.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "98-115",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "APIConnectionError raised inside _process_stream_event is swallowed by the surrounding try/except",
+        "detail": "recv_task does `try: self._process_stream_event(parsed) except Exception: logger.exception(...)`. So when an ElevenLabs auth_error or quota_exceeded arrives and the code raises APIConnectionError, it gets logged and the loop keeps running. The whole error-handling branch at the bottom of _process_stream_event is dead. Either don't catch Exception in recv_task, or set a flag/cancel the stream from inside _process_stream_event. Right now auth failure is a log line, not a failure.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "236-244, 397-413",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query string built with f-strings and no URL encoding",
+        "detail": "language_code goes straight into the query: `params.append(f\"language_code={self._language}\")`. If someone passes 'en-US' or anything with a space or ampersand, you get a malformed URL. Use urllib.parse.urlencode or yarl. This is basic.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "284-302",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_recognize_impl raises NotImplementedError - this likely breaks the STT base contract",
+        "detail": "The base STT class expects `_recognize_impl` to work. Raising NotImplementedError means anyone who calls `recognize()` on STTv2 gets a crash instead of a useful error or a fallback. If the v2 API genuinely cannot do non-streaming, either (a) override `capabilities` so callers know, or (b) buffer the input and run a one-shot stream internally. Don't ship a half-implementation that crashes on a documented base-class method.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "162-170",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_reconnect_event is declared but nothing ever sets it",
+        "detail": "There's a whole reconnect dance in `_run` waiting on `self._reconnect_event` and clearing it - but nothing in this file ever calls `self._reconnect_event.set()`. So the entire reconnect path is dead code that was copied from another plugin. Either wire up reconnect on transient WS errors, or rip the reconnect machinery out. Don't leave half-working ceremony in a streaming loop.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "183, 252-279",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three patches submitted as one",
+        "detail": "This diff is: (1) add type literals to models.py, (2) add STTv2 + SpeechStreamv2 in stt_v2.py, (3) re-export in __init__.py + example. That's fine to land together because they're tightly coupled, but the commit message is one line and doesn't explain *why* a separate STTv2 class instead of modifying STT. The PR description asks the maintainer to decide the architecture. That's backwards - propose the answer, defend it in the message, let the maintainer reject if wrong.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowing builtin name `stt` as a parameter",
+        "detail": "`def __init__(self, *, stt: STTv2, ...)` shadows the imported `stt` module inside SpeechStreamv2. It happens to work because the only references inside __init__ are to the parameter, but it's a readability trap. Rename the parameter to `stt_instance` or pass it positionally. Costs nothing.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-182",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTModels Literal has a trailing comma that makes it look like a typo",
+        "detail": "`STTModels = Literal[\"scribe_v2_realtime\",]` - the trailing comma in a single-element Literal is legal but looks broken. Either drop the comma or add an explanatory comment that more models are coming. As-is, the next reader will assume it's an error and 'fix' it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No tests, justified by 'tests are broken'",
+        "detail": "The author admits no tests and points at another PR (#3245) that also shipped without tests. That's not a reason, that's a precedent for technical debt. At minimum add a unit test that exercises _process_stream_event with the four known message_type values plus an unknown one - it needs no network, no API key, no fixtures. Five lines of arrange-act-assert per case. Refusing to write the test you can write because you couldn't write the one you couldn't is the wrong trade.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded 'en' fallback in SpeechData language",
+        "detail": "`language=self._language or \"en\"` - if the model is processing French audio with no language code set, you'll label the output as English. Either pass the model's reported language back (if the API returns it), pass None, or stop pretending you know.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "335-339",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch adds a workable WebSocket streaming STT for ElevenLabs Scribe v2 and follows the Deepgram-style v2 shape, so the overall shape is fine. But it ships with three real bugs that would bite production: error messages from ElevenLabs (auth, quota) are raised inside a blanket except and silently logged instead of failing the stream; the reconnect_event machinery is wired up but never triggered (dead ceremony); sample_rate and the documented VAD range constraints are not validated, so callers can produce server-side rejects from client-side garbage. The query string is also built without URL encoding, which is a basic miss. NEEDS-WORK: fix the swallowed APIConnectionError, either implement reconnect or remove the scaffolding, validate the public inputs you documented, and at minimum add a unit test for _process_stream_event - it needs no network and there is no excuse for skipping it."
+  },
+  "raw": ""
+}

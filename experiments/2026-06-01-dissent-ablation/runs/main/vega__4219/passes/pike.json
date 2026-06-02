@@ -1,0 +1,64 @@
+{
+  "persona": "pike",
+  "task_id": "vega__4219",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "coerceNumber silently substitutes 0 for null/undefined, changing prior behavior",
+        "detail": "The old panLinear/zoomLinear used toNumber directly as the lift function. toNumber returns null for null/undefined/NaN inputs, which then flowed through arithmetic producing NaN \u2014 a loud signal. The new coerceNumber: x => toNumber(x) ?? 0 quietly converts those to 0, which is a real behavior change disguised as a typing refactor. The data shape (number | null) is being lied about at the boundary. Either keep returning NaN/null on bad input or error early like the empty-domain check; do not invent a zero.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "30-31",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "isNonEmpty type guard is unused beyond a runtime check the error() call already provides",
+        "detail": "isNonEmpty narrows domain to NonEmptyArray<T>, but the following lines read domain[0] and peek(domain) without exploiting the narrowing \u2014 peek's new overload still returns T | undefined for the readonly T[] signature unless the caller passes a NonEmptyArray literal. The guard buys a runtime check but no compile-time leverage here. Either pass the narrowed array into peek so the non-undefined overload fires, or drop the type guard and just write `if (domain.length === 0) error(...)`. Right now it is ceremony around a length check.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "10-12, 33-35, 58-60",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "panLog/zoomLog read domain[0] before the empty-domain guard runs in the helper",
+        "detail": "panLog and zoomLog compute `Math.sign(domain[0])` before calling pan/zoom, so on an empty domain they evaluate Math.sign(undefined) = NaN, then enter the helper which throws. The thrown error still wins, but the sign computation on undefined is a code smell and means the guard is not actually first. Hoist the empty check to the exported functions, or accept it but note that the data structure (a possibly-empty array) is being threaded through three call sites that each have to remember to be defensive. A NonEmptyArray parameter type at the public boundary would make the algorithm self-evident and delete the guards.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "42-45, 67-70",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public function signatures accept number[] but the contract is non-empty \u2014 wrong data structure at the boundary",
+        "detail": "Data dominates. The exported panLinear/zoomLinear/etc. all advertise `domain: number[]`, then immediately runtime-check that it is non-empty. If the contract is non-empty, the type should say so: `domain: [number, ...number[]]` (or a named NonEmptyArray<number>). That pushes the check to the caller's compile step, lets peek pick its non-undefined overload automatically, and removes the need for isNonEmpty and the error() call inside the helpers. The current shape is the algorithm fighting the data.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "33, 40, 44, 48, 52, 58, 65, 69, 73, 77",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Domain alias as [number, number] is fine; consider the same precision for inputs",
+        "detail": "The return type Domain = [number, number] is exactly the right data-structure-first move: it says what the function produces. The asymmetry is that inputs are loose (number[], Anchor) while outputs are tight. Tightening the input side would make the helpers shrink to the obvious arithmetic with no guards. This is a nudge, not a blocker.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "6-8",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The refactor is small, composable, and mostly earns its keep \u2014 types added, helpers unchanged in shape, tests added for the new error path. Two real concerns: coerceNumber silently turns null/undefined into 0, which is a behavior change masquerading as a typing change and contradicts the \"everything else should have same runtime behavior\" claim; and the public signatures accept number[] then runtime-check non-emptiness, when a NonEmptyArray type at the boundary would let the data structure carry the invariant and delete the guards. Decision label: SMALL-AND-COMPOSABLE with a side of WRONG-DATA-STRUCTURE at the public boundary. Fix the coerceNumber semantics before merge; the type-shape suggestions are P2 nudges toward making the algorithm self-evident."
+  },
+  "raw": ""
+}

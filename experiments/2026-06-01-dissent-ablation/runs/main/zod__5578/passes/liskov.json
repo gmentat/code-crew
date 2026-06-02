@@ -1,0 +1,104 @@
+{
+  "persona": "liskov",
+  "task_id": "zod__5578",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "SPEC-MISSING / LEAKY-ABSTRACTION: `Seen.ref` and `Seen.parent` semantics are undocumented and overlap dangerously",
+        "detail": "The `Seen` interface now carries two near-identical fields \u2014 `ref` (\"schema to inherit JSON Schema properties from\") and `parent` (\"parent schema in the clone chain\") \u2014 with no precondition stating when they may coincide, when `ref` may be `null` vs `undefined`, or what the invariant is between them. The flatten code then conditionally branches on `seen.parent !== ref`, on `seen.ref === null` as a sentinel for \"already processed,\" and on `_zod.parent === ref` to detect a parent-ref. These are three different encodings of overlapping state with no written contract. A future maintainer cannot reason about whether a wrapper with both a processor-ref and a clone-parent is well-formed. State the contract: what does each field mean, what are the legal combinations, and what is the invariant after `process()` returns.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "75-84, 364-450",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP-VIOLATION risk: `ZodMiniType.check` now silently changes its postcondition by setting `parent: true`",
+        "detail": "The mini variant previously had `// { parent: true }` commented out \u2014 i.e., the documented choice was that `mini.check` did NOT establish a parent link. Flipping it on is a postcondition strengthening for every caller that relied on mini's `check` returning a non-parent-linked clone (e.g. anyone iterating `_zod.parent` chains, anyone depending on `isParent` not being set on the inner schema during JSON-Schema emission). Mini and classic now share this contract, but no test demonstrates that mini's other consumers (parsing, metadata propagation, registries) are substitutable under the new behavior. Either (a) document that `mini.check` and `classic.check` share the parent-link contract and add tests proving substitutability, or (b) justify why mini was intentionally different and revert.",
+        "file": "packages/zod/src/v4/mini/schemas.ts",
+        "lines": "65-70",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "WRONG-BOUNDARY: `finalize.flattenRef` now owns four responsibilities that belong in distinct modules",
+        "detail": "`flattenRef` performs (1) ref-chain flattening with recursion guard, (2) child-wins merge with parent-only key pruning when `_zod.parent === ref`, (3) `$ref` extraction de-duplication via `JSON.stringify` equality, and (4) a second `$ref` propagation pass for `seen.parent !== ref`. Each is a separate concern operating on the same mutable `schema` object, with order-dependent effects (the parent-pruning loop depends on `_cached` having been captured before the `Object.assign`, the dedup loop depends on the `$ref` having been set on `refSchema` by an earlier finalize pass). The module boundary should be: \"flatten one ref edge\" as one operation; \"de-duplicate against an extracted $def\" as another; \"propagate $ref from extracted parent\" as a third. Right now it is one 60-line function with three implicit phases and no stated invariants between them.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "369-450",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LEAKY-ABSTRACTION: `JSON.stringify` equality used as the de-duplication contract between child and parent JSON Schema",
+        "detail": "Two places now decide \"these properties are equal, drop the child copy\" via `JSON.stringify(schema[key]) === JSON.stringify(refSeen.def![key])`. This makes the de-dup contract depend on JS object key order, on whether undefined fields exist, and on the absence of `Date`/`RegExp`/cycles \u2014 none of which are part of the JSON Schema spec. The abstraction \"this property is already represented in the $def\" is being implemented by a string-equality test that promises strictly less than structural equality. State the predicate explicitly (e.g. a `jsonSchemaPropertyEquals` helper with a documented contract) and use it.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "411-417, 437-441",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Process-order change: parent processing moved from before processor to after, with no stated invariant about what each pass sees",
+        "detail": "Previously, when a schema had a clone-parent, the parent was processed FIRST and the child's own processor was skipped (the early return). Now the child's processor runs first, and the parent is processed afterward; `result.ref` is set only if the processor did not already set one. This reverses the data-flow contract: processors that previously could assume \"my parent's `seen.schema` is already populated when I run\" no longer can, and processors that set `ref` now race with the parent-link logic. No comment in `process()` states the new invariant (\"the processor runs against an unflattened child; the parent ref is recorded for later flattening\"). For a function this central to the ADT, the contract should be written above the function.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "175-198",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override-on-parent contract changed silently; doubling of `overrideCount` from 6 to 12 is asserted but not specified",
+        "detail": "The previous code guarded `ctx.override(...)` with `if (!seen.isParent)`, i.e., overrides ran on leaves only. The new code removes that guard, and a test is updated from `expect(overrideCount).toBe(6)` to `expect(overrideCount).toBe(12)`. This is a public-facing contract change for users who registered an `override` callback: it will now be invoked for parent schemas in the clone chain as well. The test asserts the new number but the docstring/spec for `override` does not state \"called once per seen schema including intermediate parents.\" Either restore the leaf-only behavior, or document the new contract in the `override` option's JSDoc and call it out in the changeset \u2014 downstream users almost certainly wrote overrides assuming leaf invocation.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "443-447",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`fileProcessor` contract for `anyOf` branches changed: branches no longer carry the shared string-schema properties",
+        "detail": "In the multi-MIME branch, the processor used to emit `anyOf` entries that each fully satisfied the `StringSchema` contract (`type`, `contentEncoding`, `format`, `minLength`, `maxLength`, plus their distinct `contentMediaType`). It now emits `anyOf` entries that contain only `contentMediaType`, hoisting the shared props to the root. JSON Schema permits this, but it weakens the postcondition of each branch viewed in isolation \u2014 a consumer that pulls a branch out (e.g. `schema.anyOf[0]`) no longer gets a self-describing `StringSchema`. If `anyOf` branches are documented as standalone schemas, this is an LSP-style postcondition weakening for that sub-API; if they are documented as composed-only-with-parent, state it. The typed return `JSONSchema.StringSchema` was also dropped from the map callback.",
+        "file": "packages/zod/src/v4/core/json-schema-processors.ts",
+        "lines": "234-240",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`play.ts` switched from `zod/v4` import to a deep relative path into `packages/zod/src/index.js`",
+        "detail": "The playground file now imports from `./packages/zod/src/index.js`, which couples a top-level scratch file to the monorepo internal layout. This is a small abstraction leak (the public `zod/v4` entry point is the contract; deep paths are not) and will silently break if the package is restructured. If the deep import was needed for debugging, remove before merge; if not, revert to `zod/v4`.",
+        "file": "play.ts",
+        "lines": "1-19",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`Seen.ref` type tightened from `| null | undefined` to `| null` with `undefined` only via optionality \u2014 meaning is unchanged but the three-valued state (unset / explicit-null sentinel / set) is now harder to read",
+        "detail": "`ref?: schemas.$ZodType | null` plus the use of `seen.ref = null` as a \"prevent recursion\" sentinel and the check `if (seen.ref === null) return;` for \"already processed\" gives the field three meanings \u2014 absent, in-progress-sentinel, and pointing-to-a-schema. This is fine if documented but currently is not. A small named-state enum (`unset | processing | done | ref(x)`) or at least a comment on the field stating the three legal states would prevent future misuse.",
+        "file": "packages/zod/src/v4/core/to-json-schema.ts",
+        "lines": "77-79, 380-386",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "From the abstract-data-type lens, this PR is solving a real correctness problem \u2014 parent metadata wasn't propagating through clone chains, and the new `seen.parent` field plus the rewritten `flattenRef` do produce the right JSON Schema for the wrapper-with-id case. The concern is that the contract was not written down alongside the fix. `Seen.ref` and `Seen.parent` overlap in ways that are only legible by reading the flatten code; `flattenRef` now performs three distinct operations on a shared mutable object with no stated invariants between them; the `override` callback's contract silently changed from leaf-only to all-seen-schemas (the test asserts 12 vs 6 but no spec was updated); and mini's `check` flipped on `parent: true` with no substitutability evidence beyond classic's tests. Recommend: write the contract for `Seen` (legal states of `ref`/`parent`), split `flattenRef` into named operations with documented pre/postconditions, document the `override` callback's new invocation rule, and either add mini-side tests proving the parent-link change is safe across mini consumers or revert it. The `fileProcessor` factoring is a real readability win but weakens each `anyOf` branch's standalone postcondition \u2014 fine if the branches are documented as composed-only."
+  },
+  "raw": ""
+}

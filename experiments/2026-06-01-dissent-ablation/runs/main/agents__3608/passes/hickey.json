@@ -1,0 +1,54 @@
+{
+  "persona": "hickey",
+  "task_id": "agents__3608",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR description and Deepgram docs say control message is {\"type\":\"CloseStream\"}, but code sends {\"type\":\"Close\"}",
+        "detail": "The PR title, description, and linked Deepgram SDK reference all state the required control message is {\"type\": \"CloseStream\"}. The actual constant _CLOSE_MSG is json.dumps({\"type\": \"Close\"}). These are two different values \u2014 the server will either ignore the unknown message or fail to flush, which defeats the entire purpose of the fix. The value being sent is the load-bearing fact of this PR; it needs to match the protocol.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws complects three concerns: protocol shutdown, race-condition waiting, and transport close",
+        "detail": "The new _close_ws is doing three separable things in one method: (1) sending Flush+Close protocol values, (2) waiting on a single receive() as a proxy for 'server caught up', and (3) closing the transport. Each has different failure modes and time semantics. A single receive() with a 1s timeout is a guess, not a protocol \u2014 it will return on any inbound frame (an audio chunk, a metadata message) and declare 'we're done'. The 'wait for ack' concern should be a named drain step that reads until a terminal message or timeout, not a one-shot receive.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Magic 1.0s timeout and silent TimeoutError are place-oriented constants without a named identity",
+        "detail": "The 1.0 second budget is an essential piece of behavior (how long we are willing to wait for Deepgram to drain) but it's inlined as a literal. Pull it out as a named constant (or conn_option) so the value has an identity and a reason. Same for the swallowed TimeoutError \u2014 at minimum log at debug; the current 'pass' loses the fact that the server did not acknowledge in time, which is exactly the diagnostic you'll want when 429s reappear.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-138",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Control messages are values; consider colocating with the STT close logic instead of duplicating",
+        "detail": "_FLUSH_MSG and _CLOSE_MSG are pure data describing a protocol. The PR description notes the STT side already does this correctly. Two copies of the same protocol-shaped data in two files is incidental duplication waiting to drift (this PR is itself evidence \u2014 the TTS copy already disagrees with the documented value). A small shared module of Deepgram control-message values would make the protocol a single decomposable fact.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "236-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The intent of this change is right \u2014 the close sequence is a protocol value, not just a TCP close \u2014 but the implementation complects protocol shutdown, race-waiting, and transport close in one method, and the load-bearing constant disagrees with the documented Deepgram contract ({\\\"type\\\":\\\"Close\\\"} vs {\\\"type\\\":\\\"CloseStream\\\"}). The fix is small: separate the drain step from the close step, name the timeout, and make the control-message values match the spec (ideally shared with the STT side that already gets this right). Essential complexity here is the graceful-shutdown handshake with explicit time semantics; the incidental complexity is the inline literals, the one-shot receive(), and the silent except. Decision: COMPLECTED with one EASY-NOT-SIMPLE wart (the magic 1.0s) and one likely INCIDENTAL bug (wrong message name). Worth merging once the control-message string is corrected and verified against a live Deepgram session."
+  },
+  "raw": ""
+}

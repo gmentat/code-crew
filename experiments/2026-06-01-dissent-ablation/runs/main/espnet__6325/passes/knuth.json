@@ -1,0 +1,124 @@
+{
+  "persona": "knuth",
+  "task_id": "espnet__6325",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "download_and_untar.sh warns about missing unzip but does not exit, leading to opaque downstream failures",
+        "detail": "The `command -v unzip` check prints a message but lacks an `exit` after it. The script then proceeds to call `unzip` and fails with a cryptic 'command not found' instead of the intended preflight error. A literate, defensive script states preconditions and terminates when they fail. Add `exit 1` after the warning, and similarly add `exit 1` to the usage block which currently prints help and continues.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "9-19",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unquoted command substitutions in realpath calls break on paths containing spaces",
+        "detail": "`extract_dir=$(realpath $1)` and `zip_dir=$(realpath ${2:-$extract_dir})` do not quote `$1` or the default expansion. If the downloads path contains whitespace (common on shared clusters under `/home/user name/...`), realpath will receive split arguments and the script silently picks the wrong directory. Use `\"$1\"` and `\"${2:-$extract_dir}\"`. The `set -u` mode also means an empty `$1` would have already errored, so the arg-count check is the only guard - it should be made strict.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "21-22",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Completion sentinel `.complete` is touched in a directory that may not exist after extraction",
+        "detail": "`touch \"$extract_dir/aisolution_data/.complete\"` (and the CH, MA variants) assumes the zip's top-level directory name is exactly `aisolution_data`/`CH`/`MA`. If the archive layout drifts even slightly (e.g. nested folder, different case), `touch` fails under `set -e` and the partial extraction is left in a state that the next run cannot detect. Either verify the expected directory exists before touch, or place the sentinel at `$extract_dir/.aisolution_data.complete` so the marker does not depend on the archive's internal structure.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "29-31, 40-42, 51-53",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "data.sh sources download_and_untar.sh with `.` which pollutes the parent shell and propagates `set -e` weirdly",
+        "detail": "`. ./local/download_and_untar.sh \"${TAL_ZH_ADULT_TEACH}\" \"${downloads_dir}\"` sources the script into the current shell instead of executing it. Any `exit` inside the script will terminate `data.sh`, any variable it sets leaks back, and any `set -e` interaction differs from invoking as a child process. This appears to be a copy-paste bug \u2014 Kaldi/ESPnet recipes invariably execute `download_and_untar.sh` as a subprocess. Replace with `./local/download_and_untar.sh \"${TAL_ZH_ADULT_TEACH}\" \"${downloads_dir}\"`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "37",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Asymptotic cost: prepare_kaldi re-scans wav.flist five times with sed/awk pipelines, but the deeper issue is unstated invariant on utt id uniqueness",
+        "detail": "The pipeline does `find | sed | awk` repeatedly, producing utt.list, utt_uttid, utt2spk, wav.scp, transcripts.txt, then overwrites utt.list. The invariant being maintained \u2014 'every basename in wav.flist is a unique utterance id within its parent directory' \u2014 is never stated and never checked. If two .wav files across subdirectories share the same basename, the `sort -u -k 1` step silently drops one, and `text` and `wav.scp` end up misaligned in row count, which `fix_data_dir.sh` will hide. Either state the invariant and assert it with `sort | uniq -d | wc -l` equals 0, or include the parent dir in the utt id so the invariant is structurally guaranteed. The expected-count check on line `wc -l < text` catches gross mismatch but not silent dedup, because it compares to a hand-coded num_wav, not to the wav count.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "44-66",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hard-coded utterance counts in data.sh heredoc are brittle magic numbers without provenance",
+        "detail": "The here-doc lists `22467`, `3208`, `6072`, `29386`, `38924` with no comment explaining where these numbers come from, what they correspond to in the dataset documentation, or how to update them if the upstream dataset is revised. From a literate-programming perspective: a careful reader cannot verify these without re-downloading the dataset. Add a comment block citing the dataset source page version, the date counts were verified, and the relationship to the dataset's published split ratios. Otherwise a future contributor who legitimately updates the dataset must either delete the check or chase down ground truth manually.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "70-76",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sed character substitutions on transcripts are unexplained and order-sensitive",
+        "detail": "`sed 's/\uff21/A/g' | sed 's/#//g' | sed 's/=//g' | sed 's/\u3001//g' | sed 's/\uff0c//g' | sed 's/\uff1f//g' | sed 's/\u3002//g' | sed 's/[ ][ ]*$//g'` is a chain of transcript normalization rules with no comment explaining (a) why these specific characters and not others, (b) why fullwidth A is mapped to ASCII A but other fullwidth letters are not, (c) whether other punctuation like \u300c\u300d\uff01 should be stripped too. A literate ASR recipe documents its text normalization policy, because CER numbers are not comparable across recipes that normalize differently. Collapse into a single sed -e ... -e ... call for readability and add a header comment stating the normalization invariant.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/data.sh",
+        "lines": "51-54",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "README config path inconsistency: `train/train_asr_branchformer_e24_amp.yaml` vs actual `train_asr_branchformer_e24_amp.yaml`",
+        "detail": "The README link reads `[./conf/train_asr_branchformer_e24_amp.yaml](./conf/train/train_asr_branchformer_e24_amp.yaml)` \u2014 display text and href disagree. The actual file lives at `conf/train_asr_branchformer_e24_amp.yaml` (no `train/` subdir). The link target 404s. Small but it is exactly the kind of readable-as-document concern that matters.",
+        "file": "egs2/tal_zh_adult_teach/asr1/README.md",
+        "lines": "16",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Decoder dropout rates written as `0.` invite YAML parsing ambiguity and reader confusion",
+        "detail": "`self_attention_dropout_rate: 0.` and `src_attention_dropout_rate: 0.` parse as 0.0 in PyYAML but the trailing-dot form is visually ambiguous (is it a typo for 0.1?) and unnecessary. Write `0.0`. Same nit at `time_mask_width_ratio_range: - 0.` \u2014 write `0.0`. Knuth's reader-as-constraint principle applies: code that makes a careful reader pause to verify intent is code that should be rewritten.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_asr_branchformer_e24_amp.yaml",
+        "lines": "32-33, 81",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comments contain casual typos that undermine literate quality",
+        "detail": "`max_epoch: 15  # 15epoch is enougth` and `keep_nbest_models: 10  # 10 is good.` are reviewer-facing notes, not justifications. `enougth` is a typo. Replace with a one-line rationale or remove. Recipe configs become reference documents for future projects; the comments are part of the artifact.",
+        "file": "egs2/tal_zh_adult_teach/asr1/conf/train_lm_transformer.yaml",
+        "lines": "16, 28",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "data.sh `downloads_dir=` default is empty but passed unquoted to a sourced script under `set -u`",
+        "detail": "`downloads_dir=` is declared empty, and later `\"${downloads_dir}\"` is passed to download_and_untar.sh. Under `set -u` this is fine because it is `${var}` not `$var` with default. But download_and_untar.sh accepts `<zip-dir>` as optional second arg with `${2:-$extract_dir}` \u2014 passing an empty string is not the same as omitting the argument. The fallback `${2:-$extract_dir}` triggers only when `$2` is unset, not when it is empty. An empty `downloads_dir` will set `zip_dir=$(realpath '')` which under realpath returns the cwd, masking the intended fallback to `$extract_dir`. Use `${2:+$2}` semantics or check explicitly: `zip_dir=${2:-$extract_dir}; [ -z \"$zip_dir\" ] && zip_dir=$extract_dir`.",
+        "file": "egs2/tal_zh_adult_teach/asr1/local/download_and_untar.sh",
+        "lines": "22",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED with NEEDS-LITERATE-COMMENT. The recipe is a conventional ESPnet egs2/* drop-in and the model side is standard configuration \u2014 no algorithmic claims to audit. The rigor concerns concentrate in the shell glue. download_and_untar.sh has a non-terminating unzip-missing check, unquoted realpath substitutions that break on spaces, sentinel files placed inside archive-internal directories whose existence is assumed not verified, and an ambiguous empty-string vs unset second-argument handling. data.sh sources download_and_untar.sh instead of executing it, never states the uniqueness invariant on utterance basenames that the pipeline silently depends on, hard-codes magic counts without provenance, and applies an unexplained transcript-normalization sed chain that affects CER comparability. The README also has a broken config link. None of this blocks the recipe's intent, but the analysis and reader-facing rationale that would make this a RIGOROUS contribution are missing."
+  },
+  "raw": ""
+}

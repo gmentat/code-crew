@@ -1,0 +1,74 @@
+{
+  "task_id": "agents__3909",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "audio_format duplicates sample_rate on STTOptions, creating two sources of truth that can desync.",
+        "detail": "STTOptions stores both sample_rate and audio_format, with audio_format derived as f\"pcm_{sample_rate}\". An invalid sample_rate silently produces an invalid pcm_NNNN string, and any caller mutating one field desyncs the other. Drop audio_format from STTOptions and compute it at the single use site, or make it a computed property.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "42-117",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Receive-side dispatch is a stringly-typed if/elif ladder with duplicated speaking-state bookkeeping.",
+        "detail": "_process_stream_event hand-rolls dispatch on message_type with three near-duplicate branches mutating the same _speaking flag. A dict of handlers (or small per-event helpers) would decompose protocol shape from processing, surface dead cases like committed_transcript_with_timestamps, and isolate the segment state transitions.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "320-414",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speech-segment state machine is fragile: end-of-speech depends on an empty committed_transcript with no fallback.",
+        "detail": "The _speaking invariant relies on the server sending an empty committed_transcript to terminate a segment. If that terminator is dropped (network failure, server error), downstream consumers never see END_OF_SPEECH and the invariant breaks. Make the segment state explicit and add a timeout-based fallback or state the protocol contract precisely.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "330-385",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "STTv2.recognize raises NotImplementedError, violating the STT supertype contract.",
+        "detail": "The STT supertype promises _recognize_impl returns a SpeechEvent. STTv2 weakens postconditions by raising, breaking LSP for any caller treating it as STT. Either widen the supertype with an explicit streaming-only capability, or implement recognize as a single-shot consumption of the stream.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "153-160",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sample rate is cast into STTAudioFormat via typing.cast with no validation, bypassing the ADT.",
+        "detail": "STTAudioFormat enumerates six pcm_* literals, but the constructor uses typing.cast on f\"pcm_{sample_rate}\". An invalid sample_rate like 11025 produces \"pcm_11025\" outside the ADT and is sent to the server. Validate sample_rate against the allowed set at the boundary or accept STTAudioFormat directly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "127-128",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Server error messages raise APIConnectionError inside recv_task and get swallowed by a broad except.",
+        "detail": "_process_stream_event raises APIConnectionError for auth_error and quota_exceeded, but recv_task's try/except Exception logs and continues, treating control-path failures like JSON parse errors. Separate the data path (transcripts) from the control path (errors): surface a typed failure event or flag so _run can reconnect or shut down cleanly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "207-217, 395-411",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel concludes the plugin is functional and follows the established Deepgram pattern, but carries avoidable incidental complexity and one hard contract violation. The most serious issue is that STTv2.recognize raises NotImplementedError, breaking LSP against the STT supertype. Recurring data-shape problems include audio_format duplicating sample_rate, sample_rate bypassing the STTAudioFormat ADT via typing.cast, and a stringly-typed dispatch ladder with duplicated speaking-state bookkeeping. The speech-segment state machine is fragile, depending on an empty-commit terminator with no fallback, and server-side error events get swallowed by a broad except in recv_task. None of these block merge except the LSP violation, but the data structures should be tightened before v1 and v2 calcify."
+  }
+}

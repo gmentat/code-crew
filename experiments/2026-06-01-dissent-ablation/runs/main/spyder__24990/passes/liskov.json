@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "spyder__24990",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "validate_conda contract is inconsistent: empty string returns True but signals 'valid'",
+        "detail": "The postcondition is ambiguous. validate_conda('') returns True, which by the function's own docstring ('checks that the file exists, is executable, and identifies as conda/mamba/micromamba') is a contract violation \u2014 an empty path satisfies none of those checks. The caller (create_browsefile validate_callback) cannot distinguish 'no value entered, accept it' from 'this path was validated and is a working executable'. State the contract: either (a) validate_conda returns True iff the executable is a working conda-like tool, and the empty-string acceptance is moved to the caller / a separate 'is_set' predicate, or (b) document explicitly that True means 'acceptable as a config value' (the weaker postcondition). Without this, future callers will misuse the predicate.",
+        "file": "spyder/utils/conda.py",
+        "lines": "269-297",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LSP-style contract widening on create_browsefile / create_lineedit without spec update",
+        "detail": "create_browsefile now accepts validate_callback and validate_reason and forwards them to create_lineedit. This extends the contract of a widely-used factory method (a supertype-like API used across many config pages). The new parameters default to None, so existing callers still work \u2014 but the documented behavior of create_lineedit (which is not shown updated here) now includes a new postcondition: 'the lineedit will reject input for which validate_callback returns False with validate_reason as the user-visible explanation.' That contract must be stated where create_lineedit is defined, and the semantics of validate_callback (when is it called? on every keystroke? on commit? what is its precondition \u2014 must it accept empty string?) must be pinned down. Otherwise every future caller writes a validator with different assumptions and we get the empty-string ambiguity from the previous issue repeated everywhere.",
+        "file": "spyder/widgets/config.py",
+        "lines": "782-799",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary leak: kernelspec.py reaches across to main_interpreter config keys by string",
+        "detail": "kernelspec.argv() now reads self.get_conf('conda_path', section='main_interpreter') and self.get_conf('custom_conda', section='main_interpreter'). The kernelspec module is taking a dependency on the internal config schema of a different plugin via untyped string keys. The abstract data type 'conda executable resolution' is being implemented partly in find_conda(), partly inline here, with the main_interpreter config as a back-channel. The boundary should be: a single function (e.g., resolve_conda_executable() in spyder/utils/conda.py) owns the contract 'return a path to a working conda-like exe, or None,' and consults configuration internally. Callers then have one promise to depend on, and the LSP-style substitutability of find_conda vs. the custom-conda fallback is enforced in one place.",
+        "file": "spyder/plugins/ipythonconsole/utils/kernelspec.py",
+        "lines": "161-186",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "filters='*.exe' encodes a platform-specific precondition in a cross-platform API",
+        "detail": "create_browsefile is called with filters='*.exe'. On Linux and macOS, conda/mamba/micromamba executables have no .exe extension; the file dialog will hide all valid choices. The precondition 'the user can select a conda executable through this dialog' fails on non-Windows platforms. Either branch on sys.platform to pick the filter, or drop the filter entirely and rely on validate_conda as the postcondition check. As written, the abstraction promises 'pick a conda executable' but the implementation only delivers on Windows \u2014 a leaky/broken precondition.",
+        "file": "spyder/plugins/maininterpreter/confpage.py",
+        "lines": "134-143",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "validate_conda substring match is too permissive",
+        "detail": "The check `any(tool in out.decode().lower() for tool in ['micromamba', 'mamba', 'conda'])` will accept any executable whose --version output happens to contain the substring 'conda' (e.g., a wrapper script, a tool named 'anaconda-something'). This is a weak postcondition for 'this is a working conda-like executable.' Consider matching the version-line prefix or the exact tool name with word boundaries. Low severity because the user explicitly browsed to the file, but the contract should still say what it means.",
+        "file": "spyder/utils/conda.py",
+        "lines": "289-294",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SPEC-MISSING on the new 'custom_conda' / 'conda_path' config pair",
+        "detail": "Two new config keys are introduced with no documented invariant tying them together. What is the invariant? Presumably: 'if custom_conda is True, conda_path must be a path that satisfies validate_conda; if custom_conda is False, conda_path is ignored.' That invariant is enforced nowhere \u2014 a user can toggle custom_conda on with an empty conda_path (validate_conda('') returns True), and kernelspec.py will then fall through to the not-found error. State the invariant, and either enforce it at save-time in the confpage or handle the (True, '') state explicitly in kernelspec with a more specific error message.",
+        "file": "spyder/config/main.py",
+        "lines": "146-156",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "edit.setFocus() in select_file changes the contract of a shared helper as a side effect",
+        "detail": "select_file now calls edit.setFocus() after setting the filename. This is a behavioral change to a method used by every browsefile widget in the application, made silently as part of a conda-executable feature. The postcondition of select_file shifts from 'the edit's text is the chosen filename' to 'the edit's text is the chosen filename AND the edit has focus.' If this is intentional (to trigger validate_callback on focus-out, perhaps), state it; if it's accidental, remove it. Either way, a shared widget helper's contract should not drift as a side effect of a feature in one plugin.",
+        "file": "spyder/widgets/config.py",
+        "lines": "854-857",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is reasonable and the user-facing flow is sensible, but the abstractions are under-specified at exactly the joints where this PR adds new responsibilities. validate_conda's contract conflates 'empty input is acceptable as a config value' with 'this path is a working conda executable,' and that ambiguity will propagate. create_browsefile / create_lineedit gain a validate_callback hook whose semantics are not stated, which is a contract change to a widely-used widget factory. kernelspec.argv reaches across module boundaries via string config keys instead of going through a single resolve_conda_executable abstraction, and the (custom_conda=True, conda_path='') invariant is not enforced anywhere. Finally, filters='*.exe' is a platform-specific precondition baked into a cross-platform UI, which will quietly break the feature on macOS and Linux."
+  },
+  "raw": ""
+}

@@ -1,0 +1,124 @@
+{
+  "task_id": "stylelint__9044",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "import-notation 'url' primary may incorrectly skip strings containing 'url(' substring",
+        "detail": "In lib/rules/import-notation/index.mjs, when primary === 'url', the code returns early if params matches /url\\(/i. However, '@import \"foo url(bar)\"' is a string literal whose textual content includes 'url(' but is not a real url() call. The previous implementation would parse the value and correctly flag it as needing conversion; the new fast-path returns without checking. This is a contrived but real behavioral regression \u2014 the optimization changes outcomes rather than just skipping known-clean inputs.",
+        "file": "lib/rules/import-notation/index.mjs",
+        "lines": "50-53",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "selector-not-notation changes case-sensitivity of ':not(' detection",
+        "detail": "Previously the check used `selector.includes(':not(')` which is case-sensitive; the new walkRules filter is `/:not\\(/i` (case-insensitive). Selectors written as ':NOT(' or ':Not(' would now enter the rule body whereas they were silently skipped before. CSS pseudo-class names are case-insensitive per spec, so this is arguably a correctness improvement, but it is an undocumented behavior change that could expand the set of warnings users see and is not called out in the changeset.",
+        "file": "lib/rules/selector-not-notation/index.mjs",
+        "lines": "75",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HAS_NAMED / HAS_NUMERIC regexes are built from sets without escaping",
+        "detail": "In font-weight-notation/index.mjs the regex sources are joined directly from `fontWeightNonNumericKeywords`, `fontWeightRelativeKeywords`, and NUMERIC_TO_NAMED keys. These are all plain identifiers/digits today, so no regex metacharacters are present, but the construction has no defense-in-depth: if any future keyword were added containing a metacharacter (e.g., a hyphen or dot in an extended set), the precompiled regex would silently mis-match. A small `escapeRegExp` helper on each token would harden this.",
+        "file": "lib/rules/font-weight-notation/index.mjs",
+        "lines": "42-48",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "keyframe-selector-notation HAS_PERCENTAGE regex lacks anchored end and 'i' flag",
+        "detail": "HAS_PERCENTAGE = /(?:^|[,\\s])(?:0%|25%|...)/ \u2014 there is no trailing boundary, so '0%5' (not a valid selector but possible via SCSS interpolation passing through) could match. Also no `i` flag, whereas HAS_KEYWORD uses /i. Percentages are case-insensitive (no letters anyway) so the missing flag is benign, but the asymmetry is worth a comment. As a coarse pre-filter the looseness only costs optimization, not correctness.",
+        "file": "lib/rules/keyframe-selector-notation/index.mjs",
+        "lines": "35",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "selector-pseudo-element-colon-notation walkRules(/:/) filter is extremely broad",
+        "detail": "The new filter `/:/` matches any selector containing a colon, including very common pseudo-classes (`:hover`, `:focus`, `:nth-child(...)`). Most stylesheets will see no real filtering benefit from this change versus the original `selector.includes(':')` short-circuit, since walkRules still iterates all matching rules. The performance win is real (one regex test per rule vs string includes) but smaller than the other rules in this PR; worth confirming with benchmarks the changeset alludes to.",
+        "file": "lib/rules/selector-pseudo-element-colon-notation/index.mjs",
+        "lines": "40",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No new tests added to lock down the early-return behavior",
+        "detail": "The diff contains no test changes. Each new fast-path is a behavioral surface \u2014 particularly the import-notation `/url\\(/i` filter and the case-insensitive `:not(` filter \u2014 that could regress silently. Existing tests presumably still pass because they cover canonical inputs; targeted tests for the skip conditions (value contains `url(` inside a string, selector with `:NOT(`, font shorthand with `100%` size) would prevent future regressions.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "media-feature-range-notation 'context' filter regex /(?:min|max)-/i is broad",
+        "detail": "Any params containing a substring `min-` or `max-` (case-insensitive) will pass the filter, including identifiers in custom media queries (e.g., `(--min-width-breakpoint)`). This only costs optimization, not correctness, and matches the pre-PR behavior of running the full check, so it is acceptable. A tighter pattern like /\\b(?:min|max)-(?:width|height|resolution|aspect-ratio|color|monochrome|device-...)/ would be safer but coupled to the feature list.",
+        "file": "lib/rules/media-feature-range-notation/index.mjs",
+        "lines": "66-70",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Is the import-notation 'url' fast-path actually incorrect?",
+        "positions": [
+          {
+            "persona": "strict-correctness",
+            "position": "It is a behavioral regression: '@import \"... url( ...\"' (string form with url( inside) would have been flagged under primary='url' before and is now silently skipped. Performance optimizations must not change outputs. P1."
+          },
+          {
+            "persona": "pragmatic-shipper",
+            "position": "Such an @import value is nonsensical CSS and no real-world stylesheet contains it. The optimization is correct for all realistic inputs and the rest of the rule still validates the URL form when it runs. P2 at most."
+          }
+        ]
+      },
+      {
+        "topic": "Case-insensitive ':not(' filter in selector-not-notation",
+        "positions": [
+          {
+            "persona": "spec-compliance",
+            "position": "CSS pseudo-class names are ASCII case-insensitive per the selectors spec; the old `includes(':not(')` was a pre-existing minor bug and this change fixes it. Mention in changeset."
+          },
+          {
+            "persona": "stability",
+            "position": "The PR is scoped to performance, not behavior. Silently widening match scope risks new warnings in users' codebases on upgrade. Should be split into a separate change or at least called out."
+          }
+        ]
+      },
+      {
+        "topic": "Whether unescaped regex construction is worth flagging",
+        "positions": [
+          {
+            "persona": "defensive-coding",
+            "position": "Always escape tokens before joining into a regex; future keyword additions could break this silently."
+          },
+          {
+            "persona": "yagni",
+            "position": "All current sources are constants of plain identifiers and digits. Escaping is dead code that adds noise; add it only when a non-identifier keyword is actually introduced."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR adds early-return fast paths to seven *-notation rules to avoid expensive value/selector parsing when the rule could not possibly fire. The approach is sound and consistent with existing selector-* rules. One issue is worth attention before merge: the import-notation `primary === 'url'` filter uses `/url\\(/i.test(params)`, which can match the substring `url(` inside a string-literal @import value and incorrectly skip a real violation. Two smaller behavior changes are undocumented: `selector-not-notation` switches from case-sensitive `includes(':not(')` to case-insensitive `/:not\\(/i`, and several regexes are constructed without escaping their source tokens. No tests were added to cover the new skip paths. Overall the change is acceptable and high-value, but the import-notation edge case and the case-sensitivity change deserve either a code adjustment, a test, or an explicit note in the changeset."
+  },
+  "raw": ""
+}

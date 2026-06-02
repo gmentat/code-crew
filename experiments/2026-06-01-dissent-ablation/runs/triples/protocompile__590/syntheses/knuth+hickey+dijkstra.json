@@ -1,0 +1,77 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "knuth+hickey+dijkstra",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "run() returns bare nil on CAS-fail-then-Load-nil path, violating its non-nil postcondition and pushing the nil-deref upstream",
+        "detail": "When CompareAndSwap fails and t.result.Load() is nil, run() returns nil. No other branch does this, and callers dereference output.done/Fatal downstream. The fix trades one nil-deref for another further up. Either synthesize a failure-valued *result (Fatal set) so waiters always see a value, or state and enforce the postcondition explicitly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TOCTOU window between CAS failure and Load is patched, not reasoned about; t.result's lifecycle invariant is unstated",
+        "detail": "The leader can CAS, run, panic, and clear t.result to nil between our failed CAS and our Load; a new leader could even CAS again. The patch handles one snapshot of this interleaving without stating the state machine of t.result (pending -> output -> nil-on-panic -> ?). Without a written invariant, the fix is tested-not-proved.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Root cause \u2014 clearing t.result to nil on leader panic \u2014 is the wrong model and is not shown in the diff",
+        "detail": "The hazard exists because a panicking leader nils t.result instead of storing a failure-valued *result with Fatal set. Storing a failure value would close the race by construction and let waiters always operate on a value. The cleanup path itself is not in this diff, so its postcondition cannot be reasoned about.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the branch, which is exactly where no result was seen",
+        "detail": "On the return-nil path, output is nil and we did NOT see a result. The comment says the opposite, hiding the actual semantics (leader CAS'd, ran, panicked, cleared t.result before our Load). Rewrite to name that interleaving precisely; in a concurrency primitive the comment must match the code.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle extraction lacks a stated loop invariant and moves a load-bearing precondition away from its call site",
+        "detail": "The two-pass walk over caller.path depends on an unstated invariant ('on the second walk, nodes are appended caller-to-callee up to the matching node') that makes the reversal correct. Extracting it also relocates the 'only valid when output is pending' precondition from the call site to the method, where readers no longer see why running it is safe here.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No deterministic test exercises the leader-panic + waiter-contention interleaving the patch claims to fix",
+        "detail": "A race fix without a reproducer (or a go test -race scenario forcing leader panic against a contending waiter) cannot demonstrate the specific interleaving is closed. The claim of correctness currently rests on inspection of code whose invariants are unstated. Add a focused test that exhibits CAS-fail-then-Load-nil.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR patches a symptom rather than fixing the underlying design: it swaps a nil-deref on t.result.Load().done for a bare nil return from run(), violating the function's implicit non-nil postcondition and pushing the hazard onto callers. The root cause \u2014 clearing t.result to nil on leader panic instead of storing a failure-valued *result with Fatal set \u2014 is not shown in this diff and is the actual fix; storing a failure value would close the race by construction. The TOCTOU window between CAS failure and Load is handled for one snapshot but the state machine of t.result is never written down. Secondary concerns: the new comment contradicts its branch, checkCycle's invariant and call-site precondition are unstated, and no test exercises the leader-panic interleaving. Refuse until the t.result lifecycle invariant is stated and a failure value (not nil) is produced on leader panic."
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "task_id": "vitest__9521",
+  "arm": "triple-B",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "isIncluded postcondition silently depends on mutable changedFiles state set by sibling lifecycle method",
+        "detail": "isIncluded was a pure function of filename + glob config; it now depends on this.changedFiles, populated later by onTestRunStart. The globCache.clear() papers over invalidation but the contract is no longer key-pure. Either include changedFiles in the cache key, pass it explicitly, or document the lifecycle invariant on the interface.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles membership test relies on unspecified path normalization between VitestGit and isIncluded",
+        "detail": "isIncluded compares this.changedFiles.includes(filename) where filename is slash(cleanUrl(_filename)). VitestGit.findChangedFiles must return paths in exactly this normalized form (absolute/relative, slashed, cleaned) or the test silently returns false on Windows or with relative-vs-absolute mismatches. Normalize at the boundary in onTestRunStart and document the invariant.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178, 332-345",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook duplicated across three call sites in core.ts with invariant carried only by convention",
+        "detail": "coverageProvider?.onTestRunStart?.() is invoked manually after _testRun.start(...) in three places. A fourth path will forget and silently disable changed-files filtering. Consolidate the call into _testRun.start itself, resolve changedFiles lazily in generateCoverage, or document the ordering invariant on the interface.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-611, 750-754, 880-886",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles stored as array searched per-file instead of a Set",
+        "detail": "changedFiles is a string[] and isIncluded does .includes(filename) on the hot path, making coverage filtering O(n*m). Build a Set<string> once in onTestRunStart with normalized paths; lookup becomes O(1) and the normalization boundary is explicit in one place.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-177, 332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform handles boolean inputs the CLI argument grammar cannot produce",
+        "detail": "The transform checks value === true || value === false, but CLI parsing of <commit/branch> yields strings. The dead branches indicate either a leaky abstraction between CLI and config layers or an unclear precondition. Narrow the transform's input to string and let resolveConfig handle the boolean form.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance of coverage.changed from test.changed is split across resolveConfig and onTestRunStart fallback",
+        "detail": "resolveConfig fills coverage.changed from resolved.changed only when undefined, while onTestRunStart still reads ctx.config.changed as a fallback. Two layers doing the same job, with semantics of test.changed === true (use staged/unstaged) unspecified at the findChangedFiles boundary. Pick one normalization site and define the true sentinel's contract.",
+        "file": "packages/vitest/src/node/config/resolveConfig.ts",
+        "lines": "421-424",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel agrees the feature is well-scoped but the implementation has unstated invariants that will rot. The core defect, flagged by all three reviewers, is the path-normalization contract between VitestGit.findChangedFiles and isIncluded: a raw string compare on shapes that may not align across platforms. isIncluded's postcondition now depends on mutable state set by a sibling lifecycle method, and the cache is no longer a pure function of its key. The onTestRunStart hook is wired through three duplicated call sites in core.ts, and changedFiles should be a Set rather than an array searched on the hot path. The CLI transform and resolveConfig inheritance both show split responsibilities that should be consolidated before this lands as long-lived API surface."
+  }
+}

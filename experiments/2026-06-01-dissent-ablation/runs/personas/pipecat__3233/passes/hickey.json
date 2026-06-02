@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "pipecat__3233",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Error-type list complects taxonomy with handling; data and code are tangled.",
+        "detail": "The error branch hardcodes a 14-item tuple of message_type strings inline with the dispatch. The set of error types is a value (a fact about ElevenLabs' protocol) that belongs as a module-level constant or set, separate from the function that reacts to them. Pulling it out makes both the catalog and the handler simpler and independently testable.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-741",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Duplicate 'transcriber_error' entry in the error tuple is a place-oriented bug.",
+        "detail": "'transcriber_error' appears twice in the tuple. A tuple membership check tolerates this, but it is evidence the data wasn't treated as data. As a set literal this would either deduplicate or surface the mistake. The fix and the smell are the same: lift the catalog out as a value.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "725-741",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loss of per-error logging and labeling collapses three distinct facts into one.",
+        "detail": "Previously auth_error, quota_exceeded, and generic error each logged with a distinct label and pushed a distinct error prefix. The refactor flattens all fourteen types into one 'Error: ...' string with no logger.error and no type tag. The message_type is a meaningful value; preserve it in the pushed error and the log.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "739-740",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removing the outer try around _process_messages silently changes failure semantics.",
+        "detail": "The old _receive_messages caught exceptions from the async-for itself (websocket teardown) and logged 'connection closed.' The new version relies on the inner try inside the loop, which only catches per-message errors. A websocket disconnect raised by the async iterator now propagates uncaught. That may be the intended fix for the infinite loop, but the time semantics of 'when does this method return vs. raise' should be made explicit, not incidental.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "693-702",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Fallback string 'Unknown error - {message_type}' complects human message with type tag.",
+        "detail": "When data.get('error') is missing, the code synthesizes a string that mixes a sentinel phrase with the message_type. Downstream consumers of push_error now have to parse this. Pass message_type as a separate field, or push a small dict of {type, error} rather than a formatted string.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "742",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The question that should have been asked first: what is an 'error' here, as a value?",
+        "detail": "An ElevenLabs error event is a value with a type, a message, and possibly a code. The service treats it as control flow (which elif branch) rather than as data flowing to a single handler. A single branch that parses the event into an ErrorEvent value and dispatches once would be smaller, simpler, and would make adding the next error type trivial.",
+        "file": "src/pipecat/services/elevenlabs/stt.py",
+        "lines": "722-744",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix addresses a real infinite-loop bug and broadens error coverage, which is good. But the implementation conflates the catalog of error types (a value) with the dispatch logic (code), drops the per-type logging and labeling that the previous version had, and contains a duplicated entry \u2014 all symptoms of treating error types as control flow rather than as data. The receive-loop change also alters exception-propagation semantics without making the new time model explicit. The cleanup is straightforward: lift the error-type set to a module constant, push a structured error value (type + message) instead of a flattened string, and document what _receive_messages now returns vs. raises."
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "task_id": "prowler__9702",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "PR title, metadata, and check name disagree about what the check does and whether MANUAL is a valid state.",
+        "detail": "PR title and description say 'detect multiple NICs' with PASS/FAIL only, but the directory, CheckID, and class are 'compute_instance_single_network_interface', and the code emits a third state (MANUAL) for GKE that metadata.json never documents. Reconcile naming across PR/CHANGELOG/CheckID/files, and either document MANUAL in metadata or drop it.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.metadata.json",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection by `name.startswith(\"gke-\")` is a leaky string-prefix heuristic, not the real signal.",
+        "detail": "A user-named VM `gke-bastion` becomes MANUAL while a renamed real GKE node could become FAIL. The authoritative signal is the `goog-gke-node` label or managed-instance-group ancestry. Derive an `is_gke_managed` boolean on the Instance ADT from labels/MIG and have the check consume it, or drop the carve-out and document the false-positive in metadata Notes.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "29-33",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-interface branch silently returns PASS and has no test coverage.",
+        "detail": "When `interface_count == 0`, `status_extended` reports 'no network interfaces' but `status` stays at the initial PASS, violating the implied postcondition (PASS \u21d2 exactly one NIC). No test exercises this path. Either treat zero as MANUAL/INFO with an explicit decision and test it, or remove the branch and assert zero is impossible per the GCP API.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "35-39",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mutable default `[]` on Pydantic `network_interfaces` field; prefer `Field(default_factory=list)`.",
+        "detail": "`network_interfaces: list[NetworkInterface] = []` uses a class-level mutable default. Pydantic v1 copies it safely today, but the idiom is a known footgun and risks aliasing if the model is subclassed or migrated. Match `default_factory=list` style and state the per-instance ownership invariant explicitly.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "638",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`interface_names` trusts NIC `name` and is computed even when unused.",
+        "detail": "`_get_instances` defaults missing NIC names to empty strings, so `status_extended` can emit 'has 2 network interfaces: , .'. The list comprehension also runs for the single-NIC PASS path that only uses index [0]. Substitute a placeholder like `nic[0]`/`nic[1]` when name is empty and build the list only in branches that use it.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "22-32",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this check ships with a documentation/identity mismatch and a leaky GKE heuristic that together justify a NEEDS-WORK verdict. The PR title and CHANGELOG describe detecting multiple NICs, but the CheckID, files, and class say 'single_network_interface', and the code adds an undocumented MANUAL state via `name.startswith(\\\"gke-\\\")` \u2014 a string-match standing in for the real signal (goog-gke-node label or MIG membership). The zero-NIC branch silently PASSes against its own postcondition and is untested. Cleanups around the mutable Pydantic default and the empty-NIC-name handling are minor but worth fixing for consistency."
+  }
+}

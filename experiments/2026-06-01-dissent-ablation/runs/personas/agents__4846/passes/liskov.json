@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "agents__4846",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "_BufferingHandler has unbounded buffer with no size cap, violating its implicit memory-safety invariant.",
+        "detail": "The ADT _BufferingHandler promises to buffer records for later replay, but its contract omits any bound on buffer size. If session startup hangs or crashes slowly under high log volume, buffer grows without limit. State an explicit invariant (max records, ring-buffer semantics, or drop-oldest policy) and enforce it in emit().",
+        "file": "livekit-agents/livekit/agents/telemetry/traces.py",
+        "lines": "102-110",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_flush_early_log_buffer reaches into root logger handlers to locate an OTLP LoggingHandler, leaking telemetry implementation through the JobContext boundary.",
+        "detail": "JobContext should not know that OTLP installs a LoggingHandler on the root logger; this couples JobContext's contract to a private detail of telemetry/traces. The flush API should live in the telemetry module and expose a replay(records) operation. As written, any future change in how cloud tracing installs handlers silently breaks crash-log upload.",
+        "file": "livekit-agents/livekit/agents/job.py",
+        "lines": "210-227",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_shutdown_telemetry mutates the root logger's handler list as a side effect, violating the function's stated contract.",
+        "detail": "The function is named and documented as shutting down telemetry, but it now silently removes all LoggingHandler instances from the root logger - handlers the caller may have installed independently. Postcondition has been weakened (state outside the module is mutated) without spec update. Either narrow to the handler this module installed, or document the frame explicitly.",
+        "file": "livekit-agents/livekit/agents/telemetry/traces.py",
+        "lines": "514-525",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "init_recording's contract now branches silently on _stop_log_buffering when already-initialized or non-cloud, conflating two responsibilities.",
+        "detail": "init_recording previously had a clean precondition (not yet initialized AND cloud URL) and a single postcondition (recording set up). It now also performs cleanup of an unrelated buffering handler on the early-return path. This is two operations behind one name. Split into init_recording and an explicit teardown call from _on_cleanup so the contract is visible.",
+        "file": "livekit-agents/livekit/agents/job.py",
+        "lines": "644-663",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_on_cleanup invoking init_recording with synthetic RecordingOptions overloads init_recording's contract for an unintended use case.",
+        "detail": "init_recording is the public, user-facing setup path; calling it from cleanup with audio=False/traces=False/transcript=False to opportunistically flush crash logs reuses the interface for a different purpose. A dedicated _ensure_crash_log_pipeline() with a narrower contract would make the intent and invariants explicit, and avoid future drift in init_recording's preconditions.",
+        "file": "livekit-agents/livekit/agents/job.py",
+        "lines": "275-290",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unrelated test/build changes (removing pytest-xdist, dropping test_plugin_google_stt) bundled in a logging fix obscure the contract under review.",
+        "detail": "The PR's stated contract is crash log upload, but it also serializes unit tests and drops a plugin test file with no justification in the description. These should be separate changes so each module boundary is reviewed against its own contract; bundled, they make regression attribution and revert harder.",
+        "file": "makefile",
+        "lines": "84-100",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The change addresses a real gap - crash logs never reaching the server - but the abstraction work is incomplete. JobContext now knows that OTLP installs a LoggingHandler on the root logger, and _shutdown_telemetry silently mutates handlers it did not install; both are leaks across module boundaries that the contract should forbid. _BufferingHandler lacks a bounded-buffer invariant, and init_recording has been overloaded to serve two callers with different preconditions. Tighten the telemetry module's exposed contract (replay/flush as first-class operations), bound the buffer, and separate the unrelated test/build changes."
+  }
+}

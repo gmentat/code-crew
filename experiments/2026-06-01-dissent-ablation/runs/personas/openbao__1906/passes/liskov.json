@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "openbao__1906",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo silently broadens contract without updating spec",
+        "detail": "The old contract promised a narrow projection (times). The new name implies general 'info', but the postcondition is still 'a leaseEntry with only selected fields populated'. Callers cannot tell from the signature which fields are guaranteed populated vs zero. Document the exact projection (Path, RevokeErr, namespace, IssueTime, ExpireTime, LastRenewalTime, redacted Secret) as the postcondition, or return a distinct LeaseInfo type.",
+        "file": "vault/expiration.go",
+        "lines": "1707-1745",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport is named 'for export' but exposes unexported namespace field \u2014 leaky abstraction",
+        "detail": "The returned *leaseEntry now carries the unexported `namespace` field for outside callers, but callers outside the package cannot read it directly; only logical_system.go (same package) can. The 'export' boundary is ambiguous: is this an internal helper or an external contract? Either return an exported LeaseInfo struct with explicit fields, or rename to clarify package-internal use.",
+        "file": "vault/expiration.go",
+        "lines": "1735-1745",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "RevokeErr surfaced to API callers without a documented redaction contract",
+        "detail": "The PR author flags the concern explicitly. RevokeErr is a free-form error string produced inside revoke paths; its contract about what it may contain (backend error text, upstream API responses, secrets in error payloads) is unstated. Either define and enforce a redaction invariant at the point RevokeErr is written, or gate exposure behind a capability/ACL. Don't ship a public field whose contents are 'should not be sensitive'.",
+        "file": "vault/logical_system.go",
+        "lines": "2198-2200",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Response schema declares 'path' Required:true but value may be empty for some lease types",
+        "detail": "The OpenAPI-style path declaration marks `path` as Required, but leaseInfoForExport copies whatever le.Path holds, including empty string for edge cases (token leases, irrevocable entries loaded from storage with missing fields). Either enforce the invariant that Path is always non-empty for any lease returned here, or drop Required:true. Contracts must match reality.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "inMemoryLeaseInfo now caches Path/RevokeErr/namespace, expanding the 'low-cost subset' invariant silently",
+        "detail": "The comment on inMemoryLeaseInfo says it 'restricts lease entry stored in pendingInfo to a low-cost subset'. The new fields (Path string, RevokeErr string, namespace pointer) increase per-lease memory footprint across the pending map. For deployments with many pending leases this is a measurable change. Update the comment to state the new subset, and confirm the memory budget was considered.",
+        "file": "vault/expiration.go",
+        "lines": "1757-1762",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test changed to t.Context() while sibling test still uses nil \u2014 inconsistent context invariant",
+        "detail": "TestExpiration_revokeEntry_rejected_fairsharing was updated to namespace.RootContext(t.Context()) but TestExpiration_FetchLeaseTimesIrrevocable still passes nil. Either both should pass a real context (the documented contract for FetchLeaseInfo) or the contract should explicitly allow nil. Inconsistency suggests the precondition on ctx isn't stated.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450, 3104",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The rename FetchLeaseTimes -> FetchLeaseInfo and leaseTimesForExport -> leaseInfoForExport broadens the abstract data type without restating the contract: callers still receive a partially-populated *leaseEntry whose 'export-safe' projection is implicit. The cleaner design is an exported LeaseInfo struct with documented fields, which would also resolve the namespace-field leak and make the OpenAPI Required flags honest. The RevokeErr exposure is a real contract gap \u2014 the PR author asks about it directly \u2014 and needs a documented redaction invariant before it ships to a public API. The LSP-style risk is low (no subtype hierarchy here), but the SPEC-MISSING and LEAKY-ABSTRACTION patterns are present and worth fixing while the surface is still small."
+  }
+}

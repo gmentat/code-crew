@@ -1,0 +1,60 @@
+{
+  "name": "hickey",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "IAM-policy fetch failure is silently treated as 'not publicly shared'",
+        "detail": "When getIamPolicy raises (e.g. permission denied, transient API error), the code logs and leaves publicly_shared=False. The check then reports PASS for an image whose sharing state is actually unknown. PASS and UNKNOWN are complected into one value. Model the fact: introduce a tri-state (or a separate iam_policy_retrieved flag) so the check can emit a distinct MANUAL/ERROR finding instead of a false negative.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Check name and metadata disagree with the data field it reads",
+        "detail": "Directory and CheckID are compute_image_not_publicly_shared, but the model field is publicly_shared and the check branches on `if image.publicly_shared`. The negation lives in the name while the value carries the positive fact. Pick one direction (prefer the positive fact: image.publicly_shared) and align the CheckID, or the next reader will mis-reason about what PASS means.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.py",
+        "lines": "32-36",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image value loses the binding evidence it was derived from",
+        "detail": "publicly_shared is a derived boolean; the bindings (role, members) that produced it are discarded at service-construction time. That is place-oriented: the fact is collapsed before any check can use it. Storing the relevant bindings (or at least the offending role) on the Image value would let future checks reason about which role grants public access without re-fetching.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "676-682",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests verify the mock, not the extraction logic",
+        "detail": "The service test asserts publicly_shared flags that the fixture pre-decides via getIamPolicy stubs, and the check tests construct Image objects with publicly_shared already set. Nothing exercises the bindings->publicly_shared transformation as a pure function. Pull the members-scan into a small pure function and test it directly on binding dicts; the current tests largely confirm that MagicMock returns what MagicMock was told to return.",
+        "file": "tests/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared_test.py",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public-member detection is complected with the listing/pagination loop",
+        "detail": "_get_images interleaves project iteration, pagination, per-image IAM fetch, exception handling, and the allAuthenticatedUsers scan in one nested block. The scan is a pure function from bindings to bool; extracting it (e.g. `_is_publicly_shared(iam_policy)`) separates the value transform from the I/O and makes the rule auditable and testable without API mocks.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-580",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The check works for the happy path but complects three concerns in _get_images: I/O (list + paginate), error handling, and the pure rule (does any binding contain allAuthenticatedUsers). The most consequential consequence is that an IAM-fetch failure silently becomes PASS \u2014 an unknown value being coerced into a safe-looking value, which is exactly the value/identity confusion to avoid in a security tool. The naming also disagrees with the data: a check named ..._not_publicly_shared branches on a positive publicly_shared field. Pull the rule out as a pure function over bindings, preserve the bindings (or an explicit unknown state) on the Image value, and let the check reason from facts rather than from a pre-collapsed boolean."
+  }
+}

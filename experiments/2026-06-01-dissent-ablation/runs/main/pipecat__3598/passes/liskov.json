@@ -1,0 +1,124 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Model-config registry is an ad-hoc ADT; no formal contract is stated for ModelConfig invariants",
+        "detail": "ModelConfig and TTSModelConfig are introduced as frozen dataclasses (good \u2014 values, not entities), but no invariants are documented or enforced. For example: if supports_mode is True, default_mode should be non-None; if supports_language is False, default_language should be None; if use_translate_endpoint is True, use_translate_method should match. These cross-field invariants exist implicitly in the three hard-coded entries but are not part of the type's contract. A future model added to MODEL_CONFIGS could silently violate them. State the invariants in the docstring and validate them in __post_init__.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "72-125",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_prompt postcondition weakened relative to its documented behavior (silent no-op)",
+        "detail": "set_prompt's contract says 'Pass None to clear/disable prompt.' For a model that does not support prompts, calling set_prompt(None) silently returns without clearing any state, while calling set_prompt('x') raises. The postcondition 'prompt is cleared' is not preserved for non-supporting models \u2014 the operation is partial. Either (a) document explicitly that on non-supporting models the operation is a no-op for None and an error otherwise, or (b) make it uniformly raise. The current shape is a subtle LSP-style weakening: callers that legitimately treat all SarvamSTTService instances uniformly cannot rely on a uniform postcondition.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "290-305",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Parameter clamping with warning violates the documented Field(ge=, le=) contract for pace",
+        "detail": "InputParams declares pace as Field(ge=0.3, le=3.0) \u2014 pydantic enforces this range at validation time. But the __init__ then performs additional clamping against the model-specific pace_range (e.g. 0.5-2.0 for v3) with only a logger.warning. The contract advertised by the type (range 0.3-3.0) is not the contract honored at runtime for v3 models. A caller reading InputParams cannot tell what range will actually be used. Either narrow the contract via a model_validator that knows the chosen model, or refuse out-of-range values rather than silently clamping. Silent clamping with a log line is the classic leaky-abstraction failure mode.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "282-330, 360-380",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality-comparison-on-floats to detect 'parameter was passed' is unreliable and leaks defaults",
+        "detail": "Code uses `elif params.pitch != 0.0`, `elif params.loudness != 1.0`, `elif params.temperature != 0.6` to decide whether to warn about an ignored parameter. This conflates 'user explicitly set the default value' with 'user did not set it at all,' and tests floats for inequality, which is fragile. The abstraction the caller sees (Optional[float] with a default) does not distinguish 'unset' from 'set to default,' yet the implementation tries to infer intent. Use a sentinel (None) for 'unset' and the float for explicit values, then warn only when the value is explicitly provided and unsupported.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "395-410",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_speakers_for_model silently falls back to v2 speakers for unknown models \u2014 leaky and wrong",
+        "detail": "get_speakers_for_model('made-up:model') returns the v2 speaker list. That is an incorrect postcondition: the function's contract is 'return speakers for this model,' not 'return speakers for v2 if unknown.' Worse, callers using the result to validate user input will accept v2 voices for an unknown model. Either raise on unknown models or return an empty list, but do not fabricate an answer. This is the same anti-pattern that the strict MODEL_CONFIGS validation in __init__ correctly avoids \u2014 this helper undermines it.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "194-206",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Voice-vs-model substitutability is not enforced; LSP-style mismatch between voice_id and model goes uncaught",
+        "detail": "Each model has a disjoint speaker set (V2 vs V3), yet __init__ accepts any string for voice_id and does not validate it against self._config.speakers. A caller can construct SarvamHttpTTSService(model='bulbul:v2', voice_id='aditya') and the failure surfaces only at API-call time. The type's invariant \u2014 'voice_id is a member of the model's speaker set' \u2014 should be enforced at construction. Bonus: the v3 default in TTS_MODEL_CONFIGS is 'shubh' while the documented default is 'aditya' (see module docstring and example). That is an outright contract contradiction.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "160-175, 343-360",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "InputParams docstrings carry model-specific behavior \u2014 abstraction leak from model into params type",
+        "detail": "SarvamHttpTTSService.InputParams now documents per-model behavior inside each field ('Only supported for bulbul:v2', 'Always enabled for v3-beta'). The InputParams type was a clean ADT \u2014 a value object describing voice settings. It now leaks knowledge of which models exist and how they treat each field. A cleaner decomposition would be model-specific param subclasses (V2Params, V3Params) or a single Params type whose validation depends on the model context. The current shape is workable but the ADT is no longer crisp.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "278-330",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two parallel sources of truth for model facts: Enum docstrings and TTS_MODEL_CONFIGS",
+        "detail": "SarvamTTSModel, SarvamTTSSpeakerV2, SarvamTTSSpeakerV3 carry per-model facts in their docstrings (sample rates, pace ranges, support flags). TTS_MODEL_CONFIGS carries the same facts as data. Two sources of truth will drift. The enums should be names only; the configs should be the single source. Alternatively, derive the enums from the configs. The TTSModelConfig.speakers field already uses `tuple(s.value for s in SarvamTTSSpeakerV2)` \u2014 half-derived, half-duplicated.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "69-200",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ModelConfig fields use_translate_endpoint and use_translate_method are two booleans that should be one concept",
+        "detail": "Both flags happen to be True together for saaras:v2.5 and False together for the other two models. They appear to encode the same fact: 'this is a translation service.' Two booleans that always co-vary are an ADT smell \u2014 the invariant is implicit. Either collapse to a single boolean (is_translate) or document why they could ever diverge. If the SDK genuinely separates endpoint choice from method choice for a hypothetical future model, say so; otherwise simplify.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "72-125",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Removed input_audio_codec from connect_kwargs without contract note \u2014 silent behavior change",
+        "detail": "The diff drops `input_audio_codec` from the WebSocket connect kwargs. self._input_audio_codec is still stored on the instance and exposed in __init__, but it is no longer transmitted to the SDK. If the SDK previously honored it, behavior changes silently for callers that set it. Either remove the parameter entirely from __init__ (breaking change, but honest) or restore the kwarg, or document explicitly that codec is now negotiated elsewhere.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "385-405",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "vad_signals and high_vad_sensitivity declared bool with default None \u2014 type contract violated by declaration",
+        "detail": "InputParams declares `vad_signals: bool = None` and `high_vad_sensitivity: bool = None`. The annotated type is bool, but the default is None \u2014 pydantic will accept this but the static type is wrong. Should be Optional[bool]. Small thing, but the ADT's declared contract should match its actual contract.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "150-152",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR introduces a sensible registry-based ADT (ModelConfig, TTSModelConfig) that replaces ad-hoc string-matching with explicit per-model capability tables \u2014 that is the right direction. However, the contracts of the new types are not fully stated: cross-field invariants in ModelConfig are implicit, the documented Field(ge=, le=) pace range silently disagrees with runtime clamping, set_prompt's postcondition is weakened on non-supporting models, and get_speakers_for_model fabricates an answer for unknown models. Voice/model substitutability is not enforced at construction, and the v3 default speaker in code ('shubh') contradicts the documented default ('aditya'). The InputParams type has become model-aware in its docstrings, leaking model knowledge into what was a clean value object. None of this is fatal, but for a long-lived multi-model service the contract discipline should be tightened: state invariants in __post_init__, validate voice_id against the model's speaker tuple, replace silent clamping/equality-on-floats with explicit semantics, and make TTS_MODEL_CONFIGS the single source of truth."
+  },
+  "raw": ""
+}

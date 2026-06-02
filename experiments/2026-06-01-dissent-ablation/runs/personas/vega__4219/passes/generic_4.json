@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "vega__4219",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "coerceNumber silently substitutes 0 for null/undefined, masking invalid inputs",
+        "detail": "The original code used `toNumber` directly, which returns null for invalid inputs and would propagate NaN through arithmetic. The new `coerceNumber: x => toNumber(x) ?? 0` silently converts invalid domain values into 0, producing plausible-but-wrong domain transforms instead of failing visibly. This is a behavioral change masquerading as a type-safety refactor.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "30-31",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identity replacement changes behavior for non-numeric domain entries",
+        "detail": "The original imported `identity` from accessors.js which returned its input as-is (any type). The new `identity: TransformFn = x => x` is typed as number->number, but the domain parameter is `number[]`, so date or string-coerced values that previously round-tripped through identity would now be assumed numeric. Combined with coerceNumber's `?? 0`, original NaN/null round-trips no longer occur.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "32",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isNonEmpty guard runs after domain[0] is already accessed in callers",
+        "detail": "In `panLog`, `zoomLog`, `panLinear`, etc., `Math.sign(domain[0])` is computed at the call site BEFORE pan/zoom checks `isNonEmpty`. For an empty domain, `Math.sign(undefined)` returns NaN before the error is thrown \u2014 harmless here but the guard placement is misleading. Either move the check to public functions or document that callers access domain[0] safely.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "40-41, 56-57",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public API now throws on empty domain \u2014 undocumented breaking change",
+        "detail": "Previously, `panLinear([], 0.5)` returned `[NaN, NaN]` silently. Now it throws. The PR description calls this a runtime error addition but does not flag it as a breaking change in CHANGELOG/release notes. Downstream vega-scale or user code that relied on silent NaN propagation will now throw at runtime after upgrade.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "34, 50",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Domain return type `[number, number]` may contain NaN values, weakening the type",
+        "detail": "panLog with a zero-sign domain produces `log(0)` = -Infinity, and several paths can yield NaN. Typing the return as `Domain = [number, number]` is accurate for shape but misleads consumers that values are finite. Consider documenting or refining once downstream callers are typed.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "6",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "peek overload ordering relies on TS picking non-empty signature first",
+        "detail": "The new peek overloads are correct, but the non-empty overload only matches when TS narrows the array to `readonly [T, ...T[]]`. Within `pan`/`zoom`, `domain` remains typed as `number[]` after `isNonEmpty` returns true (because the predicate narrows a local, not the param). So `peek(domain)` still returns `number | undefined`, and `d1` is implicitly `number | undefined` flowing into arithmetic \u2014 worth a cast or narrowed local.",
+        "file": "packages/vega-util/src/transform.ts",
+        "lines": "35-37, 51-53",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR adds TypeScript types to vega-util's transform functions and introduces an empty-domain runtime error. The main concerns are subtle behavioral regressions: `coerceNumber: x => toNumber(x) ?? 0` silently maps invalid inputs to 0 (the original `toNumber` returned null, producing NaN downstream), and the new local `identity` is typed as number->number rather than the pass-through used before. The empty-domain throw is a breaking change not flagged in release notes. The peek overload addition is good, but the narrowing via `isNonEmpty` doesn't actually flow into `peek(domain)` calls, so the type benefit is partly cosmetic."
+  }
+}

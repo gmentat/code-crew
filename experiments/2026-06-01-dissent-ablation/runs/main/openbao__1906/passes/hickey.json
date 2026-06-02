@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "openbao__1906",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "RevokeErr exposed as opaque string complects internal error value with API contract",
+        "detail": "The PR pipes leaseEntry.RevokeErr \u2014 an internally-formatted Go error string \u2014 directly into the API response as `revoke_error`. The value is a value (good), but its shape, language, and stability are not specified. Once a client reads this field, its exact text becomes a de facto contract; any future change to how revoke errors are formatted internally silently breaks consumers. The PR author already flagged the security concern (\"is it safe to display?\"); the deeper issue is that no one decided what this field *is*. Decide: is it a stable code + message pair, a free-form diagnostic for humans only, or an internal log leak? Pick one and make it explicit in the schema, ideally as a small structured value (e.g. `{code, message, last_attempt_time}`) rather than a stringified error.",
+        "file": "vault/logical_system.go",
+        "lines": "2199-2201",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo trades a precise name for a vague one",
+        "detail": "`FetchLeaseTimes` named exactly what it returned: time-shaped facts about a lease. `FetchLeaseInfo` is the kind of name you reach for when you've stopped deciding what's in the value. The function now returns times + path + namespace + revoke error \u2014 a grab bag whose membership will drift every time someone adds a new \"non sensitive\" field. The honest options are (a) name it after the actual shape (e.g. `FetchPublicLeaseView`) and document the exact fields it exposes, or (b) return a small purpose-built value type instead of a redacted `*leaseEntry` so the API surface is a value with a schema, not a struct-with-some-fields-zeroed. Returning a partially-populated `*leaseEntry` is place-oriented thinking: same place, different meaning depending on who filled it in.",
+        "file": "vault/expiration.go",
+        "lines": "1706-1741",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Redacted-export pattern complects \"full lease\" and \"public view\" into one type",
+        "detail": "`leaseInfoForExport` constructs a `*leaseEntry` with only some fields set, relying on every caller to know which fields are meaningful. That is the classic complecting of identity (the type) with value (which fields actually carry data). A reader of the returned struct cannot tell from the type whether `Secret`, `Auth`, `ClientToken`, etc., are zero because they were redacted or because the lease genuinely has none. A separate `LeasePublicInfo` value type \u2014 pure data, explicit fields, no hidden meaning \u2014 would be simpler (decomposable into one concept: \"the public view of a lease\") even though defining a new type feels less easy than reusing `leaseEntry`.",
+        "file": "vault/expiration.go",
+        "lines": "1744-1760",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "namespace_path conditional on non-empty path hides the root-namespace case",
+        "detail": "`if leaseInfo.namespace != nil && leaseInfo.namespace.Path != \"\"` means root-namespace leases simply omit the field, while non-root leases include it. That makes \"field absent\" mean two different things (no namespace info available vs. root namespace), which clients then have to disambiguate by knowing internal convention. Either always emit `namespace_path` (with `\"\"` or `\"root/\"` for root) or document explicitly that absence means root. The value here is small but the principle is the one this PR keeps bumping into: response shape should be a function of the lease, not of whether a string happens to be empty.",
+        "file": "vault/logical_system.go",
+        "lines": "2193-2195",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage doesn't exercise the new fields' semantics, only their presence",
+        "detail": "The added test asserts `resp.Data[\"path\"] == \"secret/foo\"` and nothing else. There is no test for `namespace_path` (including the root-namespace omission behavior), no test for `revoke_error` content/redaction, and no test confirming the cached vs. irrevocable vs. freshly-loaded paths through `FetchLeaseInfo` all populate the new fields consistently. Three code paths now copy `Path`, `RevokeErr`, and `namespace`; one of them silently drifting is exactly the kind of bug a value-shaped test would catch and a presence-check test will not. Think about the cases first, then write the tests for them \u2014 not the other way around.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The change is small and the direction is right \u2014 making lease lookup return more of the values it already has is a value-oriented move, not a behavioral one. The complecting to watch is in the shape of what gets returned: `FetchLeaseTimes` had a precise name and a precise shape; `FetchLeaseInfo` returning a partially-populated `*leaseEntry` is a grab bag whose contents will drift, and `revoke_error` as an opaque stringified Go error makes an internal log message into an API contract without anyone deciding what that contract is. The honest move is a small `LeasePublicInfo` value type with explicit fields and an explicit, structured shape for `revoke_error` (code + message, or a documented free-form-diagnostic-only field). The `namespace_path` omission rule conflates \\\"root\\\" with \\\"unknown,\\\" and the new test asserts presence rather than the semantics of the three code paths now copying these fields. Nothing here is a blocker; it's the kind of decision that's easy to defer and expensive to undo once clients are reading the field."
+  },
+  "raw": ""
+}

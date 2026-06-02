@@ -1,0 +1,92 @@
+{
+  "task_id": "protocompile__645",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil/zero-guard boilerplate is duplicated across ~20 accessors instead of captured in one helper",
+        "detail": "The same `var s []T; if f != nil { s = f.field }; return seq.NewFixedSlice(s, ...)` pattern is copy-pasted across ir_file.go, ir_type.go, ir_imports.go, and ir_member.go. A single helper (e.g. nil-tolerant seq.NewFixedSlice or a sliceOrNil filter) would state the invariant once and let every future accessor inherit it.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "180-365",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel nil-zero idioms coexist (`f == nil` vs `IsZero()`); pick one canonical predicate",
+        "detail": "*File guards with `f == nil` while value types (Type, Member, Oneof, Element) guard with `!x.IsZero()`. Both express the same abstract notion of absence but force maintainers to remember which type uses which. Define IsZero on *File too, or route every accessor through a shared guarded helper, so the rule is one line of prose.",
+        "file": "experimental/ir/ir_file.go, experimental/ir/ir_type.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value contract is implicit; the panic-free invariant should be stated, not only enforced by reflection",
+        "detail": "The PR establishes a real ADT promise \u2014 every accessor on a zero/nil receiver returns the zero value of its result type \u2014 but that contract appears nowhere in package docs. State it once (e.g. on doc.go or IsZero) so future authors know the precondition is `none` and the reflective test is a backstop rather than the spec.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex returns -1 as an in-band sentinel, complicating callers and inviting an At(-1) panic",
+        "detail": "Element.ValueNodeIndex now returns -1 on the zero value. Every other zero accessor returns the type's zero, so callers doing `MessageKeys().At(e.ValueNodeIndex())` will index by -1 and panic \u2014 the failure has merely moved. Return `(int, bool)` or add a HasValueNode predicate so presence and value are separate.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven zero test is too clever and silently skips methods that take arguments",
+        "detail": "testZeroAny filters to NumIn==1, treats any return with a Len method as a container, and special-cases IsZero/Context/ValueNodeIndex by name. Accessors taking arguments (e.g. ImportFor) are never exercised, and future return types with unrelated Len semantics will silently pass. A boring per-type table of (name, accessor) would be longer but durable.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "92-137",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "imports.Transitive/Directs rely on unstated invariants that one refactor could re-break",
+        "detail": "Transitive uses `files[:max(0, len(files)-1)]` to drop the implicit descriptor.proto, and Directs's closure still captures `i.publicEnd` etc. \u2014 safe only because an empty slice short-circuits the mapper. The invariants ('last element is descriptor.proto', 'nil receiver yields empty slice so closure never runs') are documented nowhere; state them or refactor so the guard is explicit.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-245",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR fixes real panics on zero/nil IR values and that the reflective zero-test is a valuable structural backstop, but the shape of the fix is wrong: the same defensive guard is copy-pasted across ~20 accessors instead of captured in one helper, and two parallel idioms (`f == nil` vs `IsZero()`) now coexist in the same package. The zero-value contract is implicit \u2014 only the test states it \u2014 and should be written down in package docs. ValueNodeIndex's `-1` sentinel is a small but real abstraction leak that has merely relocated the panic to any caller that indexes with it. The reflection-driven test is clever in the bad way: it silently skips methods with arguments and leans on name-based special cases where a small explicit table would be more durable. Net verdict: correct in intent, under-factored in execution; land with follow-ups, not as-is."
+  }
+}

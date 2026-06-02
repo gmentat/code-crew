@@ -1,0 +1,77 @@
+{
+  "task_id": "pipecat__3410",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Audio buffer is never flushed on stream end, silently dropping trailing audio",
+        "detail": "The _audio_send_buffer holds remainder bytes smaller than packet_bytes and has no terminal flush on disconnect, EndFrame, or Cancel. This weakens the serializer's postcondition that every serialized payload reaches the wire. Either pad-and-flush on end-of-stream with silence, or document the lossy behavior explicitly.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization concern belongs in the serializer, not the generic transport",
+        "detail": "Audio framing (20ms @ 16kHz = 640B) is a Vonage protocol property but lives in FastAPIWebsocketTransport, complecting serialize + buffer + chunk + send in _write_frame. Extract a small pure chunker function (bytes + size -> packets, remainder) or a composing PacketizingFrameSerializer wrapper. Keep the transport as a thin dispatcher.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size lacks time semantics and alignment invariant",
+        "detail": "The parameter is expressed in bytes, but the real concept is duration at a sample rate and width. There is no validation that the value is a multiple of (bytes_per_sample * channels) or matches the configured sample rate. A caller passing 641 or a value mismatched to vonage_sample_rate silently corrupts every packet. Enforce the precondition or accept duration + rate.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66, 498-507",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InterruptionFrame buffer clear races with in-flight async sends",
+        "detail": "process_frame clears _audio_send_buffer before delegating, but _write_frame's websocket send is async. An in-progress chunk send is not cancelled, so stale pre-interruption audio can still reach the wire after the InterruptionFrame. Add a send lock or sequence guard to preserve the interruption invariant.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "428-435, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF parsing accepts two payload shapes instead of pinning the Vonage contract",
+        "detail": "deserialize() tries message['digit'] then message['dtmf']['digit'], encoding uncertainty about the protocol shape as runtime behavior. Cite the documented Vonage shape, parse that as primary, and log loudly when the fallback fires. Remove the shim once confirmed against the spec.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "150-178",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pacing is promised but not implemented; rename or implement",
+        "detail": "The PR description advertises real-time pacing, but the code only chunks bytes \u2014 _send_interval and _next_send_time are unchanged on this path and the loop emits full packets back-to-back. Either implement actual pacing or rename to reflect framing-only semantics. Honest naming matters.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The Vonage serializer itself is a reasonably clean filter \u2014 values in, frames out, with a fair setup/serialize/deserialize contract. The panel's main concern is the FastAPIWebsocketTransport change: a Vonage-specific packetization concern has leaked into a generic transport, complecting buffer, chunk, and send in _write_frame. The trailing remainder is never flushed on stream end (silently dropping audio), fixed_audio_packet_size lacks alignment and time-semantic invariants, and the interruption clear races with in-flight async sends. Secondary issues: DTMF parsing guesses at two payload shapes instead of pinning the Vonage spec, and the PR oversells pacing the code does not actually do."
+  }
+}

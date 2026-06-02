@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ServiceSwitcherRequestMetadataFrame stores a live FrameProcessor reference instead of a stable identifier",
+        "detail": "The frame's `service` field holds a mutable FrameProcessor instance, complecting a value (a control frame flowing through the pipeline) with runtime identity. This makes the frame unserializable, couples it to object lifetime, and forces equality semantics that depend on FrameProcessor's __eq__. Carry a stable service id/name string and resolve at the switcher edge.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality check `frame.service == self.strategy.active_service` is fragile and unspecified",
+        "detail": "`==` on FrameProcessor falls back to identity unless overridden. A wrapper, proxy, or swapped service silently breaks the match and the frame leaks downstream. Use `is` for an explicit identity check or compare a stable id. The unstated precondition (equality-by-reference) should not be load-bearing.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Non-active-target / standalone-service path is unspecified and untested",
+        "detail": "The switcher only consumes the frame when `frame.service == active_service`; otherwise it leaks downstream. STTService now pushes the frame instead of consuming it, so when used outside a switcher the frame escapes into the rest of the pipeline. Document the contract for all target x context cases and add a test, or have the service consume when no switcher is present.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference string `\"FrameProcessor\"` hides a missing/cyclic import",
+        "detail": "The dataclass field is annotated as the string `\"FrameProcessor\"` with no visible import in frames.py. Dataclasses don't resolve annotations at runtime, but any `get_type_hints` call, schema introspection, or IDE tooling will fail. Either import it properly or use a stable id type and make the annotation honest.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts presence of a request frame but not that it targets the correct service",
+        "detail": "The updated test checks that service2 received one ServiceSwitcherRequestMetadataFrame but never asserts `request_frames[0].service is service2`. The targeted-dispatch property \u2014 the whole point of the rename \u2014 is unverified. Add an assertion on the target field.",
+        "file": "tests/test_service_switcher.py",
+        "lines": "475-482",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Rename is a breaking public-API change with no deprecation alias",
+        "detail": "`RequestMetadataFrame` was an exported symbol. Renaming it outright breaks downstream importers on the next version bump. A one-line `RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame` alias with a DeprecationWarning preserves compatibility at near-zero cost.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The rename clarifies intent and the diff is mechanically clean, but the panel unanimously rejects the design choice of embedding a live FrameProcessor reference in a control frame. The frame should carry a stable identifier (name/id) as a value; the current shape complects value with identity, depends on unstated equality semantics, and breaks serialization. The switcher's behavior on non-matching targets and on standalone STTService usage is unspecified and untested, and the rename ships without a back-compat alias for a previously-exported symbol. Needs-work: fix the service-reference shape, specify the suppression contract, and add a deprecation alias before landing."
+  }
+}

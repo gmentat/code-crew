@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3113",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Bookend invariant (Start/End frames) broken by racy timeout-based response close",
+        "detail": "_push_text_frame schedules a 1.0s timer to emit LLMFullResponseEndFrame while process_frame also emits one at end-of-stream. With no lock on _output_response_open or _close_task, overlapping invocations or the timer firing mid-stream produces double-End, End-before-Text, or unbalanced bookends. Replace the sleep-based dance with deterministic bookends tied to the real end-of-stream signal.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "120-201",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "default_response_to_output_transformer raises on malformed JSON and aborts the stream",
+        "detail": "json.loads(response_line) has no try/except. A malformed SSE line, error payload, or keepalive comment raises JSONDecodeError, killing the invocation and leaving _output_response_open=True with a dangling close task. Either catch and return None on parse failure or state and enforce the precondition. Match the warn-and-continue behavior used elsewhere.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "76-89",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AWS client recreated per LLMContextFrame instead of once at setup",
+        "detail": "Every invocation opens a fresh bedrock-agentcore client via aioboto3 Session().client(...), paying TLS setup, credential resolution, and teardown on each turn. This is hot-path code in a voice pipeline and also leaks aioboto3 lifecycle semantics into the per-call contract. Open the client once in setup() and close it in cleanup().",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates PEP 8 and the surrounding snake_case API convention",
+        "detail": "Every sibling __init__ parameter uses snake_case (aws_access_key, aws_region); agentArn is camelCase because it mirrors the boto field name. Rename to agent_arn and map to agentRuntimeArn at the boto3 call site where the foreign convention belongs. Public processor APIs should look uniform to callers.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "102-152",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No exception safety around AgentCore invocation leaves bookend state corrupted on failure",
+        "detail": "If invoke_agent_runtime or any async-for iteration raises after the Start frame is pushed, _output_response_open stays True and _close_task remains scheduled. The next LLMContextFrame then pushes a second Start without a matching End. Wrap the invocation in try/finally that guarantees the bookend invariant regardless of failure path.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "187-244",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "aioboto3 dependency bump bundled with feature patch",
+        "detail": "pyproject.toml and uv.lock churn for aioboto3/aiobotocore/boto3/botocore/s3transfer (15.0 to 15.5) is a dependency change affecting every aws consumer in the repo. It belongs in a separate commit with its own justification stating whether the new processor actually requires 15.5.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on REFUSED / NEEDS-WORK. The processor's Start/End bookend invariant is held by unsynchronized mutable state and a 1.0s sleep timer that races with the real end-of-stream cleanup, producing double-End or unbalanced bookends under concurrent or failing invocations. The default response transformer's contract is misstated: it raises on malformed JSON, aborting the stream and wedging the state machine. The AWS client is recreated per frame instead of once at setup, and the public agentArn parameter breaks the codebase's snake_case convention. Fix the bookend synchronization with try/finally, harden the JSON parsing, move client lifecycle to setup/cleanup, rename to agent_arn, and split the aioboto3 bump into its own patch."
+  }
+}

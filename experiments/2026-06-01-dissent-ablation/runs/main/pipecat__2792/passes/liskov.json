@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__2792",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "OutputImageRawFrame uses raw RGB bytes from a PIL Image that may not be in RGB mode",
+        "detail": "The code does `image = Image.open(io.BytesIO(part.inline_data.data))` then `image.tobytes()` with `format=\"RGB\"`. PIL may decode the payload as RGBA, P, or another mode depending on the source (PNG with alpha is common from generative image APIs). `image.tobytes()` returns bytes in the image's native mode, not RGB, so the downstream OutputImageRawFrame contract \u2014 `image` is raw bytes whose layout matches the declared `format` and `size` \u2014 is violated whenever the model returns anything other than a 3-channel RGB image. The contract repair is explicit conversion: `image = image.convert(\"RGB\")` before `tobytes()`, or honor the actual mode in the `format` field. This is a classic LSP-style postcondition violation: the producer promises RGB and silently delivers something else.",
+        "file": "src/pipecat/services/google/llm.py",
+        "lines": "938-943",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module-level mutation of a private SDK attribute leaks implementation through the import boundary",
+        "detail": "`genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024` is executed at import time and reaches into a private (`_api_client`) attribute of a third-party SDK. This is a leaky abstraction in two directions: (a) the pipecat module's import-time side effect silently rebinds global state in google-genai for every consumer of that SDK in the same process, violating the implicit contract that importing a service module should not mutate unrelated libraries; (b) the dependency contract pins `google-genai>=1.41.0,<2` but the patched attribute is a private symbol whose name or location can change within that semver range without notice. The correct repair is either to pass the buffer size through a supported public API, scope the override to a client instance created here, or \u2014 at minimum \u2014 guard the assignment with `hasattr` checks and a logged warning so a future SDK rename fails loudly rather than silently. The TODO comment (\"Temporary hack\") acknowledges the problem but does not contain it.",
+        "file": "src/pipecat/services/google/llm.py",
+        "lines": "76-77",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Default model change is a silently breaking contract change for existing callers",
+        "detail": "Changing the `GoogleLLMService` default `model` from `gemini-2.0-flash` to `gemini-2.5-flash` is a postcondition shift for every existing caller that relied on the default. Cost, latency, thinking-budget behavior, and tool-call shape can all differ across model generations; the subtype (new default) does not preserve the supertype's (old default) observable contract. Per LSP discipline, either the change should be gated by a major version bump with a CHANGELOG \"Breaking\" entry, or the default should remain pinned and the new model documented as the recommended choice. The CHANGELOG currently records this only under \"Changed,\" which under-signals the substitution risk.",
+        "file": "CHANGELOG.md / src/pipecat/services/google/llm.py",
+        "lines": "689",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image-model detection by substring match is a fragile, undocumented predicate",
+        "detail": "`if \"image\" in self._model_name:` in `_maybe_unset_thinking_budget` is a stringly-typed capability check that conflates \"this model name happens to contain the substring 'image'\" with \"this is an image-generating model.\" The contract this method is enforcing \u2014 \"image models do not use a thinking budget\" \u2014 is not stated as a precondition anywhere, and the predicate will both miss future image models that don't include the substring and falsely match models whose names happen to contain it. Lift the capability into an explicit registry or a typed enum (`ModelCapabilities.GENERATES_IMAGES`) so the predicate is named and testable rather than implicit in the string.",
+        "file": "src/pipecat/services/google/llm.py",
+        "lines": "796-798",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Image emission path lacks specification: ordering with text, frame metadata, and error handling are all unstated",
+        "detail": "The new branch pushes an `OutputImageRawFrame` from inside the per-part loop with no documented contract for: (a) ordering relative to `LLMTextFrame`s emitted by the same response, (b) whether multiple images per response are supported and in what order, (c) what happens when `Image.open` raises (corrupt bytes, unsupported format, oversized payload \u2014 the very reason the buffer hack exists), (d) whether the image counts toward LLM metrics. Downstream consumers of `OutputImageRawFrame` have to reverse-engineer the producer's behavior. Add a short docstring stating the postconditions of this branch (\"emits one OutputImageRawFrame per inline_data part, in document order, after any preceding text parts\") and wrap `Image.open` in a try/except that logs and skips rather than tearing down `_process_context`.",
+        "file": "src/pipecat/services/google/llm.py",
+        "lines": "938-943",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stray blank line and absence of import grouping for io/Image suggest the new dependencies aren't tracked at the module boundary",
+        "detail": "An unrelated blank line was added after `self._http_options = http_options` in `__init__`. More importantly, the new code path depends on `io` and PIL's `Image` but the diff doesn't show those imports being added or audited against the optional-dependency contract for the `google` extra. If `Image` is already imported elsewhere via the google extras chain, fine; if not, this will `NameError` only at runtime when a user happens to hit an image-returning model. Verify the imports are present and listed in the `google` extra's dependency closure.",
+        "file": "src/pipecat/services/google/llm.py",
+        "lines": "717, 938-943",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Example file copyright header dates are inconsistent with project convention",
+        "detail": "Minor: the new example `07n-interruptible-gemini-image.py` uses `Copyright (c) 2024-2025` while the PR lands in 2026. Not a correctness issue; flagging only because the example will be the user-facing entry point for this feature and copyright drift is a small signal of how carefully the long-lived artifact will be maintained.",
+        "file": "examples/foundational/07n-interruptible-gemini-image.py",
+        "lines": "2",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature adds a useful capability but violates two contracts that matter for a long-lived multi-team library. First, the producer of `OutputImageRawFrame` declares `format=\\\"RGB\\\"` while passing `image.tobytes()` from a PIL image whose mode is whatever the model returned \u2014 a postcondition violation that will silently corrupt non-RGB outputs (alpha channels, paletted images). Second, importing `pipecat.services.google.llm` now mutates a private attribute of `google-genai` at module load (`genai._api_client.READ_BUFFER_SIZE = ...`), a leaky abstraction across the dependency boundary that the code itself flags as a \\\"temporary hack.\\\" Beyond those, the default-model change is a silent subtype substitution for existing callers, and the \\\"is this an image model?\\\" predicate is a substring match rather than a named capability. The image-emission branch should also have its postconditions written down (ordering vs. text frames, multi-image behavior, error handling on malformed payloads) before more callers depend on undocumented behavior."
+  },
+  "raw": ""
+}

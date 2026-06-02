@@ -1,0 +1,94 @@
+{
+  "persona": "hickey",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "MODEL_CONFIGS conflates routing, validation, defaults, and SDK plumbing into one record",
+        "detail": "The ModelConfig dataclass bundles seven orthogonal facts (capability flags, default values, endpoint selection, method selection) into a single frozen tuple. Capability (supports_prompt) and routing (use_translate_endpoint) and defaults (default_language) are three different kinds of things about the model. When Sarvam adds saaras:v4 you will be editing one table that means three different things. Decompose into: a capability set per model, a defaults map per model, and a tiny routing function (model -> endpoint). The values are simpler when not complected with the routing.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "72-124",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TTSModelConfig duplicates the enum it claims to type",
+        "detail": "SarvamTTSSpeakerV2/V3 enums exist, then TTS_MODEL_CONFIGS stores tuple(s.value for s in SarvamTTSSpeakerV2) as a parallel data copy, then get_speakers_for_model wraps that in a list. The same fact (which speakers belong to which model) is now expressed in three places: the enum class, the config tuple, and the helper function. This is EASY-NOT-SIMPLE: enums feel like type safety but they are duplicating data that already lives in a dict. Pick one representation. The hashmap {model: [speakers]} is the value; the enum adds nothing the dict does not, and now you must keep them in sync.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "69-201",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "v3 default speaker disagrees between docstring, PR description, and config",
+        "detail": "The module docstring says v3 default speaker is aditya. The PR description says v3 default is aditya. TTS_MODEL_CONFIGS sets default_speaker=\"shubh\". This is exactly the kind of bug that arises when the same fact lives in multiple places (documentation strings, the PR table, the config dict, the enum order). One value, one place. Right now the value is ambiguous and a caller relying on the default will get a different voice than the docs promise.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "188",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent pace-clamping complects validation, mutation, and logging",
+        "detail": "When pace is out of range the code warns and silently clamps to the nearest valid value. That is three concerns intertwined: detect-invalid, mutate-input, notify-user. The caller passed pace=2.5 for v3 and the system now ships pace=2.0 without their consent. Either reject (raise, like the model validation does for prompt/mode) or accept and document the clamp as a feature, but pick one. Hidden mutation is a classic place-oriented-programming smell: the value the caller handed in is not the value the system uses, and the caller has no way to observe that except by reading logs.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "377-381",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "supports_X capability flags reinvent a set as a struct of booleans",
+        "detail": "ModelConfig has supports_prompt, supports_mode, supports_language. TTSModelConfig has supports_pitch, supports_loudness, supports_temperature. This is a set encoded as named fields. A set literal {\"prompt\", \"mode\", \"language\"} per model would be one value, queryable with `in`, and would not need a new attribute every time Sarvam adds a parameter. The current shape forces every new capability to touch the dataclass definition and every existing model entry. Data, not schema.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "73-91",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "InputParams uses Pydantic Field defaults that the warning logic then treats as 'unset'",
+        "detail": "pitch=0.0, loudness=1.0, temperature=0.6 are the Pydantic defaults. The constructor then checks `if params.pitch != 0.0` to decide whether to warn. This complects 'default value' with 'user explicitly set this'. A user who explicitly passes pitch=0.0 to a v3 model will get no warning; a user who passes loudness=1.0 to v3 gets no warning either. The value 0.0 is doing two jobs: it is both the default and the sentinel for 'not provided'. Use Optional[float] = None for the parameter and let None mean 'use the model's default'.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "405-415",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stringly-typed model names with sorted() for error messages instead of values",
+        "detail": "`if model not in MODEL_CONFIGS` is fine, but the model name itself remains a bare string flowing through self.model_name, self._config, and every comparison. The SarvamTTSModel enum exists but is not used for the model parameter type. Either commit to the enum end-to-end (typed value, no string comparisons) or remove the enum and admit it is a documentation artifact. The current state \u2014 enum exists, dict is keyed by strings, constructor accepts strings \u2014 is the worst of both: ceremony of types without the safety.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "69-86",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_prompt silent no-op when model does not support prompts and prompt is None",
+        "detail": "set_prompt(None) on a saarika model returns silently. This is the 'easy' choice (callers can call set_prompt unconditionally) but it complects two cases: 'clearing a prompt that was never set' and 'asking a model that has no prompt concept to clear it'. The caller cannot tell whether they hit a no-op path or a real clear. Either always raise on unsupported models, or always succeed on None. The asymmetric behavior is the kind of place-bound state-machine surprise that compounds when a fourth model arrives.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "298-308",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR is a careful expansion of a service that had grown a few `if \"saarika\" in model.lower()` branches and replaces them with a config table. That is movement in the right direction \u2014 the routing is now a value rather than a scattered conditional \u2014 but the table itself is complected: capability, defaults, and SDK-endpoint routing are jammed into one dataclass, and on the TTS side the same speaker list is encoded three times (enum, tuple in config, helper function). That triplication already produced a visible disagreement: docs and PR description say v3's default speaker is `aditya`, the config says `shubh`. The pace-clamp path silently mutates caller input instead of either rejecting it (like prompt/mode validation does) or accepting it as a documented feature \u2014 pick one. The right next step is not more abstraction but less: one map of `model -> {capabilities-set, defaults, endpoint}` where each piece is the smallest value that does its one job, and the enums either become the only source of truth for speakers or get removed. SIMPLE is reachable here; what's in the PR is EASY-NOT-SIMPLE."
+  },
+  "raw": ""
+}

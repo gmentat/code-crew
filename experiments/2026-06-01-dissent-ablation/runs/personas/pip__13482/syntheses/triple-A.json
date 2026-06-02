@@ -1,0 +1,79 @@
+{
+  "task_id": "pip__13482",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver silently drops the prepared/needs_more_preparation post-condition, leaving requirement state inconsistent for any caller that skips the new call site.",
+        "detail": "The resolver used to guarantee every requirement ended with prepared=True and needs_more_preparation=False. Now that invariant is owned by whichever command remembers to call prepare_linked_requirements_more. Extensions, tests, and future commands inherit a half-prepared RequirementSet by default. Either keep the flag flip near prep or document the contract loudly.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-186",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist caches a metadata-only distribution with no invalidation or priority contract when the full wheel later lands.",
+        "detail": "get_dist() returns self._distribution first, before metadata_directory or local_file_path. If a metadata-only BaseDistribution is cached and the requirement is later fully prepared, callers receive the stale view forever. There is no documented priority, no invalidation on full prep, and no assertion of equivalence \u2014 a silent correctness landmine.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is set as a side-effect inside the metadata-fetch branch, complecting fetch with reporting and risking failure when source_dir is unset in dry-run.",
+        "detail": "The caller mutates req.download_info via direct_url_from_link(req.link, req.source_dir) when metadata_dist is non-None. In dry-run req.source_dir may not exist, which works on PyPI wheels in CI but explodes on VCS URLs. download_info should be computed once at link time as a pure value, not patched in conditionally inside the fetch path.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Identical prepare_linked_requirements_more call is copy-pasted into download.py, install.py, and wheel.py instead of a shared finalize step.",
+        "detail": "Three commands now independently call preparer.prepare_linked_requirements_more right after resolve(). This is incidental complexity migrated out of the resolver into every caller \u2014 the fourth command (e.g., lock) will forget the incantation. Push it back into resolve() behind a flag, add a single finalize helper, or make dist access trigger preparation lazily.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test demonstrates that --dry-run actually avoids downloading full wheels.",
+        "detail": "The headline behavior change is 'dry-run no longer downloads full wheels,' which is a one-line functional assertion: run --dry-run against a PEP-658 wheel and assert the wheel bytes were not fetched. The diff ships zero tests for this. Without a regression test the behavior will silently rot back.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Patch combines two distinct changes \u2014 the dry-run fix and download_info plumbing for pip lock/--report \u2014 and should be split.",
+        "detail": "The news entry itself names both 'pip lock' and 'pip install --dry-run.' Splitting into two patches (one moving eager prep out of the resolver, one populating download_info for metadata-only fetches) would make review, bisection, and reverts tractable when one half regresses.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the intent is right \u2014 eager full-download inside resolve() was the bug \u2014 but the execution silently retires a resolver post-condition and scatters the replacement call across three commands, guaranteeing a future caller will forget it. The new set_dist/get_dist cache has no documented priority or invalidation story, so a metadata-only distribution can shadow a fully-prepared one. download_info is mutated as a side-effect inside the metadata-fetch branch, which is both a design smell and a likely runtime hazard for dry-run + VCS. No regression test ships for the headline behavior. NEEDS-WORK: consolidate the call site, fix the cache invariant, decouple download_info, and add a dry-run test."
+  }
+}

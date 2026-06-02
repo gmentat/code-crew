@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "protocompile__569",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Contract of Sort() not stated; reentrancy and cleanup invariants implicit",
+        "detail": "The Sorter ADT exposes Sort() returning an iter.Seq[Node], but the contract is not documented: preconditions (no other Sort iteration in flight), postconditions (state and stack are cleared on yield completion or early termination), and the invariant that `iterating` is true only while a yield function is being driven. Callers must infer these from reading the body. State a contract block above Sort() naming pre/post/invariant/frame so the next maintainer doesn't break substitutability of the type across call sites.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "60-110",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cleanup-on-defer couples state lifecycle to iteration in a way the type spec does not promise",
+        "detail": "Previously state was cleared at the *start* of Sort(); now it is cleared in a deferred block at the end of the iteration. These are observably different contracts: under the new contract, if the caller never starts the returned iterator (calls Sort() but discards the Seq, or never invokes yield), `s.iterating` is never set, so no cleanup runs \u2014 but state from the previous call has also already been cleared by the previous defer, so this happens to be fine. However, if the caller panics inside `yield`, the deferred clear runs and resets `iterating`, which is correct, but this behavior should be specified. Decide and document: is cleanup an invariant of Sort() the function, or of completed iteration?",
+        "file": "internal/toposort/toposort.go",
+        "lines": "63-77",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Three-state encoding collapsed to two without renaming the byte type or documenting the new state machine",
+        "detail": "The `unsorted | working | walking | sorted` enum lost `working`, and `walking` now serves the role previously played by `working` (in-progress, children pushed). The state machine of an ADT is part of its contract; please add a short comment above the const block stating: unsorted = not yet visited; walking = children have been pushed, awaiting second visit; sorted = yielded. Otherwise a future reader will wonder why `walking` is set before any walk has actually begun.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "25-29",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment typos in the DFS explanation weaken the spec it carries",
+        "detail": "The updated comment reads 'whether this node has been visisted and if its the first or second visit'. Two issues: 'visisted' should be 'visited', and 'its' should be 'it's'. The comment is doing real specification work (it explains the state machine), so its precision matters.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "83-86",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Post-yield assignment moved inside the !yield-success branch changes the postcondition in a subtle way",
+        "detail": "Previously `s.state[k] = sorted` ran unconditionally after the pop, even when yield returned false (early termination). Now it only runs when yield returns true. Functionally this is fine because the deferred clear wipes state anyway, but it means the per-key postcondition 'after pop, state[k] == sorted' no longer holds at the moment of early return. If anything external ever observed state mid-iteration it would now see a different value. State explicitly that state is private to a single Sort() invocation and is not observable.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "98-104",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test exercising state reuse across successive Sort() calls on the same Sorter",
+        "detail": "The PR description says this 'fixes state reuse' \u2014 the contract being repaired is that a Sorter[Node, Key] is reusable across multiple Sort() calls and across early termination. There should be a test that (a) runs Sort() to completion, then calls Sort() again with a different DAG, and (b) runs Sort(), breaks out early via yield returning false, then calls Sort() again \u2014 verifying both produce correct topological orders. Without such tests, the regression that prompted this fix is not pinned down.",
+        "file": "internal/toposort/toposort.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The abstract data type here is a reusable topological sorter whose contract is: across successive Sort() calls on the same Sorter, the previous run's state must not contaminate the next one. This PR moves cleanup from start-of-call to end-of-iteration (via defer) and collapses the unsorted/working/walking/sorted enum to three states, which is a reasonable simplification. The substitution properties of the type are preserved, but the contract \u2014 preconditions, postconditions, the lifecycle of `iterating`, and the state machine of the byte enum \u2014 is nowhere written down, so future maintainers will have to re-derive it. The fix is correct in mechanism; what is missing is the specification work and the regression tests that pin the reuse contract in place. Decision label: ADT-SOUND with SPEC-MISSING."
+  },
+  "raw": ""
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Mutates shared rateLimit object's Stats/FullKey on every GetLimit call, creating data race and per-request stats churn",
+        "detail": "The `rateLimit` returned by `GetLimit` is the same pointer stored in the descriptor tree at config load. The new code unconditionally replaces `rateLimit.Stats` and `rateLimit.FullKey` on every request (whenever `enhancedKey != rateLimit.FullKey`). This mutates shared state under concurrent traffic (data race) and creates fresh Stats objects per request, leaking metric registrations.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-431",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`enhancedKey != rateLimit.FullKey` condition fires even when value_to_metric is unset, because FullKey is empty by default",
+        "detail": "Nothing in the diff sets `rateLimit.FullKey` on the non-detailed path before this comparison. So `rateLimit.FullKey` is the empty string (or stale prior value) for every fresh limit, making `enhancedKey != rateLimit.FullKey` always true. This means every descriptor lookup re-creates Stats via NewRateLimit, regardless of whether value_to_metric was configured anywhere - a major regression.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-431",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Double Stats allocation: NewRateLimit is called with one Stats then immediately overwritten with another",
+        "detail": "Line creates `NewRateLimit(..., this.statsManager.NewStats(rateLimit.FullKey), ...)` and the next line does `rateLimit.Stats = this.statsManager.NewStats(enhancedKey)`. The first NewStats call is wasted and registers a counter under the old key in the stats sink. Either skip the first allocation or pass enhancedKey directly to NewRateLimit.",
+        "file": "src/config/config_impl.go",
+        "lines": "427-429",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "value_to_metric key construction duplicates logic across three branches that produce identical output",
+        "detail": "In the wildcard, matchedUsingValue, and default-key branches inside the new block, when `valueToMetric` is true the code is identical: write `entry.Key`, then `_value` if non-empty. The branches could collapse to: `if valueToMetric || matchedUsingValue { include value }`. Current structure makes the precedence rules harder to audit and risks divergence on future edits.",
+        "file": "src/config/config_impl.go",
+        "lines": "359-388",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unbounded metric cardinality risk not gated by any safeguard or warning log",
+        "detail": "`value_to_metric` injects raw runtime values (route names, user IDs, arbitrary header values) into Prometheus/statsd keys. Unlike `detailed_metric` which is documented with an `NB!` warning, the new feature lets users enable per-level value injection at intermediate descriptors where cardinality compounds multiplicatively. README mentions visibility but understates the cardinality blowup risk vs detailed_metric.",
+        "file": "README.md",
+        "lines": "342-349",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile; prefer named fields",
+        "detail": "`&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric}` relies on field order. Adding a future field will silently shift meaning. Use named fields (`{descriptors: ..., limit: ..., valueToMetric: ...}`) for safety and readability.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "summary": "The feature is conceptually sound and well-tested for the happy path, but the new override block at the end of `GetLimit` has two serious problems: it mutates shared descriptor state under concurrent traffic, and its guard condition (`enhancedKey != rateLimit.FullKey`) is broken because `FullKey` is not initialized on the non-detailed-metric path, causing the recreation logic to fire for every request even when no descriptor sets `value_to_metric`. Additionally, the code allocates two Stats objects per call where one suffices. Cardinality risk should be called out more prominently in docs, and the positional struct literal should switch to named fields. The tests don't exercise concurrent access or the no-flag regression path against the new override block, which is how these issues slipped through."
+  }
+}

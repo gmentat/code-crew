@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panics likely crashes callers expecting non-nil *result",
+        "detail": "On the new path `if output == nil { return nil }`, callers of run() (and downstream consumers) almost certainly dereference the returned *result. Propagating a raw nil just relocates the nil deref. The fix should either return a sentinel result with Fatal set (e.g., wrapping the leader panic) or have callers explicitly handle nil. This needs a test.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Cycle check is skipped on the leader-panic recovery branch, reintroducing potential infinite waits",
+        "detail": "Previously the cycle detection ran whenever output was already pending. The new CompareAndSwap-failure branch loads output and calls waitUntilDone without invoking checkCycle. If the caller is actually in a cycle with this task, we now silently wait on output.done instead of returning ErrCycle. This is a behavioral regression.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment typo and inverted meaning: 'but we did see a result'",
+        "detail": "The comment says 'Leader panicked but we did see a result' \u2014 but the code path is precisely the one where we did NOT see a result (Load returned nil). This should read 'did not see a result' or similar. Confusing comments in race-condition code are dangerous for future maintainers.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TOCTOU between t.result.Load() and waitUntilDone \u2014 output may still be cleared before select",
+        "detail": "After CAS fails we Load() into a local output var, but the leader can panic and clear t.result between this Load and entering the select. We now read from the captured *output.done, which is correct \u2014 but if the leader's panic recovery is supposed to signal waiters, closing nothing means waiters block until caller.ctx.Done(). Confirm leader panic path closes output.done before niling t.result.",
+        "file": "experimental/incremental/task.go",
+        "lines": "454-460",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test added for the race / nil-deref scenario",
+        "detail": "This is a concurrency bug fix described as fixing a panic in production. Without a test that reliably reproduces the leader-panic-then-waiter sequence (e.g., using a query that panics with concurrent waiters), there is no guarantee the fix holds or that future refactors won't regress. Recommend a stress test with -race.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle walks caller.path twice; could be a single pass with index tracking",
+        "detail": "The extracted helper preserves the original two-pass walk: one to detect the cycle, one to collect nodes up to it. A single pass collecting into a slice and truncating at the match would be simpler and avoids re-walking. Minor, but since the code was being moved anyway, worth considering.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "summary": "The PR correctly identifies the race (waiters reading t.result.Load().done after leader nils it) and the local-capture fix is right in principle. However, two concerns are serious: (1) returning a bare nil *result from run() on the panic path likely just relocates the nil deref to callers, and (2) the new CompareAndSwap-failure branch bypasses checkCycle, which the old code path always ran when output was pending \u2014 a behavioral regression. Also a misleading comment and no regression test for a concurrency bug. The checkCycle refactor itself is a clean extraction."
+  }
+}

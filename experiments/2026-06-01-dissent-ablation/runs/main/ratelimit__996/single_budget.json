@@ -1,0 +1,174 @@
+{
+  "task_id": "ratelimit__996",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Detailed-metric branch sets FullKey but the original code path did not \u2014 but value_to_metric branch reads rateLimit.FullKey before it is set, comparing enhancedKey to a possibly-empty string",
+        "detail": "In the non-detailed branch, the code does `if enhancedKey != rateLimit.FullKey`. However, FullKey is only assigned inside the new detailed_metric branch above (and possibly elsewhere in NewRateLimit). For any RateLimit created without detailed_metric, rateLimit.FullKey may be empty (or the un-enhanced default), so this comparison effectively always triggers the override. The result is that stats are reconstructed via NewRateLimit + reassigned twice (once with FullKey, once with enhancedKey), creating an extra unused Stats object for every call \u2014 wasted allocation and possibly duplicate stats registration.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-428",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "valueToMetricFullKey is built unconditionally for every descriptor in every request, then mostly thrown away",
+        "detail": "The builder is appended to for every entry traversal regardless of whether any descriptor in the chain has valueToMetric=true. Then the code compares to rateLimit.FullKey and overrides stats every time the strings differ. Because FullKey is generally empty for non-detailed limits, this allocates a new Stats object on every GetLimit call \u2014 even for configs that never opt into value_to_metric. This is a hot path; allocating + registering a stats counter per request is a serious performance regression and a likely stats-leak (the unused Stats object from NewRateLimit is created and discarded).",
+        "file": "src/config/config_impl.go",
+        "lines": "319-322, 367-388, 418-428",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "RateLimit pointer is reassigned via NewRateLimit, breaking identity for callers that already hold a reference",
+        "detail": "`rateLimit = NewRateLimit(...)` replaces the pointer with a fresh struct. The original rateLimit was obtained from nextDescriptor.limit; depending on whether GetLimit returns the same pointer reference that the descriptor tree holds, reassignment to a local variable is harmless \u2014 but `rateLimit.Stats = ...` mutates the new value. If the descriptor.limit pointer is the one returned, the caller now receives a different object than the cached descriptor.limit, which means subsequent calls see the original (un-enhanced) limit while this caller sees the enhanced one. This is non-deterministic in a way the tests do not cover.",
+        "file": "src/config/config_impl.go",
+        "lines": "423-427",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Stats counter registration on every request will explode cardinality / metrics registry",
+        "detail": "statsManager.NewStats is typically intended to register named stats once at config load. Calling it inside GetLimit (per-request) for every distinct enhanced key \u2014 even when value_to_metric is disabled because of the FullKey mismatch bug above \u2014 will register new stats objects on every call. For high-RPS deployments this likely leaks memory in the underlying stats store and defeats the purpose of pre-allocated stats counters. Detailed_metric has the same shape but is gated on `rateLimit.DetailedMetric`; the value_to_metric branch lacks an equivalent gate ('any descriptor in the chain had ValueToMetric=true').",
+        "file": "src/config/config_impl.go",
+        "lines": "418-428",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Logic duplication between matchedViaWildcard, matchedUsingValue, and default-key branches",
+        "detail": "The three branches that build valueToMetricFullKey all do effectively the same thing: 'if valueToMetric or matchedUsingValue, append key_value (when value non-empty), else append key'. The matched-via-wildcard branch and the default-key branch are line-for-line identical. The matched-using-value branch always appends value (because explicit key+value match means value is in the config), which is correct, but could be unified. Collapsing this to a single conditional would reduce ~25 lines to ~5 and remove the risk of future divergence.",
+        "file": "src/config/config_impl.go",
+        "lines": "367-389",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior when matchedUsingValue is true but valueToMetric is false is inconsistent with the documented contract",
+        "detail": "The PR description says 'If the descriptor matches via an explicit key+value or wildcard, the runtime value is always included in the metric key'. The code matches that for matchedUsingValue (explicit value always appended). But for wildcard, only when valueToMetric is true does it append the full runtime value; otherwise it appends only the key (not key_wildcardvalue). That contradicts existing behavior pre-PR where wildcard-matched descriptors used the *wildcard key* (e.g., key_read*) in metrics. This silently changes the metric naming for wildcard configs that never opted into value_to_metric \u2014 a backward-compat break.",
+        "file": "src/config/config_impl.go",
+        "lines": "368-377",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test for the 'value_to_metric not set anywhere' case where matchedViaWildcard is true",
+        "detail": "All wildcard tests have value_to_metric: true. There is no test that exercises pre-existing wildcard behavior with value_to_metric disabled to confirm that the previous metric key (which would have used the wildcard pattern like `action_read*`) is preserved. Given the regression risk in the wildcard branch (above), this is the test that would catch it.",
+        "file": "test/config/config_test.go",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literal in loadDescriptors and loadConfig is fragile",
+        "detail": "`&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric}` and the parallel `{..., nil, false}` rely on field order. Any future field addition silently shifts assignments. Switch to named-field initialization (`&rateLimitDescriptor{descriptors: ..., limit: ..., valueToMetric: ...}`) \u2014 Go idiom and consistent with the rest of the file's style. The PR already introduces a field; adding another later will be error-prone.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Empty-value handling is tested but contradicts the documented 'always include runtime value' contract",
+        "detail": "TestValueToMetric_WithEmptyValue verifies that an empty runtime value collapses to `key` (no trailing underscore). That is sensible UX, but the README says the runtime value is included. Document this edge case in the README (or normalize to an explicit sentinel like 'empty') so operators are not surprised when two distinct request patterns both produce `route.http_method.subject_id`.",
+        "file": "README.md",
+        "lines": "342-349",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Field name asymmetry: ValueToMetric vs DetailedMetric",
+        "detail": "DetailedMetric ('detailed metric on/off') and ValueToMetric ('value-to-metric on/off') have different naming patterns. A clearer name like `IncludeValueInMetric` or `ValueInMetric` would read more naturally. Minor, but this is a public YAML field \u2014 renaming after release is painful.",
+        "file": "src/config/config_impl.go",
+        "lines": "35",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "TOC not regenerated",
+        "detail": "The PR description acknowledges that doctoc needs to run. Either run it or note explicitly that the TOC entry was hand-edited correctly.",
+        "file": "README.md",
+        "lines": "24,35",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test naming nit: tests assert behavior that wasn't documented in PR description (FullKey == Stats.Key invariant)",
+        "detail": "TestValueToMetric_FullKeyMatchesStatsKey is a good invariant test, but FullKey is not in the diff except as a write site. If FullKey is an existing field this is fine; if it's added in this PR, the diff is incomplete (no field declaration shown). Verify that FullKey is defined on RateLimit elsewhere or include the addition in this PR.",
+        "file": "src/config/config_impl.go",
+        "lines": "415, 426",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Should value_to_metric override stats per-request or be pre-resolved at config load?",
+        "positions": [
+          {
+            "persona": "performance/abstraction-discipline",
+            "position": "Stats should be pre-allocated at config load (like detailed_metric handles its key build-up) or the enhanced key should be assembled into a per-descriptor cached value. Per-request statsManager.NewStats calls are an anti-pattern in this codebase."
+          },
+          {
+            "persona": "pragmatic-shippability",
+            "position": "Because the enhanced key depends on runtime entry values (not static config), per-request resolution is unavoidable. The optimization is to gate the work behind a 'any-descriptor-in-chain has valueToMetric=true' flag and skip the whole builder when not needed."
+          }
+        ]
+      },
+      {
+        "topic": "Wildcard semantics under value_to_metric=false",
+        "positions": [
+          {
+            "persona": "backward-compat-strict",
+            "position": "The current wildcard metric key (e.g., `action_read*`) must remain unchanged when value_to_metric is not set. The new code drops the wildcard suffix and emits only the key, which is a silent behavior change."
+          },
+          {
+            "persona": "feature-intent",
+            "position": "The PR description frames the wildcard-as-key-only behavior as the intended default; users wanting the full value should opt in. If so, this should be called out as a breaking change in the changelog."
+          }
+        ]
+      },
+      {
+        "topic": "Whether building valueToMetricFullKey unconditionally is acceptable",
+        "positions": [
+          {
+            "persona": "simplicity-first",
+            "position": "Building the string unconditionally keeps the code linear and easy to reason about. The cost is one strings.Builder per request, which is cheap."
+          },
+          {
+            "persona": "data-structure-soundness",
+            "position": "The cost is not the builder \u2014 it's the downstream `statsManager.NewStats(enhancedKey)` call that fires on every request due to the FullKey-comparison bug. That's a real correctness + perf problem regardless of how the string is built."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR adds a useful, opt-in metric-cardinality knob, with good test coverage of the happy paths. However, the implementation has a serious correctness/performance bug: the value_to_metric override branch compares `enhancedKey` against `rateLimit.FullKey`, but FullKey appears to be set only inside this PR's new detailed_metric branch \u2014 meaning for non-detailed limits the comparison nearly always mismatches and triggers a per-request `statsManager.NewStats` allocation plus a `NewRateLimit` reconstruction whose first Stats object is immediately discarded. This both leaks stats registrations and breaks the apparent contract that GetLimit returns a stable, pre-allocated rate limit. Secondary issues: the wildcard branch silently changes metric naming for configs that did not opt in (backward-compat risk), the three branches building the enhanced key are nearly duplicate, positional struct literals are fragile, and the missing test for value_to_metric=false + wildcard would have caught the regression. Recommend gating the entire enhanced-key/stats path on a chain-level 'any valueToMetric' flag computed at config load, and using named-field struct initialization throughout."
+  },
+  "raw": ""
+}

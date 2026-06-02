@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "matchedUsingValue is set true even for wildcard match, then conditionally reset, leading to confusing dead-branch logic",
+        "detail": "After the wildcard loop sets matchedViaWildcard=true, matchedUsingValue is still true. The subsequent if/else if structure has matchedViaWildcard and matchedUsingValue branches that produce identical output when valueToMetric is true (both append key_value). The non-valueToMetric branches also both produce just the key. The branches can be collapsed; current form invites future bugs.",
+        "file": "src/config/config_impl.go",
+        "lines": "356-386",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Double NewStats call wastes a stats allocation when value_to_metric overrides the key",
+        "detail": "In the override branch, code calls NewRateLimit(... NewStats(rateLimit.FullKey) ...) and then immediately overwrites rl.Stats with NewStats(enhancedKey). The first NewStats call registers a stats struct under the old key that is never used, polluting the stats store and wasting allocations on every GetLimit call when value_to_metric is enabled.",
+        "file": "src/config/config_impl.go",
+        "lines": "422-430",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "rateLimit.FullKey may be uninitialized/empty when override branch reads it",
+        "detail": "The override block at line 422 reads rateLimit.FullKey to pass into NewRateLimit, but FullKey is only set above when DetailedMetric is true. For the common non-detailed path, FullKey may be empty or stale (depending on NewRateLimit defaults), causing the throwaway NewStats call to register under an incorrect key. Verify FullKey is populated on the default path.",
+        "file": "src/config/config_impl.go",
+        "lines": "420-428",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Override unconditionally fires whenever any value_to_metric flag is set, including when no descriptor actually had the flag enabled",
+        "detail": "The condition `enhancedKey != rateLimit.FullKey` triggers the override on every limit lookup when value_to_metric pathing produced any different string. But for descriptors with no value_to_metric flag set anywhere, valueToMetricFullKey still builds key segments and may differ from the prior FullKey representation, causing a needless rebuild and stats reallocation on every hot-path call. This is a performance regression on the request path.",
+        "file": "src/config/config_impl.go",
+        "lines": "418-430",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stats key mutation on every GetLimit call races with concurrent readers and breaks metric stability",
+        "detail": "GetLimit is called on the request hot path. The override block mutates rateLimit.Stats and rateLimit.FullKey on every call. RateLimit objects are shared across goroutines after config load; concurrent writes to Stats and FullKey are a data race, and re-creating stats per request defeats the cardinality protection the feature was supposed to provide.",
+        "file": "src/config/config_impl.go",
+        "lines": "411-430",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Wildcard branch in metric construction is redundant with the matchedUsingValue branch",
+        "detail": "Both branches produce `key` or `key_value` depending on valueToMetric and entry.Value; they could be a single block. Splitting them suggests the wildcard case is special when behaviorally it is not, increasing maintenance burden.",
+        "file": "src/config/config_impl.go",
+        "lines": "359-377",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "summary": "The PR adds a useful `value_to_metric` field, but the implementation in GetLimit has several concerns. The most serious is that the override block mutates the shared RateLimit's Stats and FullKey on every request, which is both a data race and a per-request stats allocation that undermines the feature's cardinality control goals. Additionally, a throwaway NewStats call wastes allocation under an old/possibly-empty FullKey. Logic for matchedViaWildcard/matchedUsingValue branches collapses to the same output and should be simplified. Tests are thorough for the happy path but don't appear to cover concurrent access or verify single stats registration."
+  }
+}

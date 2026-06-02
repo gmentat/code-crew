@@ -1,0 +1,84 @@
+{
+  "persona": "torvalds",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles comparison uses raw strings instead of resolved paths \u2014 fragile path matching",
+        "detail": "In isIncluded, `filename` is the slashed+cleanUrl form of whatever path was passed in (often absolute, sometimes module URL). `this.changedFiles` is whatever VitestGit.findChangedFiles returns (typically absolute paths resolved against ctx.config.root) or whatever ctx.config.related contains. The code does a naive `this.changedFiles.includes(filename)` string match. If one side is absolute and the other isn't, or one is slashed and the other isn't, every file silently falls out of coverage and the user sees empty reports with no error. Normalize both sides through the same `slash(path.resolve(root, ...))` pipeline before comparing, and assert the invariant.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache cleared in onTestRunStart but isIncluded results from earlier calls leak",
+        "detail": "onTestRunStart clears globCache after computing changedFiles. Fine. But isIncluded is the kind of function that gets called from many paths \u2014 `resolveFilesToCover`, transforms, reporters \u2014 and any call before onTestRunStart runs will populate the cache with the pre-changed-files answer (true/false based only on glob). The cache key is just `filename`, not `(filename, hasChangedFilter)`. If the cache is hit after changedFiles is set, you get the wrong answer. Either make the cache key include the changed-filter state, or guarantee onTestRunStart runs before any isIncluded call and document it. Right now it's order-dependent and that's how bugs live for years.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "152-182, 332-346",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CLI transform accepts boolean inputs that the CLI parser never produces",
+        "detail": "The transform checks `value === true` and `value === false` alongside the string variants. CLI arguments are strings. This is defensive code for a path that doesn't exist, and worse, it makes the reader wonder when those booleans show up. Either it's dead code (delete it) or there's an actual code path that passes booleans through and that path needs a comment explaining why. Pick one.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three identical `await this.coverageProvider?.onTestRunStart?.()` insertions \u2014 abstraction smell",
+        "detail": "core.ts gets the same line inserted in three places right after `_testRun.start(...)`. That's a sign the hook belongs inside `_testRun.start` or in a small wrapper, not copy-pasted at every call site. Today it's three; tomorrow someone adds a fourth call site to `_testRun.start` and forgets the hook, and coverage silently goes back to reporting everything. Either wrap the start call, or document loudly why each site needs it independently.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-886",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "test file mode flipped to 0755 for no reason",
+        "detail": "`test/coverage-test/test/changed.test.ts` mode changes from 100644 to 100755. It's a .ts file, not an executable. Unrelated noise in the diff. Revert the chmod.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl change is a behavior shift smuggled into a feature patch",
+        "detail": "Switching `slash(_filename)` to `slash(cleanUrl(_filename))` in isIncluded changes how every existing caller of isIncluded resolves filenames \u2014 query strings now get stripped before matching. That may be the right fix (the query-param test seems to depend on it), but it's a separate logical change from 'add coverage.changed' and deserves either its own commit or at minimum a sentence in the message explaining why isIncluded needed it independently. THREE-PATCHES territory: (1) cleanUrl in isIncluded, (2) onTestRunStart hook plumbing, (3) coverage.changed option.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "12, 151",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test for the failure mode where git ref is invalid or repo is not a git repo",
+        "detail": "VitestGit.findChangedFiles can return null/undefined when the ref is bad or the cwd isn't a git working tree. The code handles it (`changedFiles ?? undefined`), but there's no test asserting the user-visible behavior in that case. Does coverage fall back to all files? Throw? Silently report nothing? The maintainer six years from now wants to know which of those is intended.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-340",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The shape of the patch is right \u2014 small option, sensible inheritance from `test.changed`, hook on the coverage provider, tests included \u2014 and the feature is one users actually want. But two correctness concerns matter before this lands: changedFiles is compared as raw strings against whatever isIncluded gets handed, which is a path-normalization landmine, and the globCache key doesn't include the changed-filter state so order of calls determines correctness. Also, this is really three patches in one \u2014 the cleanUrl shift in isIncluded is a behavior change independent of coverage.changed and should be called out separately. Style nits: dead boolean branches in the CLI transform, three copy-pasted hook calls in core.ts that want a wrapper, and a gratuitous chmod on the test file. Fix the path normalization, fix or document the cache invariant, and either split the cleanUrl change or justify it in the commit message, and this lands."
+  },
+  "raw": ""
+}

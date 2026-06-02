@@ -1,0 +1,79 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "run() returns bare nil on leader panic, breaking its non-nil postcondition and relocating the nil-deref upstream",
+        "detail": "The new `if output == nil { return nil }` branch violates run()'s implicit contract that it always returns a non-nil *result. Callers dereference output.done, output.Fatal, etc., so this just moves the nil-deref one layer up. Fix: return a sentinel result with Fatal set instead of nil, and document the invariant.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TOCTOU race not fully closed; t.result can still be cleared between Load and use across both paths",
+        "detail": "Between CompareAndSwap failing and t.result.Load(), the leader can panic and nil t.result. The patch catches one snapshot but the pending-output branch above still trusts Load() without the same guard, and the cycle check is skipped on the CAS-failure path where it previously ran. Either retry the CAS loop or document memory ordering precisely.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code path where output is nil",
+        "detail": "On the `return nil` branch, output is nil and we did NOT see a result. The comment inverts the meaning on a subtle concurrency branch, which will mislead maintainers about when this path fires and whether returning nil is intended. Fix to read 'did not see a result' or rewrite for clarity.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for the panic-while-waiting race",
+        "detail": "A concurrency bug that produced a nil deref is being fixed with zero tests. Needs a deterministic reproducer: inject a panic in the leader, have N waiters, assert they all get a sensible error rather than nil or panic. Without it, this will regress.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Leader-panic invariant (t.result reset to nil) and new waitUntilDone snapshot semantics are undocumented",
+        "detail": "The fix depends on an invariant that the panicking leader CASes t.result back to nil, but this is not stated at the call site or module boundary. Additionally, waitUntilDone now takes `output *result` as a caller-supplied snapshot rather than re-reading t.result.Load(), which is a meaningful contract change that needs documenting so future edits don't silently break callers.",
+        "file": "experimental/incremental/task.go",
+        "lines": "451-550",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowed `output` variable in run() hurts readability",
+        "detail": "Inside the CAS-failure branch, `output := t.result.Load()` shadows the named return `output`. The two represent different roles (this goroutine's result vs. the leader's) and a reader must track both. Rename the inner local (e.g., `leader` or `winner`) so the named return is the only `output`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel agrees the checkCycle extraction is a clean refactor, but the actual race fix is half-done: returning bare nil from run() on a panicked leader violates a previously universal postcondition and just relocates the nil-deref into every caller. The TOCTOU window remains open in principle, the cycle check is now skipped on the CAS-failure slow path, and a comment inverts the meaning of the new branch. Fix by returning a Fatal-carrying sentinel instead of nil, documenting the leader-panic invariant and waitUntilDone's new snapshot contract, adding a deterministic regression test for the panicking-leader case, and ideally splitting refactor from race fix."
+  }
+}

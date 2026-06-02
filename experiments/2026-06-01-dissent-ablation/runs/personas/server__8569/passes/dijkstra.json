@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "server__8569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig.is_registered is shared mutable state mutated under concurrent requests without a lock.",
+        "detail": "_create_trtllm_generate_request reads is_registered, loads weights, and flips it to True with no synchronization. Two concurrent first-use requests will both observe False, both emit weights, and either both succeed redundantly or race against the backend's task_id registration. State the invariant: 'after first successful registration, is_registered is True.' It is not maintained.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "triton.py _create_trtllm_generate_request",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "is_registered is set to True before the request has demonstrably succeeded.",
+        "detail": "The flag is flipped immediately after attaching inputs, not after the backend acknowledges registration. If the request fails (network, OOM, validation), subsequent calls will omit lora_weights and lora_config under a task_id the backend never learned. Postcondition 'task_id is registered with backend' is asserted, not proved.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "_create_trtllm_generate_request lora block",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_task_id is assigned per-repo-iteration and may collide across repos or restarts.",
+        "detail": "lora_task_id starts at 1 inside _parse_lora_configs and increments per entry across all repo paths, but there is no documented invariant tying task_id to LoRA identity across server restarts or multiple model loads. Same name may get different task_id; different LoRAs in different models may share task_id 1. Specification of task_id uniqueness is absent.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "_parse_lora_configs",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "lora_config_path identifier is rebound inside the loop, shadowing the outer multi_lora.json path.",
+        "detail": "Outer scope: lora_config_path = .../multi_lora.json. Inside the loop body: lora_config_path = os.path.join(lora_path, 'model.lora_config.npy'). The same name now denotes two distinct objects in the same scope. A reader cannot follow control flow without simulating it. Smuggled-goto by naming. Rename one.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "_parse_lora_configs inner loop",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare `except Exception` swallows all parse errors and returns None, hiding real bugs as 'no LoRAs configured'.",
+        "detail": "Function postcondition is ambiguous: None means 'no LoRA support', 'malformed config', or 'unrelated bug in this function'. Caller cannot distinguish. The added traceback print does not constitute error handling; it is defensive-as-substitute for a defined error contract. State which exceptions are expected and let the rest propagate.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "_parse_lora_configs except Exception",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Stray `print(f\"backend: {backend}\")` and traceback prints in request paths are debug residue.",
+        "detail": "Print statements inside _parse_lora_configs and in every fastapi router's exception handler are debugging scaffolding, not logging. They bypass any configured logger, cannot be filtered, and will pollute stdout in production. Use the existing logger and remove the per-iteration print before merge.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "multiple",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The feature is TESTED-NOT-PROVED and contains a SMUGGLED-GOTO via shared mutable registration state. The is_registered flag on TritonLoraConfig is a hidden global mutated from request handlers without synchronization and without waiting for backend acknowledgment; its invariant ('True iff backend knows this task_id') is not maintained under concurrency or partial failure. Secondary failures of structured reasoning: task_id allocation has no stated uniqueness specification, an identifier is rebound mid-scope, and a blanket except Exception conflates parse errors with absence of LoRA. Debug prints have been left in production paths. REFUSED until the registration state machine is specified and proved, not merely exercised by a happy-path test."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "pike",
+  "task_id": "prowler__9702",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Title/CHANGELOG say 'single_network_interface' but PR description says 'multiple_network_interfaces' \u2014 naming is muddled.",
+        "detail": "The check folder, file, and CHANGELOG entry use 'single_network_interface' while the PR title and description refer to 'multiple_network_interfaces'. Pick one and make it the data: the check name should describe what it asserts. Naming carries the data structure for human readers; inconsistency here will leak into docs and search.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE exemption keyed on a name prefix is the wrong data structure.",
+        "detail": "Detecting GKE-managed instances by `instance.name.startswith('gke-')` is string-sniffing that any user can spoof or unintentionally match. The right data is the GKE-managed label (`goog-gke-node`) or the managed-instance-group reference from the API. Capture that field in the Instance model and key the exemption off it. Data dominates.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "27-32",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ip_forward / network-appliance exemption mentioned in metadata but not implemented.",
+        "detail": "The Notes call out network virtual appliances as legitimate multi-NIC, and `ip_forward` already exists on Instance. Either honor it (MANUAL when `ip_forward=True` and multi-NIC) or drop the claim. Right now the data is present but unused \u2014 a small composable signal left on the floor.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "27-37",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface is a 3-field bag \u2014 fine, but `public_ip` already lives at Instance level redundantly.",
+        "detail": "The new NetworkInterface struct stores name/network/subnetwork while `public_ip` continues to be computed by a parallel loop and stored on Instance. Move accessConfigs/natIP into NetworkInterface too, then derive `public_ip` from `any(nic.public_ip for nic in instance.network_interfaces)`. One pass, one source of truth, the algorithm becomes self-evident.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "105-135, 603-608",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`interface_count == 0` branch reports PASS \u2014 semantically wrong for a 'single interface' check.",
+        "detail": "When `len(network_interfaces) == 0` the code falls through with the default `status='PASS'` and a status_extended saying 'has no network interfaces'. A VM with zero NICs is not 'single network interface'; it's a degenerate/unknown case. Either keep PASS but say so explicitly, or mark MANUAL. The data shape should drive the status, not default-through.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "33-37",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The check is small and the data structure addition (NetworkInterface list on Instance) is the right move \u2014 data dominates, and now the algorithm is a one-liner. Two real issues: the GKE exemption uses string-prefix sniffing instead of the actual GKE label that the API provides, and the naming is inconsistent between 'single' and 'multiple' across title, folder, and CHANGELOG. Smaller cleanups: fold the existing parallel `public_ip` loop into the new NetworkInterface struct so there's one pass over the data, honor `ip_forward` for the network-appliance exemption the metadata promises, and don't silently PASS the zero-NIC degenerate case. Overall SMALL-AND-COMPOSABLE with one WRONG-DATA-STRUCTURE around GKE detection."
+  }
+}

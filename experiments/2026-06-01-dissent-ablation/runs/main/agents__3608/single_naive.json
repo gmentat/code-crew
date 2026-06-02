@@ -1,0 +1,144 @@
+{
+  "task_id": "agents__3608",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "PR description says CloseStream but code sends type \"Close\"",
+        "detail": "The PR description (and Deepgram's documented control message in the linked SDK) refer to a CloseStream control message ({\"type\": \"CloseStream\"}). The code instead sends {\"type\": \"Close\"} via _CLOSE_MSG. If Deepgram requires the exact string \"CloseStream\", the server will ignore the message and the fix won't actually work \u2014 defeating the entire point of the PR. This needs to be reconciled against Deepgram's current Speak v1 socket protocol before merge.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ws.receive() reads exactly one frame, not \"final messages\"",
+        "detail": "The comment claims the code waits for server acknowledgment / final messages, but asyncio.wait_for(ws.receive(), timeout=1.0) consumes only a single WebSocket frame and then discards it. If Deepgram emits multiple final audio frames or a Flushed event followed by a close acknowledgment, only the first is observed and the rest are dropped when ws.close() runs. A loop that drains until a Close frame or timeout would more faithfully implement the intent stated in the comments.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-138",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Received frame is dropped, breaking the audio emission path",
+        "detail": "_close_ws is called during teardown but the WS is presumably also being drained by a reader task that emits audio frames. Calling ws.receive() from _close_ws steals a frame from that reader, which could be a final audio chunk \u2014 exactly the truncation this PR claims to fix. The graceful-close handshake should be coordinated with the existing reader (e.g., signal the reader to drain until close, or only call receive() after the reader task has finished).",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-138",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_str on an already-closing/closed socket will raise and be swallowed",
+        "detail": "_close_ws may be invoked when the socket is already half-closed (server-initiated close, network error, cancellation). send_str will raise ConnectionResetError / ClientConnectionError, which the broad except swallows as a warning. That's acceptable, but the code should at minimum check ws.closed before attempting the Flush/Close sends to avoid noisy logs on every normal teardown path.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "129-140",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare 1.0s timeout is a magic number with no justification",
+        "detail": "The 1.0 second wait is hardcoded and uncommented as to why this value. For high-latency networks or long final audio tails this may be too short; for tests it may slow teardown unnecessarily. Promote to a class-level constant (e.g., _CLOSE_TIMEOUT = 1.0) or derive from conn_options so it is tunable and testable.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "136",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR claims alignment with STT but STT pattern not referenced",
+        "detail": "The description says this aligns with the STT implementation which already sends CloseStream. Worth confirming the STT plugin uses exactly the same message name and shape \u2014 if STT sends {\"type\": \"CloseStream\"} and TTS sends {\"type\": \"Close\"}, the divergence is itself a smell and a hint that the TTS message name is wrong.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Broad except Exception is wider than necessary",
+        "detail": "Catching Exception across the send + receive block obscures distinct failure modes (send on closed socket vs. malformed server response vs. cancellation). Narrowing to aiohttp.ClientError / ConnectionError and re-raising asyncio.CancelledError would be cleaner and avoid swallowing cancellation during shutdown.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-140",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "f-string in logger call",
+        "detail": "logger.warning(f\"Error during WebSocket close sequence: {e}\") eagerly formats the string regardless of log level. Prefer logger.warning(\"Error during WebSocket close sequence: %s\", e) or logger.exception for stack traces during teardown debugging.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_FLUSH_MSG send is new behavior, not just a CloseStream addition",
+        "detail": "The PR title/description focus on CloseStream, but the diff also sends a Flush message before close. Flushing on every teardown changes semantics for callers who close mid-stream intentionally (e.g., interruption). Consider whether Flush is desired on cancellation/interruption paths \u2014 you may want Close-without-Flush there to abandon pending audio quickly.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "131-132",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Whether the Close message name is wrong",
+        "positions": [
+          {
+            "persona": "Protocol literalist",
+            "position": "Deepgram's documented control message for Speak v1 is the exact string the server expects; if SDK reference says CloseStream, sending Close is silently a no-op and the PR doesn't actually fix the bug."
+          },
+          {
+            "persona": "Pragmatist",
+            "position": "Deepgram's Speak (TTS) socket may use Close while Listen (STT) uses CloseStream \u2014 the two endpoints have distinct protocols. Without confirmation from Deepgram's Speak socket source, we can't assert this is wrong. The maintainer likely verified against the Speak v1 socket client linked in the PR."
+          }
+        ]
+      },
+      {
+        "topic": "Whether ws.receive() in _close_ws is harmful",
+        "positions": [
+          {
+            "persona": "Concurrency hawk",
+            "position": "There is almost certainly a reader task consuming frames elsewhere; calling receive() in close steals a frame and can break audio emission. The handshake belongs in the reader loop, not in close."
+          },
+          {
+            "persona": "Ship-it pragmatist",
+            "position": "By the time _close_ws is called, the stream is being torn down \u2014 the reader is presumably already stopped or about to be. Reading one frame to drain a Close ack is a common idiom and unlikely to cause issues in practice."
+          }
+        ]
+      },
+      {
+        "topic": "Scope of the fix",
+        "positions": [
+          {
+            "persona": "Narrow-fix advocate",
+            "position": "Send Close on teardown, done. Don't also introduce Flush, don't drain frames, don't add timeouts \u2014 minimal change, easy to review and revert."
+          },
+          {
+            "persona": "Correctness advocate",
+            "position": "Half a graceful-close is worse than none: if you Flush+Close without waiting properly for the server's acknowledgment and final audio, you still truncate. Either commit to the full handshake (drain until server close frame) or skip the receive() entirely."
+          }
+        ]
+      }
+    ],
+    "summary": "The PR's intent is correct \u2014 Deepgram now requires a control message before WebSocket close \u2014 but the implementation has two material concerns. First, the constant name and the PR description disagree: the code sends {\"type\": \"Close\"} while the PR text and Deepgram's Listen SDK reference use \"CloseStream\"; this must be verified against Deepgram's Speak v1 socket client or the fix may be silently inert. Second, the single ws.receive() in _close_ws is mis-described as waiting for \"final messages\" \u2014 it reads exactly one frame and can race with whatever reader task currently consumes audio, potentially stealing the very final audio chunk the PR claims to preserve. Lower-priority concerns: hardcoded 1.0s timeout, broad except, eager f-string logging, and adding Flush semantics that aren't mentioned in the PR title. Recommend resolving the Close vs CloseStream question and coordinating the close handshake with the existing reader before merge."
+  },
+  "raw": ""
+}

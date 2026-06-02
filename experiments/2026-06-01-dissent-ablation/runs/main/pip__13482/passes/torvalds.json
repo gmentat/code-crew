@@ -1,0 +1,94 @@
+{
+  "persona": "torvalds",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Resolver no longer sets req.prepared / needs_more_preparation = False; downstream code may re-prepare or skip incorrectly",
+        "detail": "The old resolver code set `req.prepared = True` and `req.needs_more_preparation = False` after calling prepare_linked_requirements_more. The new commands now call prepare_linked_requirements_more themselves, but nothing in the diff shows those flags getting flipped after the call. If any code path reads `prepared` or `needs_more_preparation` (and the existing code clearly does \u2014 that's why the resolver set them), this will misbehave: either re-running preparation or treating partially-prepared reqs as fully prepared. Show me where those flags get set now, or this patch is broken.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-186",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download command preserves order-of-operations bug: prepare_more before save_linked_requirement",
+        "detail": "In commands/download.py the call to prepare_linked_requirements_more was moved before the save_linked_requirement loop. That's the correct order for download (you need the file before you save it), so this is fine, but it changes behavior subtly: previously save happened on metadata-only reqs and prepare_more ran after. Now prepare_more runs first, which is what you want, but the patch never explains why this re-ordering is safe for the existing download flow. State it in the commit message or I assume you didn't think about it.",
+        "file": "src/pip/_internal/commands/download.py",
+        "lines": "130-140",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info fallback uses direct_url_from_link with req.source_dir which may be None for metadata-only reqs",
+        "detail": "The new block in prepare.py sets `req.download_info = direct_url_from_link(req.link, req.source_dir)` when fetching metadata only. But the whole point of metadata-only is that we haven't unpacked anything, so req.source_dir is very likely None or unset at this point. direct_url_from_link's contract with a None source_dir needs to be verified; if it crashes or produces a bogus DirectUrl that pip lock / --report then emits, you've traded one bug for another. Show the test that exercises this path.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist / get_dist cache has no invalidation contract",
+        "detail": "You added a `_distribution` cache and a `set_dist` setter, and `get_dist` now prefers the cached distribution over `metadata_directory` and `local_file_path`. Fine in the dry-run case. But after `prepare_linked_requirements_more` actually downloads the wheel for the install path, the cached metadata-only distribution is now stale \u2014 get_dist will return it instead of the real on-disk distribution. Either invalidate `_distribution` when the req gets fully prepared, or document why the metadata dist is still correct post-download. The current code does neither.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 608-620",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "THREE-PATCHES: one feature, three semi-independent changes, one commit",
+        "detail": "This is at least three patches mashed into one: (1) move prepare_linked_requirements_more out of the resolver into each command, (2) add the _distribution cache with set_dist/get_dist, (3) populate download_info during metadata-only fetch. Each is reviewable on its own. Mashed together they're harder to bisect when something regresses, and the news entry only mentions the user-visible win. Split it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no validation; just assign the attribute or make it a property",
+        "detail": "`def set_dist(self, distribution): self._distribution = distribution` is Java cosplay. Either drop the underscore and assign directly, or use a property if you want a real invariant. The getter/setter pair as written buys nothing.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-612",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment 'Ensure download_info is available even in dry-run mode' explains what, not why",
+        "detail": "The comment says what the line does. The interesting question is *why* download_info was previously None here and what downstream consumers (pip lock, --report) actually need from it. Put that in the commit message or the comment so the next maintainer doesn't have to git-blame their way to the answer.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage shown in diff for the dry-run no-download behavior",
+        "detail": "The whole point of this patch is 'pip install --dry-run no longer downloads full wheels.' That is exactly the kind of regression that will silently come back. The diff contains zero test changes. Either there's a hidden test elsewhere in the PR (then say so) or there isn't (then NEEDS-WORK until there is).",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The patch solves a real problem (don't download full wheels for dry-run / lock when PEP-658 metadata is available) and the high-level shape \u2014 push prepare_linked_requirements_more out of the resolver into the commands that actually need it \u2014 is correct. But the execution is sloppy. The resolver used to set `req.prepared = True` and `req.needs_more_preparation = False`; the new code drops that with no replacement shown, which is the kind of thing that bites you in week six. The new `_distribution` cache has no invalidation story when the req later gets fully prepared. The download_info fallback uses `req.source_dir` which is suspect for metadata-only reqs. And there are no tests in the diff for the headline behavior. This is THREE-PATCHES jammed into one commit. NEEDS-WORK: split it, fix the prepared/needs_more_preparation flag handling, prove download_info is correct with source_dir=None, define the cache invalidation, and ship a test that fails before this patch and passes after."
+  },
+  "raw": ""
+}

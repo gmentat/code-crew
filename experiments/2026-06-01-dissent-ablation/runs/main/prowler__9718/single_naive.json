@@ -1,0 +1,144 @@
+{
+  "task_id": "prowler__9718",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [
+      {
+        "topic": "Naming mismatch between check ID and PR description",
+        "positions": [
+          {
+            "persona": "Pragmatic shippability",
+            "position": "The PR description says check is named 'compute_image_publicly_shared' but the actual implementation uses 'compute_image_not_publicly_shared'. This is just a description error; the code is internally consistent and the changelog matches the implementation."
+          },
+          {
+            "persona": "Documentation discipline",
+            "position": "PR descriptions should match implementation; reviewers/maintainers depend on accurate descriptions. Worth flagging but not blocking."
+          }
+        ]
+      },
+      {
+        "topic": "Handling of IAM policy retrieval failures",
+        "positions": [
+          {
+            "persona": "Security correctness",
+            "position": "When getIamPolicy fails (e.g., permission denied), the code silently logs and treats the image as not publicly shared (publicly_shared=False default). This produces a false PASS for images whose policy could not be inspected, which is a security risk - silent failures should be surfaced as ERROR/UNKNOWN status, not PASS."
+          },
+          {
+            "persona": "Pragmatic operator",
+            "position": "Logging the error and continuing is consistent with the existing pattern in the file. Failing closed could create noise on permission issues that are common in real environments."
+          }
+        ]
+      },
+      {
+        "topic": "Pagination in mock tests",
+        "positions": [
+          {
+            "persona": "Test fidelity",
+            "position": "The mock uses list_next.return_value = None but the production code calls list_next(previous_request=request, previous_response=response). The mock will still return None correctly, but this doesn't exercise the pagination loop logic at all."
+          },
+          {
+            "persona": "Test pragmatism",
+            "position": "Matches existing patterns in the fixtures file; full pagination testing is out of scope for a single check addition."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "IAM policy retrieval failures silently default to publicly_shared=False, causing false PASS",
+        "detail": "In _get_images(), if getIamPolicy() throws (e.g., permission denied as exercised by test-image-3), the exception is caught and logged, but the image is still appended with publicly_shared=False. This produces a misleading PASS result for images whose actual IAM policy is unknown. The check should either skip these images, mark them with an ERROR/UNKNOWN status, or surface the inspection failure explicitly. Security checks failing open is a meaningful integrity issue.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "552-570",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR title/description references wrong check name",
+        "detail": "PR title and description refer to 'compute_image_publicly_shared' (and the README steps reference a directory by that name), but the actual implementation, metadata, changelog entry, and tests all use 'compute_image_not_publicly_shared'. The implementation is internally consistent; only the PR description is wrong. This will confuse anyone searching git history or reading the merge commit.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test for test-image-3 (permission denied) asserts PASS rather than verifying error handling",
+        "detail": "The compute_service_test.py asserts that compute_client.images[2].publicly_shared is False for test-image-3, which had a getIamPolicy exception. This locks in the silent-fail behavior described above as the expected contract. If the P1 above is addressed, this test will need to change. Even keeping current behavior, the test should explicitly assert that the failure was logged.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "274-277",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Image model lacks fields useful for remediation and reporting",
+        "detail": "The Image model only carries name, id, project_id, and publicly_shared. It does not retain which members or roles were granted public access, which would be useful in status_extended (e.g., 'shared via roles/compute.imageUser with allAuthenticatedUsers') and for downstream remediation. Other models in the file (e.g., LoadBalancer, ManagedInstanceGroup) carry richer context.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "678-682",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pagination loop is correct but untested by mocks",
+        "detail": "_get_images() correctly implements list/list_next pagination, but the mock fixture sets client.images().list_next.return_value = None at the top level, meaning the while loop only ever executes once. Pagination behavior is effectively untested. This matches existing patterns in the codebase but is worth noting for future hardening.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-578",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Use of broad 'except Exception' for IAM policy retrieval",
+        "detail": "Both except clauses in _get_images() use bare 'except Exception'. While consistent with the file's existing style, this swallows programming errors (KeyError, AttributeError) alongside expected API errors. Narrowing to googleapiclient.errors.HttpError where possible would make failures more diagnosable.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "560-565, 576-578",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Metadata Severity 'medium' may understate impact for images containing secrets",
+        "detail": "The risk text emphasizes 'sensitive data', 'data breaches', and 'secrets or proprietary code' but the Severity is set to 'medium'. Comparable public-exposure checks in Prowler (e.g., public buckets, public AMIs in AWS) are often 'high'. Worth confirming this matches the project's severity rubric for public-exposure of data-bearing resources.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "9",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Remediation CLI placeholder ROLE_NAME is ambiguous",
+        "detail": "The CLI remediation 'gcloud compute images remove-iam-policy-binding IMAGE_NAME --member=allAuthenticatedUsers --role=ROLE_NAME' requires a specific role to be removed. Since the public binding may be on any role (commonly roles/compute.imageUser), the remediation could call this out or recommend listing the policy first to find the binding.",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "23",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing IAM permission documentation update",
+        "detail": "PR checklist asks whether provider permissions need updating. Calling images.getIamPolicy requires the compute.images.getIamPolicy permission, which may not be in the existing Prowler role/permission set used for GCP scanning. Worth verifying this is included in the documented required permissions; otherwise the check will silently fail in many environments (compounding the P1 above).",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "summary": "This PR adds a well-structured GCP check for publicly shared Compute Engine disk images, with reasonable separation between the service layer (data collection) and the check (evaluation). The main concern is a security correctness issue: when getIamPolicy fails (e.g., permission denied), the image is silently recorded as not publicly shared, producing a false PASS - and the test suite explicitly codifies this behavior. A secondary concern is that the PR title and description reference 'compute_image_publicly_shared' while the implementation, changelog, metadata, and tests use 'compute_image_not_publicly_shared'. Minor issues include thin Image model context, broad exception handling, possibly understated severity ('medium' for data exposure), and lack of confirmation that compute.images.getIamPolicy is in the documented required permissions. Overall the implementation is shippable once the failure-mode is handled (either fail-closed with ERROR status or explicit logging plus model field tracking inspection failure)."
+  },
+  "raw": ""
+}

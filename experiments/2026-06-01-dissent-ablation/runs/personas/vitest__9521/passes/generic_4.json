@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "vitest__9521",
+  "review": {
+    "summary": "The PR adds a useful `coverage.changed` option but contains a likely path-shape correctness bug in `isIncluded` (comparing slashed/cleaned filenames against raw git output), changes existing `isIncluded` behavior by adding `cleanUrl` which affects all users not just this feature, and silently no-ops when git resolution fails. There's no warning when `findChangedFiles` returns null, custom providers don't get the behavior despite the type exposing it, and a file mode change to 755 looks unintentional. Tests cover the happy path well but miss the failure/empty-changeset edge cases.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Path-shape mismatch between changedFiles and filename in isIncluded may yield no matches",
+        "detail": "In coverage.ts isIncluded, filename is slash(cleanUrl(_filename)) (often absolute, normalized). changedFiles comes from VitestGit.findChangedFiles which typically returns absolute paths as git produces them. If shapes differ (relative vs absolute, casing, normalization), includes() returns false and coverage silently reports zero files. Needs explicit normalization on both sides and a test for absolute vs relative input.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Adding cleanUrl to isIncluded changes behavior for all existing users, not just coverage.changed",
+        "detail": "The line `slash(cleanUrl(_filename))` replaces `slash(_filename)` unconditionally. Any consumer whose filenames previously included query strings (e.g. `?vue&type=script`) will now match different include/exclude globs and produce different cache keys. This is an undeclared behavior change that should be called out, tested independently, and ideally gated behind the new feature.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent fallback when findChangedFiles returns null hides misconfiguration",
+        "detail": "In onTestRunStart, if vitestGit.findChangedFiles returns null (no git repo, bad ref, detached state), `changedFiles` becomes undefined and coverage silently reverts to reporting ALL files. CI users relying on `coverage.changed: 'origin/main'` would not notice and could ship false-positive coverage reports. Should warn or error rather than silently degrade.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-339",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CustomProviderOptions exposes `changed` but base onTestRunStart logic lives in BaseCoverageProvider",
+        "detail": "CustomProviderOptions was extended to Pick 'changed', implying custom providers accept the option. But the implementation that resolves changedFiles is on BaseCoverageProvider.onTestRunStart. Custom providers not extending the base class will accept `changed` from users and silently do nothing. Either document the contract or move the logic so custom providers get a usable hook.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "292-296",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart re-runs git on every test run but doesn't refresh in watch mode between file edits",
+        "detail": "In watch mode, runFiles calls onTestRunStart per rerun which re-queries git \u2014 good. But because globCache is keyed by filename and cleared each call, every rerun re-globs everything; large repos may see noticeable latency. Worse, if changedFiles becomes empty (nothing changed since ref), every file is excluded with no message \u2014 confusing UX worth a console hint.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "File mode change from 644 to 755 on changed.test.ts appears unintentional",
+        "detail": "The diff shows `old mode 100644 / new mode 100755` on test/coverage-test/test/changed.test.ts with no executable shebang or reason. Likely an accidental chmod from the contributor's machine. Reset to 100644 to avoid noise in the tree.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

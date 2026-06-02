@@ -1,0 +1,84 @@
+{
+  "persona": "dijkstra",
+  "task_id": "chia-blockchain__20099",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "default_raise() retained as a 3.9-compat scaffold after 3.9 is dropped \u2014 dead reasoning, live code path",
+        "detail": "The module comment still reads 'this is for < 3.10 compatibility' and default_raise() exists solely because pre-3.10 had no kw_only. With 3.10+ enforced, every field that uses default_factory=default_raise should instead be a required positional/kw-only field with no default. The current pattern means the dataclass silently accepts construction without these fields and only raises at factory-call time \u2014 a runtime trap where the type system could have refused the program. SMUGGLED-GOTO: the missing required argument is laundered through a factory that raises, instead of being a precondition the constructor enforces.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "42-46 and all sites using default_factory=default_raise",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three UP rules (UP045, UP007, UP035) globally suppressed with a TODO \u2014 the stated rationale of the PR is undermined in the same diff",
+        "detail": "The PR description states 'Union types will soon not be supported through Ruff. Use A | B or A | None for Optional[A].' Yet ruff.toml adds blanket ignores for exactly the rules that enforce this (UP007 non-pep604-annotation, UP045 non-pep604-annotation-optional, UP035 deprecated-import) with the comment 'TODO: Remove these - it's a lot of errors.' This is TESTED-NOT-PROVED in policy form: the discipline is announced and simultaneously disabled. Either the migration is in scope and these rules should fire (file-by-file ignores or a tracked deadline), or it is not, and the PR description is misleading. A bare TODO with no owner, no issue link, and no kill-date is not a plan.",
+        "file": "ruff.toml",
+        "lines": "102-105",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Amazon Linux / Rocky install steps execute 'dnf search python3.12' inside the install pipeline \u2014 diagnostic noise in a production path",
+        "detail": "dnf search is an interactive discovery command. It has no effect on the installation and its presence in a non-interactive CI install script suggests the author was probing during development and forgot to remove the probe. The precondition for the install step is 'python3.12 is available in the configured repos'; either that holds and the search is dead, or it does not and the install will fail anyway. A reasoned change states the precondition and does not ship the debugger.",
+        "file": ".github/workflows/test-install-scripts.yml",
+        "lines": "215-219, 245-249",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "install.sh version check still tests PYTHON_MINOR_VER < 7 after the floor moved to 3.10",
+        "detail": "The guard reads: if PYTHON_MAJOR_VER != 3 OR PYTHON_MINOR_VER < 7 OR PYTHON_MINOR_VER >= 13. The error message was updated to '>= 3.10 and < 3.13.0' but the actual predicate still accepts 3.7, 3.8, 3.9. Specification and implementation disagree. Either the check should be PYTHON_MINOR_VER < 10, or the message lies. Choose one.",
+        "file": "install.sh",
+        "lines": "138-139",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment in conditions.py was deleted but the # pragma: no cover it justified was also removed without confirming coverage now holds",
+        "detail": "Before: 'Something about python 3.9 makes this be not covered but on 3.10+ it is covered' with pragma: no cover. After: bare continue. The pragma's removal is correct in spirit (the 3.9 quirk is gone), but the change presumes the branch is now exercised by the existing test suite. A disciplined change states 'the test covering branch X' or adds one; this change merely removes the pragma and trusts that coverage will not regress silently.",
+        "file": "chia/wallet/conditions.py",
+        "lines": "1472-1475",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cmd_classes.py still imports field, MISSING and uses default=kwargs.get('default', MISSING) \u2014 option() default semantics not re-examined post-3.9 removal",
+        "detail": "The old code distinguished MISSING (3.10+) from None (pre-3.10) because pre-3.10 dataclasses could not express 'no default with kw_only'. With kw_only now unconditional, the option() helper still returns a field with default=MISSING when the caller omits 'default'. That is the right answer, but the call sites used to depend on the old None-fallback. The change is REASONED only if all callers were audited for the semantic shift from None-as-sentinel back to MISSING. The diff shows no such audit. State the precondition: 'no caller of option() relied on the pre-3.10 None default.'",
+        "file": "chia/cmds/cmd_classes.py",
+        "lines": "46-54",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "itertools.pairwise substitution is correct but unrelated to the stated PR scope",
+        "detail": "Replacing zip(ordered, ordered[1:]) with itertools.pairwise(ordered) is fine and only valid on 3.10+. It is, however, an opportunistic cleanup unrelated to 'remove python 3.9 support.' Bundling unrelated edits into a version-drop PR makes the diff harder to reason about and harder to revert. Not a defect; a discipline note.",
+        "file": "chia/_tests/util/test_priority_mutex.py",
+        "lines": "383-384",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The mechanical work of removing 3.9 \u2014 workflows, install scripts, sys.version_info branches, kw_only_dataclass shim \u2014 is executed competently. The discipline complaints are about residue and scope. First, default_raise() and its surrounding factory-as-required-field pattern were a pre-3.10 workaround; with 3.10 enforced they should be deleted in favor of actually-required kw_only fields, not preserved as a runtime trap. Second, ruff.toml globally ignores UP007/UP035/UP045 with a bare TODO \u2014 the same rules the PR description claims are the reason for the migration; the policy is announced and disabled in one diff. Third, smaller inconsistencies remain: install.sh's minor-version predicate still permits 3.7-3.9 while its error message says 3.10+, the install workflows ship a 'dnf search' probe, and a pragma: no cover was removed without evidence the branch is now covered. Verdict: REASONED in the large, TESTED-NOT-PROVED in the policy claims, with two P1 items that should land before merge."
+  },
+  "raw": ""
+}

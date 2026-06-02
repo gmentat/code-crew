@@ -1,0 +1,77 @@
+{
+  "task_id": "espnet__6278",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring says max_steps/val_interval but code reads max_step and ignores val_interval",
+        "detail": "The constructor docstring advertises max_steps and val_interval; the code actually reads max_step and never consults val_interval (validation runs on save_interval cadence). A typo on a required key risks KeyError on first launch and the documented validation cadence knob is dead. Reconcile names, assert required keys at __init__, and document actual cadence.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-75",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery is fragile: substring match + naive int parse with no atomicity guard",
+        "detail": "Resume scans for any directory containing 'step_', splits on 'step_' and int()s the last segment. A name like 'step_100_backup' raises ValueError, and a half-written directory from a crashed save is silently chosen as latest. Tighten the predicate (startswith + regex), and write a 'latest' marker or verify completeness before loading.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "run() loop has no max_step invariant; overshoots, double-validates on resume, and may skip final save",
+        "detail": "The outer loop runs train() for save_interval steps then unconditionally validates and checkpoints, with no inner break when global_step reaches max_step. If save_interval does not divide max_step the final iteration overshoots by up to save_interval-1; on resume at max_step the loop exits without saving. State and enforce the invariant inside train().",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "150-188",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "valid_*_specifier parsed by whitespace split with no grammar validation",
+        "detail": "train.py splits valid_*_specifier on whitespace and passes each token to DataIteratorFactory, but the documented format is colon-delimited 'task:name:data_json[:factor]' where data_json is a path that may contain spaces. Typos or spaces silently produce bogus or misnamed validation sets. Parse once at the edge into a small dataclass and pick a real delimiter.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "192-217",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats silently assumes cross-rank key alignment and has unclear in-place ownership",
+        "detail": "SUM-reduce divided by world_size only yields a correct mean if every rank contributes exactly one value per key; missing keys produce silently wrong means with no presence check. The function also mutates the caller's dict in place while the caller rebuilds stats as floats, leaving ownership ambiguous. Assert key-set consistency (or all_reduce a count mask) and pick pure-or-destructive, not both.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "120-160",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Trainer complects engine, wandb global, checkpoint discovery, dtype, and reduction in one class",
+        "detail": "DeepSpeedTrainer braids five separable concerns and depends on a module-level wandb singleton initialized elsewhere, making value flow invisible and tests painful. save_interval also secretly drives three different cadences (train chunk, validation, checkpoint). Pass an explicit logger, split pure helpers (precision_from_config, checkpoint discovery), and separate the three time semantics.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "20-110",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is NEEDS-WORK with three blocking correctness issues: a docstring/code key mismatch around max_step(s) plus an unused val_interval, fragile checkpoint-resume that both crashes on near-miss directory names and silently picks half-written saves, and an outer training loop with no max_step invariant that overshoots or skips the final save. P1 concerns cluster around stringly-typed whitespace-split specifiers, an _all_reduce_stats that assumes cross-rank key alignment with ambiguous in-place ownership, and a trainer class that complects engine, wandb global, discovery, dtype, and reduction. Structure is right-shaped but rigor, naming, and value-flow discipline are missing."
+  }
+}

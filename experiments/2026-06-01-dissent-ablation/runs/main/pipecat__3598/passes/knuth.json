@@ -1,0 +1,84 @@
+{
+  "persona": "knuth",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Default speaker for bulbul:v3-beta disagrees with its own documentation",
+        "detail": "The module docstring, class docstring, and PR description all state that `aditya` is the default speaker for bulbul:v3-beta. However, TTS_MODEL_CONFIGS sets default_speaker=\"shubh\". A reader auditing this file cannot tell which is the intended invariant. Pick one and make the code and the prose agree; the literate-programming discipline is precisely that the explanation and the code must not contradict each other.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "TTS_MODEL_CONFIGS bulbul:v3-beta entry vs. module docstring",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pace clamping silently mutates user input; range check is incorrect when pace is None",
+        "detail": "The clamp logic warns and clamps when pace is outside [pace_min, pace_max], but `params.pace` has a Pydantic default of 1.0 and is Optional. The conditional `if pace is not None and (pace < pace_min or pace > pace_max)` is fine, but the invariant being enforced is asymmetric: a v3 user who explicitly requests 2.5 (legal for v2's range, illegal for v3) is silently clamped rather than rejected, while pitch/loudness/temperature outside their model are logged-and-ignored. State one invariant for out-of-range parameters and apply it uniformly: either reject (ValueError) or warn-and-clamp. Mixing the two is the kind of inconsistency a careful reader will trip on.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "pace validation in __init__",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`get_speakers_for_model` silently falls back to v2 speakers for unknown models",
+        "detail": "The function's contract per its docstring is \"return speakers available for the model.\" Returning v2's speaker list for an unknown model is a lie that will produce confusing downstream errors when a caller hands one of those speakers to a v3 endpoint. Either raise ValueError on unknown models (matching the constructor's behavior) or return an empty list with a documented contract. Silent fallback violates the principle that the function's behavior should be statable in one sentence the caller can rely on.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "get_speakers_for_model",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Ignored-parameter warnings fire on Pydantic defaults, not on user intent",
+        "detail": "Because `pitch`, `loudness`, and `temperature` have non-None Pydantic defaults (0.0, 1.0, 0.6), the heuristic `elif params.pitch != 0.0` only fires when the user explicitly diverges from the default. A user who passes `pitch=0.0` explicitly on v3 gets no warning; a user who passes `temperature=0.6` explicitly on v2 gets no warning. Use a sentinel (e.g., default=None with the real default applied later) so the warning reflects user intent rather than value-equality with the default. Minor, but the current code conflates \"user supplied a parameter\" with \"value differs from default,\" which a careful reader will notice.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": "ignored-parameter warning block in __init__",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "MODEL_CONFIGS and TTS_MODEL_CONFIGS are module-level mutable Dicts typed as Dict, not Mapping",
+        "detail": "The dataclasses are `frozen=True` (good), but the outer registry is a plain `Dict[str, ...]`. A reader cannot tell from the type whether the registry is meant to be mutated at runtime (e.g., plugin registration) or frozen at import. Type as `Mapping[str, ...]` or wrap in `types.MappingProxyType` to make the invariant explicit. This is exactly the kind of \"state the invariant\" discipline that prevents future contributors from adding a `MODEL_CONFIGS[\"saaras:v4\"] = ...` line at module load and breaking the type model.",
+        "file": "src/pipecat/services/sarvam/stt.py, src/pipecat/services/sarvam/tts.py",
+        "lines": "MODEL_CONFIGS, TTS_MODEL_CONFIGS declarations",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STT `_connect` removed `input_audio_codec` from connect_kwargs without explanation",
+        "detail": "The previous code sent `input_audio_codec` to the SDK's connect call; the new code drops it. There is no comment explaining whether the SDK no longer accepts the parameter, whether it's now inferred from another field, or whether this is a behavior change the caller should know about. For code that will be read later, a one-line literate comment (\"v3 SDK infers codec from audio frames; pre-v3 SDKs ignored this kwarg\") is the difference between an audit that passes and one that has to git-blame the change.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "_connect method, connect_kwargs construction",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Pydantic field declarations use `bool = None` which is type-incorrect",
+        "detail": "`vad_signals: bool = None` and `high_vad_sensitivity: bool = None` in InputParams are typed as `bool` but defaulted to `None`. They should be `Optional[bool] = None`. Pydantic v2 will likely catch this at model construction, but the declared type is wrong and a reader cannot infer intent. Pre-existing, but adjacent to this PR and worth fixing while the file is open.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": "InputParams class",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED with NEEDS-LITERATE-COMMENT tendencies. The refactor to dataclass-based ModelConfig/TTSModelConfig is a real improvement: it replaces string-sniffing (`\"saaras\" in model.lower()`) with a single registry whose invariants \u2014 what each model supports, its defaults, its endpoint \u2014 are stated in one place. That is the right shape. The audit reveals three classes of issue worth fixing before merge: (1) the code and the docstrings disagree about the v3-beta default speaker (`aditya` in prose, `shubh` in the dict), which is the kind of contradiction literate-programming discipline exists to prevent; (2) the policy for out-of-range or model-incompatible parameters is inconsistent \u2014 pace gets warn-and-clamp, pitch/loudness/temperature get warn-and-ignore, language/mode/prompt get ValueError \u2014 pick one invariant and apply it uniformly; (3) several small literate-comment gaps (silent dropping of `input_audio_codec`, mutable Dict registries, Pydantic `bool = None`). No algorithmic complexity concerns \u2014 this is config-routing code, O(1) lookups throughout, no hot loops. The data structure choice (frozen dataclass + dict registry) is correct; finish the discipline by making the registries truly immutable and the prose match the data."
+  },
+  "raw": ""
+}

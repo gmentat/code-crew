@@ -1,0 +1,74 @@
+{
+  "persona": "hickey",
+  "task_id": "kale__601",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "script_content complects the compiled artifact's value with the RPC response shape",
+        "detail": "The RPC was returning a reference (pipeline_package_path) \u2014 an identity pointing at a file on disk. Now it also returns the file's contents inlined as a string. Those are two different things: a place-pointer and a value-snapshot. Complecting them in one response means every caller that wanted only the path now pays the cost of reading and serializing the whole script, and the response's time semantics get muddier (the file at the path can drift from the inlined content). Separate them: either return the value (content + a content hash) and drop the path coupling, or keep the path and expose a second, explicit 'read compiled script' call that returns the value on demand.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "116-126",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frontend re-implements 'download a file' from scratch instead of treating the file as a value with a URL",
+        "detail": "handleDownloadClick builds a Blob, mints an object URL, creates an anchor, appends it to the DOM, clicks it, removes it, and revokes the URL. That is six imperative steps standing in for one idea: 'this value, named, downloadable.' The incidental complexity is the DOM dance; the essential thing is a (filename, bytes) pair. Push the bytes through an <a href={objectUrl} download={fileName}> rendered declaratively (memoized, revoked on unmount), or \u2014 better \u2014 have the server expose the compiled artifact at a stable URL and let the browser's native download handle it. The current code is easy (familiar idiom) but not simple.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-184",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Compiled script content is duplicated across three layers of state with no single source of truth",
+        "detail": "The same value (script_content / compiledContent) now lives in the RPC response, in the Commands return shape, in DeploysProgress state, and is passed as a prop into DeployProgress. Four places holding the same bytes is place-oriented programming: each copy is an identity that can, in principle, point at a different value over time. If the file is large or the user compiles repeatedly, the state tree carries arbitrarily many copies of arbitrarily large strings. Hold the value once \u2014 ideally as a lazily-fetched value keyed by compiledPath \u2014 and let the download handler ask for it when clicked, rather than threading it through every layer eagerly.",
+        "file": "labextension/src/widgets/deploys-progress/DeploysProgress.tsx",
+        "lines": "36-90",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "File is read from disk with no encoding declared and no size bound",
+        "detail": "open(script_path) without an encoding relies on the platform default, and f.read() loads the entire file into memory and then into the JSON response with no upper bound. The essential fact being represented is 'the bytes of the compiled script'; the incidental things being smuggled in are 'whatever locale the server happens to have' and 'however large the user's pipeline grew.' Specify encoding='utf-8' explicitly, and decide what the contract is when the script is large \u2014 truncate, stream, or refuse \u2014 rather than letting it be implicit.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-120",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "GetAppIcon is a clickable control rendered as an icon, not a button",
+        "detail": "onClick on a bare icon is the easy path; the simple thing is a <button> (or an <a> with href and download) that happens to render an icon. The current shape complects 'this is a thing the user activates' with 'this is decorative SVG' \u2014 no keyboard activation, no role, no focus ring. Wrap it in an IconButton or render an anchor; the behavior and the affordance then come from the same element.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "235-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "compiledContent is optional and silently no-ops if missing",
+        "detail": "handleDownloadClick guards on both compiledPath and compiledContent and does nothing if either is absent. From the user's perspective, clicking the download icon then produces no feedback \u2014 the identity (the visible button) and the value (the bytes) are decoupled in a way the UI does not express. Either make the icon's presence conditional on having the content, or render a disabled state. Don't let the click be a silent contract violation.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-184",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "COMPLECTED. The change conflates a reference (the path to a compiled file on disk) with the value of that file (its bytes), and threads the value eagerly through four layers of state when one layer would do. The frontend reimplements 'download a file' as a six-step imperative DOM ritual \u2014 easy, because the idiom is familiar; not simple, because the underlying idea is just (name, bytes) made available to the browser. The question that should have been asked first is: what is the compiled pipeline, as a value, and where does it live? If the server already produces a file at a known path, expose it at a URL and let the browser download it; if the server should hand back a value, hand back the value (with a hash and a declared encoding) and stop also handing back a path. Decompose the response, hold the bytes in one place, and render the control as a real button or anchor."
+  },
+  "raw": ""
+}

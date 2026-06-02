@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "metaflow__2653",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "fcntl errors are unhandled and leave fd in inconsistent state",
+        "detail": "F_GETFL/F_SETFL can fail (OSError). If F_SETFL fails after F_GETFL succeeds, you're stuck thinking you're blocking when you're not. Wrap in try/except, or at minimum document why this can't fail. The fd state change has no cleanup on exception path either - if the inner read loop raises, the fd stays blocking for whoever inherits it.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-136",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Inner blocking read loop has no timeout or process-exit check",
+        "detail": "Once you flip to blocking mode, you've thrown away every safety net the original code had. If the writer hangs without closing the FIFO, the parent blocks forever. The original code at least had check_process_exited as a backstop. You traded an intermittent truncation bug for a potential deadlock. That's not a win.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-144",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BlockingIOError handler became a pass and dropped has_blocking_error tracking silently",
+        "detail": "The previous code tracked has_blocking_error and used `content` to decide whether the file was closed. The new code just passes. If has_blocking_error was actually used downstream or for semantics, you've quietly changed behavior. If it wasn't used, the variable should have been removed entirely in a separate cleanup patch. Two changes in one diff.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch does two things: fix the race and delete the MacOS workaround",
+        "detail": "The deleted block with the MacOS comment was load-bearing for someone. Either it was wrong (say so, and explain why the new approach subsumes it) or it was right (then you just broke MacOS). The commit message claims POSIX guarantees solve it, but the deleted code existed precisely because POSIX behavior wasn't observed on MacOS FIFOs. Prove it or split the patch.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "139-158",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test added for an intermittent race condition fix",
+        "detail": "Intermittent JSON truncation at 86KB is exactly the kind of bug that comes back. A regression test that writes a large payload and closes the writer fast would catch this. Patches that fix races without tests get re-broken in six months by the next refactor. Show me the test.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Control flow uses break-out-of-outer-loop pattern that could be a function",
+        "detail": "The drain-to-EOF logic is a self-contained operation. Extracting it as `_drain_blocking(fifo_fd) -> bytes` would make the outer loop readable and the unit-testable surface obvious. Minor taste point, but the nested while-True-break-break is harder to read than it needs to be.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "137-145",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "NEEDS-WORK. The diagnosis is plausible and the POSIX-blocking-read strategy is the right shape, but the execution is sloppy. Flipping O_NONBLOCK without error handling and then entering an unguarded blocking read loop trades an intermittent truncation for a potential hang - that's not an improvement, it's a different bug. The patch also silently deletes a MacOS-specific workaround and quietly drops has_blocking_error semantics, doing two things in one diff. No regression test for a race condition that already shipped in production. Fix the error handling, keep a timeout/process-exit backstop on the blocking path, justify or restore the MacOS handling, add a test, then resubmit."
+  }
+}

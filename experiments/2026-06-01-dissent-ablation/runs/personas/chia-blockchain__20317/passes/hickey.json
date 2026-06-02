@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "chia-blockchain__20317",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "signing_mode_enum decision table is incomplete and silently falls through to CHIP_0002",
+        "detail": "The free function in wallet_request_types.py enumerates three of four boolean combinations explicitly, then returns CHIP_0002 as a default for the remaining (is_hex=False, safe_mode=True) case. The fourth case is implicit, not stated. Make all four branches explicit so the value/mode mapping is a single readable table rather than three ifs plus a fallthrough.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "is_hex/safe_mode booleans complect two independent concerns into request shape",
+        "detail": "The request carries two booleans whose four combinations encode one of four SigningMode values. That is a value masquerading as two flags, and the decoder lives in a free function plus a property. A single signing_mode field on the request (the value itself) would remove the translation layer entirely. The new helper preserves the complecting rather than dissolving it.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-440",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sign_message branching on SigningMode duplicates verify_signature's branching with different output shapes",
+        "detail": "sign_message and verify_signature both switch on SigningMode to produce the bytes-to-sign, but with subtly different branch sets and a different default. Extract one pure function message_bytes(mode, message) -> bytes used by both. Right now the same fact about CHIP-0002 prefix-hashing lives in two places, which is the kind of incidental duplication the refactor was supposed to remove.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-40, 70-85",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "convert_secret_key_to_synthetic lives on Wallet instance but uses no instance state",
+        "detail": "The method takes a PrivateKey and returns calculate_synthetic_secret_key(secret_key, DEFAULT_HIDDEN_PUZZLE_HASH) with no self reference. Calling it through self.service.wallet_state_manager.main_wallet just to reach a pure function complects identity (which wallet) with a value transform that has neither. Make it a module-level function in signing.py.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SignMessageResponse is a new dataclass that duplicates the (pubkey, signature) tuple shape",
+        "detail": "The old sign_message returned tuple[G1Element, G2Element]. The new one wraps it in a frozen dataclass. That is fine, but the callers immediately destructure it back into the response types. The dataclass adds a name without adding meaning. A NamedTuple, or just keeping the tuple return, would be equally clear with less code.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "63-67",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "verify_signature docstring references a request parameter that no longer exists",
+        "detail": "The new free function takes signing_mode/public_key/message/signature/address as keyword args, but the docstring still says ':param request:' carried over from the RPC method. Small, but indicates the extraction was mechanical rather than rethought. Remove or rewrite the docstring to match the new signature.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "18-24",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The extraction moves signing/verification out of the RPC into chia/wallet/util/signing.py, which is the right direction, but the result is EASY-NOT-SIMPLE: the same SigningMode branching now lives in two functions, and the four-way mode is still encoded as two coupled booleans (is_hex, safe_mode) translated by a helper. The wallet-instance methods (convert_secret_key_to_synthetic, current_p2_puzzle_hash) further complect identity with pure-value computations that have no need for a wallet. Decompose: one message_bytes(mode, message) helper used by both sign and verify, one signing_mode value on the request instead of two booleans, and move the synthetic-key derivation to a module function. The tests adding sign_message_by_id coverage are a clear win."
+  }
+}

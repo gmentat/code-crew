@@ -1,0 +1,78 @@
+{
+  "task_id": "openbao__1906",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "revoke_error exposed via API without sanitization or capability gating, despite author flagging it as sensitive",
+        "detail": "All three reviewers flag this as the central concern. RevokeErr is free-form backend error text that routinely leaks paths, credentials fragments, and upstream API responses. Shipping it on a non-privileged lookup endpoint without redaction, a documented redaction invariant, or a sudo/root capability gate is the wrong boundary. Decide before merge: redact, gate, or document the invariant.",
+        "file": "vault/logical_system.go",
+        "lines": "2195-2201",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Rename FetchLeaseTimes -> FetchLeaseInfo breaks exported API and broadens contract without compatibility shim or spec update",
+        "detail": "Pike and Torvalds note it's a gratuitous break of an exported method with downstream callers; Liskov notes the new name implies broader 'info' while the postcondition is still a partially-populated leaseEntry. Either keep FetchLeaseTimes as a deprecated alias, or document the exact projection contract (which fields are guaranteed populated). Don't churn exported symbols just for nicer godoc.",
+        "file": "vault/expiration.go",
+        "lines": "1703-1745",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage only asserts path; namespace_path and revoke_error branches are unexercised",
+        "detail": "TestSystemBackend_leases adds one assertion on path but leaves the two security-relevant fields untested. Add a child-namespace lease test asserting namespace_path and a forced-revoke-failure test asserting revoke_error shape. Otherwise the new schema fields are aspirational.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test inconsistently mixes t.Context() and namespace.RootContext(nil) across sibling tests in same diff",
+        "detail": "Line 2450 was changed to namespace.RootContext(t.Context()) while parallel tests (line 3104, TestExpiration_FetchLeaseTimesIrrevocable) still pass nil. Either both should use a real context or the contract should explicitly allow nil. Pick one shape for test contexts in this file.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "OpenAPI schema marks path Required:true but value may be empty for irrevocable/edge-case leases",
+        "detail": "leaseInfoForExport copies whatever le.Path holds, including empty string for token leases or irrevocable entries loaded from storage with missing fields. Either enforce the invariant that Path is always non-empty for any lease returned here, or drop Required:true so generated clients don't break on legitimate empty values.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Metrics label 'fetch-lease-times' is now stale after rename, baking inconsistency into telemetry",
+        "detail": "metrics.MeasureSince still uses the literal \"fetch-lease-times\" key while the function is now FetchLeaseInfo. Either keep the metric name with a comment so future maintainers don't 'fix' it, or rename deliberately. Silent code/metric mismatch confuses ops months later.",
+        "file": "vault/expiration.go",
+        "lines": "1712",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel converges on two real problems and several smaller cleanups. The dominant concern, flagged by all three reviewers and by the PR author themselves, is that revoke_error is being surfaced on a non-privileged lookup endpoint with no sanitization, redaction contract, or capability gate \u2014 backend error strings routinely carry sensitive content. The second consensus issue is the FetchLeaseTimes -> FetchLeaseInfo rename: it breaks an exported API without a compatibility alias, leaves the metrics label stale, and broadens the contract without documenting the new projection. Test coverage exercises only one of three new fields, and minor inconsistencies (context handling in tests, OpenAPI Required flags) should be tidied. Overall verdict: small well-shaped patch, needs work on the security boundary and the API churn before merge."
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3113",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "AWS client is rebuilt per LLMContextFrame on the hot path",
+        "detail": "Every invocation opens a fresh bedrock-agentcore client via aioboto3, paying TLS handshake, credential resolution, and teardown per turn. In a streaming voice pipeline this is per-turn latency the user feels. Create the client once in setup()/start() and close it in cleanup().",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "201-220",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "default_response_to_output_transformer raises on non-JSON lines, aborting the stream",
+        "detail": "json.loads is called with no try/except inside the per-line loop. A malformed SSE line, keepalive comment, or error payload raises JSONDecodeError, propagates out of process_frame, and leaves _output_response_open True with no matching LLMFullResponseEndFrame. Catch the exception or return None on parse failure.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "76-89",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "agentArn parameter violates PEP 8 and surrounding snake_case convention",
+        "detail": "Every sibling constructor argument uses snake_case (aws_access_key, aws_region) but agentArn is camelCase and stored as self._agentArn. This breaks the codebase's voice and is a public kwarg \u2014 renaming later is breaking. Rename to agent_arn and keep agentRuntimeArn only at the boto3 boundary.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "114-120, 148-152, 207-217",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Start/End bookend invariant not preserved under exceptions, timeouts, or overlapping invocations",
+        "detail": "The 'every LLMFullResponseStartFrame has exactly one matching End' invariant relies on shared mutable state (_output_response_open, _close_task) with no lock and no exception-path handling. The 1-second timeout close races with the end-of-stream close in process_frame, and overlapping LLMContextFrames can interleave or drop bookends. Centralize closing and use the real stream-end signal.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "108-198, 245-253",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SSE parsing is not RFC-compliant",
+        "detail": "The loop hardcodes a 6-character slice for 'data: ', splits on '\\n' so '\\r\\n' transports leave stray CRs, and warns on any other prefix. Real SSE streams include id:, event:, retry:, and comment lines, with blank-line frame boundaries. Use an SSE parser or document the narrowed contract.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "234-247",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "aioboto3 dependency bump bundled into feature patch",
+        "detail": "pyproject.toml and uv.lock churn for aioboto3/aiobotocore/boto3/botocore/s3transfer (15.0 to 15.5) affects every AWS consumer in the repo. It belongs in its own commit with justification for whether the new processor actually requires the bump.",
+        "file": "pyproject.toml",
+        "lines": "52",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. Four P1 issues are flagged by multiple reviewers: the bedrock-agentcore client is rebuilt per turn on the hot path, the default response transformer's unguarded json.loads can abort streams mid-response, the camelCase agentArn parameter breaks the snake_case API convention, and the Start/End bookend invariant is fragile under exceptions, timeouts, and overlapping invocations. Secondary concerns include non-RFC SSE parsing and a bundled aioboto3 dependency bump that should be split out. Fix the client lifecycle, harden the transformer, rename the parameter, and replace the sleep-based close with a deterministic end-of-stream signal before merging."
+  }
+}

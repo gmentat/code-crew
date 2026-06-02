@@ -1,0 +1,84 @@
+{
+  "persona": "knuth",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "isIncluded uses O(n) Array.includes on changedFiles for every candidate file",
+        "detail": "In BaseCoverageProvider.isIncluded, after the picomatch check, the code does `included = this.changedFiles.includes(filename)`. isIncluded is called per file (and the result is cached, but the cache key is filename, so each unique file pays O(n) once). For repos with thousands of source files and a moderately-sized changed set, this is O(F * C). The invariant being checked is set membership; the right data structure is Set<string>, built once in onTestRunStart. Trivial change, asymptotically correct rather than asymptotically-OK-practically-slow.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "165-178",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "changedFiles invariant is not stated and its lifetime across runs is unclear",
+        "detail": "The new instance field `changedFiles?: string[]` is mutated in onTestRunStart and read in isIncluded and getUntestedFiles, but nothing states the invariant: 'after onTestRunStart resolves, changedFiles is either undefined (no filtering) or the slash-normalized, cleanUrl-stripped set of files that changed since options.changed/config.changed'. In particular, the cache invalidation `this.globCache.clear()` is only called if `this.changedFiles` is truthy, but on a second run where the previous run had changedFiles and the new run does not (config changed mid-watch), the stale changedFiles from the prior run will silently persist. Either reset to undefined at the top of onTestRunStart or document the lifecycle in a literate comment. Right now the reader has to reverse-engineer it.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-89, 332-348",
+        "flagged_by": [
+          "knuke"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Filename normalization mismatch between changedFiles and isIncluded's lookup key",
+        "detail": "isIncluded now does `slash(cleanUrl(_filename))` before checking membership in `this.changedFiles`. But changedFiles is populated either from `VitestGit.findChangedFiles(...)` or from `this.ctx.config.related`, and neither is documented to be slashed-and-cleanUrl'd in the same way. If git returns posix paths and related returns absolute resolved paths, the .includes() check will silently miss on Windows or when query params/hashes appear. State the normalization invariant explicitly and apply it on both sides at the point changedFiles is assigned, not just at the lookup site. Otherwise the correctness of the whole filter rests on an unstated assumption.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151-178, 332-348",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform for boolean-ish values is duplicated logic that belongs in a helper",
+        "detail": "The inline transform `if (value === 'true' || value === 'yes' || value === true) return true; if (value === 'false' || value === 'no' || value === false) return false; return value` is the kind of small parser that recurs in CLI configs. A named helper (parseBooleanOrString) with a one-line comment stating the contract ('returns boolean if the value names one, else passes the string through as a git ref') would make this readable as literature rather than as a sequence of equality checks. NEEDS-LITERATE-COMMENT at minimum.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart hook is added to three call sites with no shared abstraction",
+        "detail": "core.ts now calls `await this.coverageProvider?.onTestRunStart?.()` immediately after `_testRun.start(...)` in three places. The invariant 'onTestRunStart fires exactly once per test run, after start, before any file reporting' is now load-bearing but enforced by convention across three call sites. If a future code path adds a fourth `_testRun.start` without the matching hook call, coverage filtering silently breaks. A small wrapper (e.g. `_testRun.start` calls the hook itself, or a private `startTestRun` helper) would make the invariant local rather than scattered.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-611, 749-754, 880-887",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test asserts behavior on a real git tag in the Vitest repo, coupling test correctness to repo history",
+        "detail": "The test `{ changed: 'v0.0.1', coverage.changed: 'HEAD' }` relies on `v0.0.1` being 'an actual git tag in Vitest repository'. The comment says so, but this couples the test's correctness to external repo state (a tag that could be deleted, force-moved, or absent in a shallow clone in CI). The invariant being tested \u2014 'coverage.changed overrides test.changed' \u2014 can be checked without that coupling by mocking VitestGit or by using the resolveConfig-level test that already exists in public.test.ts. As-is, this is a test that will work today and fail mysteriously in some clone configurations.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": "133-166",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Termination and failure mode of VitestGit.findChangedFiles is not handled",
+        "detail": "In onTestRunStart, `const changedFiles = await vitestGit.findChangedFiles({ changedSince: this.options.changed })` is awaited with no error handling and `changedFiles ?? undefined` assignment. If git is missing, the ref is bad, or the user runs outside a git repo, the failure mode is unstated. Does it throw? Return null? Either way the user should get a clear message ('coverage.changed=foo: git ref not found'), not a stack trace from deep inside coverage. A one-line invariant comment plus a try/catch with a contextual error would suffice.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-340",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The feature is small and largely correct in shape: a new `coverage.changed` option, an `onTestRunStart` lifecycle hook to populate `changedFiles`, and a filter applied inside `isIncluded` and `getUntestedFiles`. The algorithm is fine; the rigor is thin. Decision: UNDER-AUDITED with one ASYMPTOTICALLY-OK-PRACTICALLY-SLOW concern. Specifically: `changedFiles` is a `string[]` used as a set on every file lookup (should be `Set<string>`); the normalization invariant between how changedFiles is populated and how filenames are queried is not stated and not obviously consistent across git output, `config.related`, and `slash(cleanUrl(...))`; the `onTestRunStart` hook is added to three call sites by convention rather than enforced by structure; and one test couples to a real git tag in the repo. None of this is a blocker, but the loop invariant of the filter \u2014 'changedFiles is a normalized set; membership decides inclusion after glob match' \u2014 should be written down as a literate comment and the data structure upgraded to match."
+  },
+  "raw": ""
+}

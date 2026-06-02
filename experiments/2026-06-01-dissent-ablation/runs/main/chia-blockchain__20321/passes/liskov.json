@@ -1,0 +1,104 @@
+{
+  "persona": "liskov",
+  "task_id": "chia-blockchain__20321",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "LSP-VIOLATION: CreateSignedTransaction's __post_init__ requires len(additions) >= 1, but tests now pass a sentinel Addition(amount=0, puzzle_hash=zeros) \u2014 the contract has been silently weakened to permit a 'dummy addition' that the supertype never promised to handle.",
+        "detail": "The CreateSignedTransaction ADT's stated precondition is 'at least one real addition'. The send_transaction/cat_spend forwarding path is now passing zero-amount, zero-puzzle-hash sentinels through that interface when callers omit additions (see test updates). This means either (a) CreateSignedTransaction's true contract is now 'at least one Addition, which may be a sentinel meaning no-op' \u2014 a fundamentally different ADT \u2014 or (b) the forwarding is producing semantically invalid transactions that the type system accepts. Either the contract needs to be rewritten to make the sentinel legal and document its meaning, or the forwarding code must construct a real Addition (not a zeros sentinel). As written, the abstraction promise of CreateSignedTransaction has been quietly broken to make the refactor work.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "INHERITANCE-FOR-REUSE / WRONG-BOUNDARY: CreateSignedTransaction has been extended with CAT-specific fields (extra_delta, tail_reveal, tail_solution, puzzle_decorator), conflating two distinct abstract data types into one.",
+        "detail": "CreateSignedTransaction was an XCH-style 'create signed transaction' ADT. By bolting CAT-specific fields onto it so that cat_spend can forward through it, the module boundary has been redrawn around 'whatever the implementation needs' rather than around a coherent responsibility. The invariant 'these fields are meaningful only for CAT spends' is now unstated and unenforced \u2014 a CreateSignedTransaction with extra_delta set on a non-CAT wallet has undefined meaning. The right structural move is either composition (an inner CatDiscrepancy value object passed alongside, or a shared private builder that both endpoints compose) or a sum/variant type. Reusing the supertype as a kitchen-sink because it 'mostly fits' is the classic inheritance-for-reuse anti-pattern at the request-type level.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1916-1962",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SPEC-MISSING: cat_discrepancy_validation lifted to module scope without a docstring stating its precondition, postcondition, or the all-or-nothing invariant it enforces.",
+        "detail": "The helper now serves two ADTs (CATSpend.cat_discrepancy and CreateSignedTransaction.cat_discrepancy). Because it is the contract for both, its contract must be written down: precondition (the three params are either all None or all non-None, extra_delta parses as int, tail_reveal/tail_solution parse as Program bytes), postcondition (returns None xor a fully-realized triple), and the raised ValueError on partial input. Without the spec at the function boundary, two subtypes are now relying on undocumented behavior of a free function, and any third caller will rediscover the rules empirically.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LEAKY-ABSTRACTION: send_transaction now calls get_wallet purely for its side effect of raising, comment 'opportunity to raise' \u2014 the validation contract is leaking through a discarded return value.",
+        "detail": "The previous code used the returned wallet object. The new code calls get_wallet and throws the result away, relying on the implementation detail that get_wallet raises when wallet_id is wrong or the type doesn't match. This couples send_transaction/cat_spend to an undocumented side-effecting precondition check rather than expressing the precondition explicitly (e.g., a validate_wallet_id_and_type method, or letting create_signed_transaction perform the check). A reader cannot tell from the contract why the get call exists; only the comment hints at it. Either lift the check into a named precondition method, or move the validation responsibility entirely into create_signed_transaction and remove the dead call.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1512, 2012-2013",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LSP-VIOLATION risk: cat_spend forwarded through create_signed_transaction loses the CATWallet type guarantee that the original code enforced via required_type=CATWallet.",
+        "detail": "Originally cat_spend asserted the target wallet was a CATWallet before generating the transaction. Now the required_type check is performed only as the discarded 'opportunity to raise' call, and the actual transaction generation goes through create_signed_transaction, which has no equivalent invariant. If create_signed_transaction's implementation routes by wallet type (or doesn't), a wallet_id that passed the discarded check but is handled differently downstream could now produce a transaction with CAT-only fields (extra_delta, tail_reveal, tail_solution) but on the wrong wallet type. The supertype's postcondition ('a valid signed tx for this wallet') is weakened relative to the original cat_spend's stronger postcondition ('a valid CAT-spend tx').",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2012-2042",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Addition is constructed positionally without keyword arguments at two new call sites, fragile against field reordering and obscuring the contract at the call site.",
+        "detail": "Addition is a Streamable dataclass with fields amount, puzzle_hash, memos. The new code constructs it positionally \u2014 Addition(request.amount, decode_puzzle_hash(...), request.memos) \u2014 and the test uses Addition(amount=..., puzzle_hash=...). Mixing positional and keyword construction across the codebase is a minor abstraction discipline issue: the call site does not state which field is which, and any future reordering of the dataclass fields silently changes meaning at these sites. Prefer keyword construction at every Addition call site as a small but enforceable rule.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1517-1525, 2018-2030",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two cat_discrepancy properties on unrelated request types share a name and a contract without a shared supertype or protocol stating that contract.",
+        "detail": "CATSpend.cat_discrepancy and CreateSignedTransaction.cat_discrepancy now return the same tuple shape via the same helper. This is structurally a small protocol ('has cat_discrepancy: tuple[int, Program, Program] | None'), but it is not declared. If a third request type needs the same field, the pattern will diverge again. A small Protocol or mixin (HasCatDiscrepancy) would name the contract and make the substitutability explicit. Not urgent, but worth stating.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1509-1513, 1960-1962",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment 'Technically this value was meant to support many types here \u2026 as a slight hack, we'll specify that only Clawback is supported' documents a known abstraction leak being knowingly enshrined in a new public field.",
+        "detail": "puzzle_decorator: list[ClawbackPuzzleDecoratorOverride] | None on CreateSignedTransaction admits in-line that the field's type is narrower than the underlying mechanism supports. This is a SPEC-MISSING / LEAKY-ABSTRACTION at the type level: the request type lies about the domain, and future widening will be a breaking change to the public contract. A minimum fix is to type the field against a base PuzzleDecoratorOverride (even if today only Clawback exists) so the contract anticipates the documented intent. As-is, you've made the hack part of the wire format.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1922-1925",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "extra_delta typed as str 'to support negative ints' is a long-standing leaky abstraction now being copied to a second ADT.",
+        "detail": "The field carries the comment '# str to support negative ints :('. This is implementation seepage into the type \u2014 JSON or some serializer's limitation surfacing as a stringly-typed field on an otherwise-typed request object. Lifting it from CATSpend to CreateSignedTransaction unchanged doubles the surface area of this leak. Either fix the serializer so the field can be int, or introduce a small newtype (NegativeIntStr) that documents and validates the constraint at the boundary. Not a blocker, but the leak is now spreading.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1919-1920",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "This PR reduces duplication by making send_transaction and cat_spend forward to create_signed_transaction, but it does so by widening the supertype's contract rather than by composing a shared mechanism. CreateSignedTransaction has been extended with CAT-specific fields and a CAT-specific cat_discrepancy property, conflating two distinct abstract data types into a kitchen-sink request; the more honest structural move would be composition or a shared private builder, not field accretion on the public request type. The most concerning signal is the test change introducing Addition(amount=0, puzzle_hash=zeros) sentinels to satisfy the supertype's len(additions) >= 1 precondition \u2014 the contract has been quietly weakened, and downstream invariants now depend on a meaning that nobody has written down. Several smaller leaks (discarded get_wallet for side effects, puzzle_decorator narrowed by 'slight hack' comment, extra_delta as str) propagate existing abstraction debt into a second ADT. Recommend: extract a shared internal builder both endpoints compose, keep CreateSignedTransaction's public contract clean, write down cat_discrepancy_validation's spec, and remove the sentinel-Addition workaround."
+  },
+  "raw": ""
+}

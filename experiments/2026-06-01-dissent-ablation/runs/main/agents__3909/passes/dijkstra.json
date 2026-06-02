@@ -1,0 +1,124 @@
+{
+  "persona": "dijkstra",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Reconnect loop drops audio and never re-establishes the AudioByteStream invariant",
+        "detail": "The outer `while True:` loop creates fresh `send_task`/`recv_task`/`keepalive_task` on every iteration, but `self._input_ch` is consumed once. If `_reconnect_event` ever fires, the new `send_task` re-enters `async for data in self._input_ch` while the previous frames have already been pulled and base64-encoded into the now-closed socket. There is no invariant stated that bridges audio across reconnects, no replay buffer, no documented precondition that reconnect is impossible. Either prove reconnect never occurs (the event is never set anywhere in the diff -- which means the entire reconnect scaffolding is dead code, also a defect) or state and uphold the invariant that no audio is lost across the boundary.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "186-217",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Smuggled goto via the `closing_ws` flag and the `_speaking` flag",
+        "detail": "`closing_ws` is a nonlocal mutable bit set by `send_task` and read by `recv_task` to decide whether a CLOSE frame is benign or an error. This is exactly the kind of flag-as-goto that structured programming exists to forbid: control flow is now a joint function of two coroutines plus a shared bit, and no invariant is stated relating the bit to socket state. Likewise `self._speaking` is mutated from three branches of `_process_stream_event` with no stated invariant -- e.g. what guarantees END_OF_SPEECH is paired with exactly one prior START_OF_SPEECH? Replace the flags with explicit state (a small state machine with a written invariant), or state the invariant and prove the branches preserve it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "164-235, 332-389",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "`closing_ws = True` is set unconditionally when `_input_ch` ends, even on cancellation or upstream error",
+        "detail": "`send_task` writes `closing_ws = True` after the `async for` exits for any reason -- normal end-of-input, cancellation, or exception inside the loop body (e.g. an `aiohttp` send failure). `recv_task` then interprets the next CLOSE as benign and silently returns, hiding genuine remote failures. The postcondition `closing_ws == True implies the local side initiated an orderly shutdown` is not maintained. Either restrict the assignment to the orderly-completion branch (try/else) or carry an explicit reason.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "150-163, 175-180",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`tasks_group.exception()` called on a Future that may not be done",
+        "detail": "Inside the `finally`, `tasks_group.cancel()` is invoked and then `tasks_group.exception()` is read on the next line. `Future.exception()` raises `InvalidStateError` when the future is not yet done, and cancellation does not synchronously complete a gather. The author has not stated the precondition under which `.exception()` is legal here; the comment `# Retrieve exception to prevent it from being logged` reveals that the call is being used for its side effect on an object whose state has not been reasoned about. This is DEFENSIVE-AS-SUBSTITUTE.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "208-213",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Raising `APIConnectionError` from inside `_process_stream_event` violates the receive loop's structure",
+        "detail": "When the server sends an error message, `_process_stream_event` raises `APIConnectionError`, which is then swallowed by the broad `except Exception: logger.exception(...)` in `recv_task`. Net effect: the error is logged and the loop continues as if nothing happened. The postcondition the author seems to want (`server error terminates the stream`) is therefore not delivered by the code. Either propagate via the event channel / re-raise outside the except, or narrow the except so error messages actually surface.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "182-187, 372-388",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Audio format derivation has no precondition check on `sample_rate`",
+        "detail": "`audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")` blindly trusts the caller. `STTAudioFormat` enumerates exactly six legal rates; any other integer silently produces a string the server will reject at WS-open time, far from the constructor where the mistake was made. The docstring even claims `Supports sample rates from 8kHz to 48kHz` (a range) while the type admits only six discrete values. State and check the precondition at the constructor: `sample_rate in {8000,16000,22050,24000,44100,48000}`.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "95-97",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Query string is hand-assembled without URL encoding",
+        "detail": "`params.append(f\"language_code={self._language}\")` and similar lines build the query string with raw f-strings. If `language_code` ever contains a character requiring percent-encoding (`+`, space, `&`, etc.), the request is malformed and the failure mode is invisible -- the server simply receives a different language than intended. Use `aiohttp`'s params kwarg or `urllib.parse.urlencode`. The author cannot state the precondition `language is URL-safe` because there is none.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "242-265",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Author concedes the change is TESTED-NOT-PROVED, and not even tested",
+        "detail": "The PR description states `I wasn't able to update test_stt.py - the tests appear to be broken since May 2025... I did the test with a full pipeline`. So the claim of correctness rests on a manual smoke test, not on automated regression coverage and certainly not on reasoning about the message protocol, the reconnect loop, or the speaking-state machine. A streaming WebSocket protocol implementation with four distinct server message types, a reconnect loop, and a flag-driven speech state machine cannot be accepted on `it worked when I tried it once`. At minimum: protocol-level unit tests over `_process_stream_event` with synthetic frames covering every documented message_type and the empty-commit boundary.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch: `committed_transcript_with_timestamps` is acknowledged but produces no events",
+        "detail": "The branch logs at debug and returns. Either it is unreachable (state that fact and remove it), or it is reachable and the stream silently drops what may be the only authoritative transcript message. Pick one.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "367-369",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Keepalive task swallows all exceptions",
+        "detail": "`except Exception: return` in `keepalive_task` is the textbook defensive-as-substitute pattern. If the ping fails because the socket died, the keepalive quietly stops while `send_task` and `recv_task` continue against a corpse until they notice on their own. State the postcondition (`ping failure implies stream teardown`) and uphold it, or narrow the except to the specific transport exception you expect.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "143-149",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Docstring lies about VAD parameter validation",
+        "detail": "The docstring says `must be between 0.3 and 3.0`, `must be between 0.1 and 0.9`, etc., yet the constructor performs no such check. The preconditions are documented as if enforced. Either enforce them at the boundary or downgrade the wording to `the server requires`.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "63-78",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "UNREASONED and TESTED-NOT-PROVED. The author cannot state the precondition for the reconnect loop (no replay buffer, no invariant connecting input_ch consumption to socket identity), nor the invariant of the `_speaking` flag (no proof that START/END_OF_SPEECH events are well-paired), nor the legality of calling `.exception()` on a just-cancelled gather. The control flow is SMUGGLED-GOTO under three polite names: `closing_ws`, `_speaking`, and `_reconnect_event` -- three mutable bits that jointly determine behaviour with no written invariant relating them. Server error messages are raised inside a broad `except Exception` and silently logged, which is the inverse of the postcondition the code appears to intend. The PR explicitly admits there are no tests, only a manual pipeline run; the streaming protocol, the reconnect loop, and the speech state machine therefore rest on neither reasoning nor regression coverage. REFUSED in its current form -- a small written state machine, a stated reconnect invariant, encoded query params, validated sample_rate, and protocol-level unit tests would change the verdict."
+  },
+  "raw": ""
+}

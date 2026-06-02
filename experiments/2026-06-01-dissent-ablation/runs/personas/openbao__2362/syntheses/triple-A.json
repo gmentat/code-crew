@@ -1,0 +1,77 @@
+{
+  "task_id": "openbao__2362",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub always returns false while callers already depend on it for seal-state gating",
+        "detail": "(*Core).NamespaceSealed is introduced as a TODO that unconditionally returns false, yet ListAllNamespaces, root-token paths, and new ErrNamespaceSealed handling treat it as authoritative. A stub that lies is a silent security regression. Either ship SealManager in this patch, return ErrNotImplemented, or panic in non-production builds \u2014 do not let production paths trust a falsehood.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent-based root ancestry check is load-bearing for authorization but has unstated semantics and thin tests",
+        "detail": "AllowOperation now grants RootPrivs via ns.HasParent(a.root) with no documented invariant: is it reflexive? how is RootNamespace handled? is Path canonicalized? testACLRoot only covers self-ns allow and root-context deny. The permission matrix (sibling, cousin, deep descendant, root-of-root) must be exhaustively tested or this lands as latent privilege escalation.",
+        "file": "vault/acl.go",
+        "lines": "342-361",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-namespace detection uses errwrap.Contains substring match instead of errors.Is on the sentinel",
+        "detail": "errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) coerces any error whose message embeds 'namespace is sealed' into a 503, including handler, plugin, or audit-log strings. Treat errors as values: errors.Is on the sentinel survives wrapping and avoids false positives. The refactor to switch is the right moment to fix the underlying bug rather than propagate it.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL fast-path silently denies when namespace.FromContext errors instead of failing loud",
+        "detail": "AllowOperation now does ns, err := namespace.FromContext(ctx); if err != nil { return ret } \u2014 returning empty ACLResults with no log or signal. A missing namespace in context silently denies every root operation, conflating 'no namespace' with 'denied'. Log the condition or return a distinguishable error; this is the silent failure mode that bites at 3am.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR bundles three independent patches that should land and be bisected separately",
+        "detail": "The diff combines a security-critical ACL semantic shift, an unrelated sdk/response_util refactor, wholesale context.Background -> namespace.RootContext plumbing across many tests, and unimplemented stubs. Each deserves independent review. The ACL change especially should land alone with focused tests so a future bisect can isolate authorization regressions.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength formula written as TokenLen + \".\"[1] + nsID is opaque and likely malformed",
+        "detail": "Indexing a one-byte string literal to encode a separator length is gratuitously clever and reads as wrong. Name a const tokenSeparatorLen = 1 (or Separator = \".\") and write TokenLen + tokenSeparatorLen + len(nsID). Also reconsider embedding the namespace ID in the token at all \u2014 it complects token identity with namespace location and breaks on rename.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a NEEDS-WORK verdict. The headline risk is the NamespaceSealed stub that unconditionally returns false while production callers already trust it \u2014 a silent security regression all three reviewers flagged. The ACL root change from boolean to *namespace.Namespace with a HasParent ancestry check is the right direction architecturally but ships with unstated invariants and thin tests that do not cover the sibling/cousin/deep-descendant matrix. Substring-based ErrNamespaceSealed matching, silent deny on FromContext error, and an opaque NSTokenLength formula round out the actionable list. The PR should be split: land the ACL change alone with an exhaustive ancestry test matrix, defer the seal-state surface until SealManager exists, and fix errors.Is usage while refactoring response_util."
+  }
+}

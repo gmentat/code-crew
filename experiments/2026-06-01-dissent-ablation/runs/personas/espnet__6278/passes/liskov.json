@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "espnet__6278",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args contract is inconsistent: docstring promises max_steps/val_interval, code reads max_step and never honors val_interval",
+        "detail": "The docstring states the contract as max_steps, log_interval, val_interval, save_interval, but __init__ reads trainer_args['max_step'] (singular) and the run loop calls self.valid() every save_interval rather than at val_interval. The published precondition does not match the implemented precondition; callers writing a config to the documented contract will KeyError or get wrong validation cadence. Pick one spelling, state it, honor it.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-60, 154-167",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer silently depends on a global wandb.run; the dependency is hidden in the interface",
+        "detail": "The class docstring warns wandb must be initialized externally, and __init__ then mutates wandb.config and run() calls wandb.log unconditionally, yet there is no precondition check (assert wandb.run is not None) and no injected logger. This is a leaky abstraction: a hidden global is part of the contract. Inject a logger sink or assert the precondition the docstring claims.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "18-25, 88-90, 197-199",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "train_data_factory and valid_data_factories have no stated type; the duck-typed contract is unspecified",
+        "detail": "Both parameters are untyped Any with no documented operations beyond build_iter(global_step=, length=) and build_iter(). Train factories must accept kwargs that valid factories must not. The abstract data type 'DataIteratorFactory' is never written down, so any subtype substitution is unverifiable. Define a Protocol or ABC with explicit build_iter signatures and frame conditions.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "27-42, 169-174, 187-189",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_load_checkpoint postcondition is violated when resume_path is given but does not exist",
+        "detail": "If the caller passes a resume_path that does not exist, the code silently falls through to 'no checkpoint, start from 0' rather than raising. The implicit postcondition 'resume from the requested checkpoint or fail loudly' is weakened to 'maybe resume, maybe not.' A user expecting resumption will silently retrain from scratch. Raise FileNotFoundError when resume_path is explicit and missing.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-122",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats mutates its argument in place and also rebinds dict entries; the frame condition is unstated and surprising",
+        "detail": "The function both mutates tensors in place via all_reduce and then reassigns stats[key] = stats[key] / world_size, which replaces the entry with a new tensor. Callers that retain a reference to the original tensor will see partial mutation. The docstring says 'Modified in-place to contain the averaged values' but the frame is actually 'dict entries replaced; original tensors mutated mid-flight.' State or fix the frame.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "124-152",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Specifier parsing uses split() inconsistently and the format contract is documented only in argparse help",
+        "detail": "train.py splits validation specifiers on whitespace and passes each to DataIteratorFactory, while train specifiers are passed whole. The grammar ('task:name:data_json[:factor]') lives only in --help text, with no parser/validator near the ADT boundary. Lift the specifier grammar into a small typed parser so the contract is one place and substitutable.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-79, 187-194",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The two files sketch a reasonable trainer but the contracts are underspecified and inconsistent. The most serious issue is SPEC-MISSING/LSP-VIOLATION between the docstring's trainer_args keys and what the code actually reads (max_steps vs max_step, val_interval unused). DeepSpeedTrainer also leaks a hidden global dependency on wandb.run and accepts untyped data factories whose build_iter signatures diverge between train and valid. Several smaller issues (silent resume fallback, frame-mutation surprise in _all_reduce_stats, specifier grammar buried in --help) are fixable but should be addressed before this becomes a long-lived module boundary that other teams build against."
+  }
+}

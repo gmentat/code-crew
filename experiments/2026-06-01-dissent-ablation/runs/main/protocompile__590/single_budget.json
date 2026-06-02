@@ -1,0 +1,134 @@
+{
+  "task_id": "protocompile__590",
+  "variant": "budget",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() likely violates caller's non-nil result invariant",
+        "detail": "In the CAS-failure branch, when t.result.Load() returns nil (leader panicked and cleared state), the code returns nil. The function has a named return `output *result` and callers throughout the codebase likely dereference it (e.g., reading output.Fatal, output.done, output.Value). Returning nil here just moves the nil-deref panic from inside waitUntilDone to wherever run()'s caller uses the result. A proper fix should either retry the leadership acquisition, return a synthesized error result, or have callers explicitly handle nil \u2014 but the diff shows neither approach.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment contradicts the code: says 'did see a result' but the branch is for 'did NOT see a result'",
+        "detail": "The comment reads `// Leader panicked but we did see a result.` This branch executes when `output == nil`, i.e., the leader panicked and we did NOT see a result. The comment should say something like `// Leader panicked and cleared the result; we have nothing to wait on.` Misleading comments on concurrency code are particularly dangerous because they bias future readers diagnosing the next race.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Pending-branch still subject to the same race that motivated the CAS-branch fix",
+        "detail": "The pending branch captures `output` from `t.result.Load()` at the top of run() (above the diff context) and now passes it into waitUntilDone. If the leader panics and clears t.result AFTER our capture but BEFORE we select on output.done, we hold a pointer to an orphaned result whose `done` channel may never be closed. We'd then block until caller.ctx.Done(). This is not a panic, but it is a latent hang/deadlock that the same fix philosophy (handle the panicked-leader case) should address. At minimum, document why this branch is safe; better, unify the handling.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-447",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for the race condition",
+        "detail": "This is a concurrency bug fix involving a leader panicking and a follower observing nil. Race conditions like this are easy to silently re-introduce. A test using a panicking query plus `go test -race` (and ideally a stress loop) should accompany the fix. The diff has no test changes, so future refactors of run()/waitUntilDone() have no guard against regression.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable shadowing of named return `output`",
+        "detail": "Inside the `if !t.result.CompareAndSwap(...)` block, `output := t.result.Load()` shadows the outer named return. This is syntactically fine but can confuse readers (and panic-recovery deferred functions that reference the named return). Consider a distinct name (e.g., `existing`) or reuse the outer variable with `=`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is good but could share a single Walk pass",
+        "detail": "The extracted checkCycle still walks caller.path twice: once to detect the cycle, then again to collect it. For deep paths this is O(2n). A single pass that records visited nodes (or a single pass that builds the cycle once a match is found and truncates) would be cleaner. This is pre-existing behavior, just preserved by the refactor \u2014 call out as informational.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Acknowledged limitation: cycle check only covers immediate call path",
+        "detail": "PR description notes this is intentional and a follow-up PR will handle dependency cycles. Tracking this here so the follow-up isn't lost; consider adding a TODO comment in checkCycle referencing the follow-up issue/PR number so the limitation is discoverable in code, not only in PR history.",
+        "file": "experimental/incremental/task.go",
+        "lines": "406-407",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Asymmetry between pending branch and CAS-failure branch",
+        "detail": "Pending branch: uses pre-captured `output`, no nil check. CAS-failure branch: re-Loads and nil-checks. Both branches reach the same waitUntilDone with the same race surface. The asymmetric handling will invite confusion. Consider a single helper `loadActiveResult(t) (*result, ok)` used by both paths.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "How to handle nil result after leader panic",
+        "positions": [
+          {
+            "persona": "Pragmatic shipper",
+            "position": "Returning nil is the smallest possible fix \u2014 callers that crash on nil were already crashing via the original NPE, so this is at worst neutral and at best lets some callers handle the case. Land it, file a follow-up."
+          },
+          {
+            "persona": "Correctness-first",
+            "position": "Returning nil from a function whose contract implies a non-nil *result just relocates the panic. The fix should retry leader acquisition or synthesize an error result (e.g., result{Fatal: errLeaderPanicked}) so the type invariant holds and downstream code can branch on Fatal instead of nil."
+          }
+        ]
+      },
+      {
+        "topic": "Scope of the cycle-detection refactor",
+        "positions": [
+          {
+            "persona": "Reviewer focused on diff hygiene",
+            "position": "The checkCycle extraction is unrelated to the race fix and should be a separate PR. Mixing a refactor with a concurrency bugfix makes the diff harder to bisect if a regression appears."
+          },
+          {
+            "persona": "Reviewer focused on readability",
+            "position": "Extracting checkCycle materially improves the readability of run()'s pending branch, which is exactly the code under scrutiny. Keeping them together aids review of the surrounding logic."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the pending-branch race needs same treatment",
+        "positions": [
+          {
+            "persona": "Conservative",
+            "position": "The pending branch already loaded `output` above and checked `closed(output.done)`; if the leader panics afterward, ctx.Done() will eventually unblock the waiter. Not a panic, acceptable for now."
+          },
+          {
+            "persona": "Defense-in-depth",
+            "position": "Relying on ctx cancellation to recover from an orphaned wait is a hang risk in unbounded-context callers. The same nil/abandoned-result handling should be unified across both branches."
+          }
+        ]
+      }
+    ],
+    "summary": "The fix addresses the immediate NPE by capturing t.result.Load() once and nil-checking before dereferencing .done, but it does so by returning nil from run() \u2014 which likely just relocates the panic to run()'s callers unless they explicitly handle nil (the diff doesn't show that). The comment on the new nil-return branch is also inverted ('did see a result' should be 'did not see a result'), which is a concrete documentation bug on the most subtle line of the patch. The pending branch carries the same race surface (orphaned result pointer after leader panic) but is handled asymmetrically \u2014 it relies on ctx cancellation rather than explicit detection \u2014 inviting a future hang bug. The checkCycle extraction is a clean readability win but is logically independent of the race fix and arguably belongs in a separate PR. Most importantly, no regression test accompanies a concurrency fix; this should not merge without a panicking-leader test under `-race`."
+  },
+  "raw": ""
+}

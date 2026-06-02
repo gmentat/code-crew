@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "chia-blockchain__20317",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "signing_mode dispatch is a four-way boolean truth table that should be a dict lookup.",
+        "detail": "The free function signing_mode_enum in wallet_request_types.py enumerates all four combinations of (is_hex, safe_mode) with elif chains. The right data structure is a dict keyed by the (is_hex, safe_mode) tuple. Fewer lines, no fall-through bug surface, and the algorithm becomes the lookup.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-407",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sign_message and verify_signature duplicate the same mode-to-bytes transform.",
+        "detail": "Both functions in signing.py reimplement the SigningMode -> message-bytes mapping with parallel if/elif ladders. Extract one private helper that takes (mode, message) -> bytes. Data dominates: the encoding table is the same data, expressed twice.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "20-39, 71-80",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert_secret_key_to_synthetic is an instance method that uses no instance state.",
+        "detail": "Wallet.convert_secret_key_to_synthetic only calls calculate_synthetic_secret_key with a module constant. It does not read self. Making it a method bundles a function around no data, which is exactly the class-where-a-function-would-do shape. Make it a module-level function in signing.py.",
+        "file": "chia/wallet/wallet.py",
+        "lines": "114-115",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "RPC sign_message_by_address/by_id repeat the same three-step pipeline.",
+        "detail": "Both endpoints do: derive synthetic secret key from a puzzle_hash, call sign_message, return a response. That is a filter shape. One helper sign_with_puzzle_hash(wsm, puzzle_hash, request) would let each endpoint be ~3 lines, with the DID/NFT branches contributing only the puzzle_hash and latest_coin_id.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1849-1930",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "signing_mode_enum exists as both module function and property; pick one.",
+        "detail": "wallet_request_types.py defines a free function signing_mode_enum AND adds @property signing_mode_enum on two request classes that just delegate to it. Two names, one behavior. Either delete the property and call the function, or delete the function and let the property hold the logic. Composition, not duplication.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "398-441",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "VerifySignatureResponse is the wrong return type for verify_signature's internal use.",
+        "detail": "verify_signature in a wallet util library returns an RPC response object (VerifySignatureResponse with isValid/error strings). That couples the library to the RPC layer's wire shape. A small (bool, str|None) tuple or a dedicated result struct in signing.py keeps the library reusable by non-RPC callers, which was the stated motivation for extracting it.",
+        "file": "chia/wallet/util/signing.py",
+        "lines": "18-65",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The extraction is a real win \u2014 three near-duplicate sign_message implementations across Wallet, DIDWallet, NFTWallet collapse into one library function, and the wallets are reduced to just exposing a puzzle hash. That is the right decomposition. What remains is small-but-real duplication: the SigningMode-to-bytes mapping appears twice inside signing.py, the (is_hex, safe_mode) -> SigningMode mapping is a truth table written as elif, and signing_mode_enum exists as both a module function and a property. The new library also leaks the RPC response type, which limits the reuse the PR claims to enable. None block merge, but the cleanup is cheap and the data structures want to be flatter."
+  }
+}

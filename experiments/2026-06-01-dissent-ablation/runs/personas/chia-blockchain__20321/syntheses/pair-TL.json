@@ -1,0 +1,72 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests synthesize a zero-amount/zero-puzhash Addition sentinel to satisfy CreateSignedTransaction's non-empty additions precondition",
+        "detail": "Both reviewers flagged that callers (cat_spend path, tests) invent Addition(amount=0, puzzle_hash=zeros) just to pass __post_init__'s len(additions) < 1 check while real outputs come from cat_discrepancy/extra_delta. This is an LSP violation and a data-model smell: relax the precondition when cat_discrepancy is present, or refuse the substitution. Do not paper it over with sentinel coins.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction now silently forwards full puzzle_decorator list while cat_spend silently drops it",
+        "detail": "Old send_transaction explicitly forwarded only puzzle_decorator[0]; the new code passes the whole list through, changing observable behavior for callers sending more than one entry. cat_spend builds CreateSignedTransaction without forwarding request.puzzle_decorator at all even though CATSpend accepts it. Pick one contract for both endpoints and honor it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Address-prefix validation semantics changed from network-config prefix check to AddressType.XCH enum membership",
+        "detail": "Old send_transaction rejected addresses whose bech32 prefix did not match network config's address_prefix. The new code uses ensure_valid_address(..., allowed_types={AddressType.XCH}), a different check. On testnet/simulator builds where the configured prefix is not xch this is a behavior change and possibly a regression. Document the equivalence or restore the original check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1518-1525",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation is a free function duplicating an invariant across two dataclasses",
+        "detail": "The extra_delta/tail_reveal/tail_solution triple is a single conceptual ADT embedded in both CATSpend and CreateSignedTransaction. A free function captures behavior but not type structure; the three Optional fields can drift apart in either class. Introduce a shared CatDiscrepancySpec ADT (or mixin) that owns the invariant rather than three loose Optionals on two classes.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1919-1923",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "puzzle_decorator field bakes a 'Clawback only' hack into a public request type",
+        "detail": "The field's comment admits 'as a slight hack, we'll specify that only Clawback is supported' \u2014 a leaky abstraction frozen into the type. The name promises generic puzzle decorators but only ClawbackPuzzleDecoratorOverride is accepted. Either rename honestly (clawback_override) or define a proper sum type. Hacks documented in comments tend to outlive the plan to fix them.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1922-1925",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Extracted cat_discrepancy_validation preserves type: ignore comments and None-in-set trick instead of cleaning up",
+        "detail": "The helper is moved verbatim with three # type: ignore[arg-type] and the `None in {...}` membership check. While extracting, replace with explicit narrowing (`if extra_delta is None or tail_reveal is None or tail_solution is None`) to delete the ignores and read better. Also validate extra_delta's int-parseability at construction, not at call time.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1484",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the refactor's intent \u2014 collapsing send_transaction and cat_spend into thin wrappers over create_signed_transaction \u2014 is sound, but execution leaks contracts at the boundary. The headline issue is an LSP-style violation: CreateSignedTransaction's precondition (additions non-empty) is preserved syntactically while callers and tests synthesize zero-amount sentinel Additions to satisfy it. Two unannounced behavior changes also slipped in: puzzle_decorator handling diverges between the two endpoints, and address-prefix validation switched from network-config string compare to AddressType.XCH enum membership. Secondary cleanups: model the cat_discrepancy triple as a real ADT, rename the 'Clawback-only' puzzle_decorator field honestly, and clean the extracted validator rather than carrying its type-ignores forward."
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "task_id": "protocompile__645",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Repeated nil-guard boilerplate across ~20 accessors instead of one shared helper",
+        "detail": "Both reviewers flag the same copy-pasted pattern (`var s []X; if x != nil { s = ... }; return seq.NewFixedSlice(s, ...)`) in every getter. The fix is one helper \u2014 make seq.NewFixedSlice tolerate nil, or add a nilSafeSlice wrapper \u2014 so the contract is enforced once instead of relying on every future getter author to remember.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "182-365",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel zero-checks (f == nil vs t.IsZero()) instead of one canonical guard",
+        "detail": "File uses `if f != nil`; Type/Member/Oneof/ReservedName/Element use `if !x.IsZero()`. These are two different predicates for the same abstract notion of an absent value. A single canonical predicate across IR node types would prevent drift as new accessors are added.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value contract is implicit and only enforced by reflection; should be specified in package docs",
+        "detail": "The PR establishes a real ADT contract \u2014 accessors on a zero/nil receiver return the zero value of the result type \u2014 but that contract lives only in a reflective test. State it at the package or IsZero level (a doc.go) so future methods know the precondition, rather than discovering violations after the fact.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test addition and ~20 behavioral nil-guard fixes should be separate commits",
+        "detail": "The commit mixes \"add zero test\" with a wide spray of panic fixes. Land the test first, then each panic fix as its own diff with a one-line justification. As submitted, a future bisect on any regression points uselessly at the test commit.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex returns -1 sentinel, inconsistent with other zero accessors",
+        "detail": "Every other zero accessor returns the type's zero value, but ValueNodeIndex returns -1. Callers now must know two sentinels (0 valid, -1 zero). Either return (int, bool), add a HasValueNode predicate, or pick one convention and document it on the type itself rather than just a comment.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-driven zero test silently skips methods with parameters and under-specifies multi-return contracts",
+        "detail": "testZeroAny filters to NumIn()==1, so accessors taking arguments (e.g. ImportFor) are never exercised. It also treats any Len()==0 as success and may pass on multi-return or interface-returning methods that still violate intent. Add an explicit allowlist of skipped methods and audit list per type.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "95-136",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this PR is doing the right kind of work \u2014 establishing a zero-value contract across IR accessors and adding a reflective test to enforce it. The execution has consistent weaknesses: the same nil-guard boilerplate is copy-pasted across twenty methods instead of captured in one helper, the guard idiom is non-uniform (`f == nil` vs `IsZero()`), and the contract is implicit (only the test states it). The ValueNodeIndex -1 sentinel breaks the otherwise uniform convention. Verdict: sound in intent, needs refactor and documentation before landing; consider splitting the test from the fixes."
+  }
+}

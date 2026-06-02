@@ -1,0 +1,71 @@
+{
+  "name": "generic_6",
+  "task_id": "prowler__9718",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check filename/class does not match the CheckID declared in metadata",
+        "detail": "The metadata declares CheckID `compute_image_not_publicly_shared` and the CHANGELOG entry matches, but the PR title/description repeatedly say `compute_image_publicly_shared`. More importantly, frameworks typically require directory name, file name, class name and CheckID to be identical. Verify all four agree (they appear to in the diff, but the PR description disagrees \u2014 confirm before merge).",
+        "file": "prowler/providers/gcp/services/compute/compute_image_not_publicly_shared/compute_image_not_publicly_shared.metadata.json",
+        "lines": "3",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public images (deprecated/non-custom) not filtered \u2014 check evaluates every image returned by images().list()",
+        "detail": "`images().list(project=...)` against the user's own projects returns only that project's images, which is fine. But there is no filter for deprecated images or images shared from other projects accessible to the caller. If a project hosts intentionally public images (e.g., a marketplace publisher), every one fails. Consider documenting scope or filtering by `deprecated.state` and project ownership.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "538-582",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "IAM policy fetch failure is silently treated as not publicly shared (false negative)",
+        "detail": "When `getIamPolicy` throws (e.g., permission denied as in test-image-3), the except logs and leaves `publicly_shared=False`, so the check reports PASS for an image whose IAM state is unknown. This is a security check \u2014 unknown state should not be reported as compliant. Consider raising or surfacing as an error/MANUAL finding.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "552-566",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "New `compute.images.getIamPolicy` permission requirement not documented",
+        "detail": "The check newly calls `images().getIamPolicy`, requiring the `compute.images.getIamPolicy` permission (not in the standard viewer role). The PR checklist asks to update provider permissions but it is unchecked and no permission/role docs are updated. Without this, the check will silently fail in customer environments using the default Prowler role.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`_get_images` runs sequentially per project while every other compute getter uses `__threading_call__`",
+        "detail": "Lines 35-38 of `__init__` use `__threading_call__` for nearly every fetch, but `_get_images` is called as a plain serial loop over projects, and each image then incurs a sequential getIamPolicy round-trip. For accounts with many projects/images this materially slows scans. Mirror the existing threading pattern.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "38, 538-582",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Service-level test for image-3 asserts wrong expected state given mocked exception",
+        "elaboration": "test-image-3's getIamPolicy raises, so it is appended with publicly_shared=False, and the assertion passes. But this masks the false-negative bug above: the test enshrines the silent-failure behavior. Consider asserting that an exception path is observable (logged/skipped) rather than producing a PASS-eligible record.",
+        "detail": "test-image-3's getIamPolicy raises in the fixture. Current code appends it with publicly_shared=False and the test asserts `not publicly_shared`, which codifies the silent-failure behavior as correct. Tests should instead assert that IAM-unknown images are either skipped or marked, so the false-negative does not regress.",
+        "file": "tests/providers/gcp/services/compute/compute_service_test.py",
+        "lines": "275-277",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The check is small and well-tested in the happy path, but has a notable correctness gap: when `getIamPolicy` fails (e.g., permission denied), the image is recorded with `publicly_shared=False` and reported as PASS, turning a permission/error condition into a clean bill of health. The new permission requirement (`compute.images.getIamPolicy`) is not reflected in provider permission docs, which will silently break the check in default deployments. Performance-wise, `_get_images` skips the existing `__threading_call__` pattern, serializing per-project + per-image API calls. Naming consistency between PR description, CHANGELOG, and code should be confirmed (description says `compute_image_publicly_shared`, code/metadata use `compute_image_not_publicly_shared`)."
+  }
+}

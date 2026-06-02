@@ -1,0 +1,77 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests pass a bogus zero-amount/zero-puzzle-hash Addition sentinel to bypass the non-empty additions guard",
+        "detail": "Tests replaced `additions=[]` with `Addition(amount=0, puzzle_hash=bytes32.zeros)` to satisfy `CreateSignedTransaction.__post_init__`'s `len(additions) < 1` check. The production `cat_spend` path cannot produce this when `request.additions is None`. The test fabricating fake data to satisfy a validator is a clear signal the data model is wrong-shape: fix the model (make additions optional or model absence explicitly), not the tests.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CreateSignedTransaction complects three distinct request shapes with no mutual-exclusivity validation",
+        "detail": "Adding `extra_delta`, `tail_reveal`, `tail_solution`, and `puzzle_decorator` to CreateSignedTransaction collapses XCH-send, CAT-spend, and signed-tx-creation into one type whose valid field combinations are unstated. There is no `__post_init__` check preventing nonsensical states (e.g. XCH send with `tail_reveal` set). Either lift CAT discrepancy to a proper value type or add an invariant documenting which subsets are valid.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1910-1962",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "cat_discrepancy_validation carries forward type: ignores and unreadable `None in {set}` membership trick",
+        "detail": "The extracted helper preserves three `# type: ignore[arg-type]` comments and uses set membership to test tri-state Nones. An explicit `if any(x is None for x in (extra_delta, tail_reveal, tail_solution))` narrows properly and removes the ignores. Better still: lift to a `CatDiscrepancy` value type constructed at the boundary so the property is a clean field access. Moving bad taste into a function doesn't fix it.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1484",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "puzzle_decorator handling diverges silently between send_transaction and cat_spend",
+        "detail": "Old `send_transaction` forwarded only `request.puzzle_decorator[0]`; the new code passes the whole list straight through, changing observable behavior for multi-entry callers. Meanwhile `cat_spend` builds CreateSignedTransaction without forwarding `request.puzzle_decorator` at all, even though CATSpend accepts it. Hickey also notes the field types as a list but only index 0 is consumed downstream. Pick one contract and honor it consistently.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Address-prefix validation semantics changed from network-config string compare to AddressType.XCH enum membership",
+        "detail": "Old `send_transaction` rejected any address whose bech32 prefix didn't match the network config's `address_prefix`. The new code uses `ensure_valid_address(..., allowed_types={AddressType.XCH})`, a different check. On testnet/simulator builds where the configured prefix is not `xch`, this is a behavior change and possibly a regression. Document the equivalence or restore the original check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1518-1525",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "get_wallet called purely for its raising side effect is opaque place-oriented programming",
+        "detail": "`# opportunity to raise` followed by a discarded `get_wallet()` call uses a lookup as a validation effect. The intent ('assert wallet of type X exists') is not in the name, and a future reader may delete the dead-looking line. Extract a named `validate_wallet_type(wallet_id, Wallet)` helper that states what it does.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511, 2012",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The deduplication idea \u2014 collapsing send_transaction and cat_spend into thin wrappers over create_signed_transaction \u2014 is sound, but execution leaks invariants. The clearest signal is the test fabricating a zero-amount Addition sentinel to satisfy a non-empty-list guard the production path can't produce. CreateSignedTransaction now complects three request shapes with no mutual-exclusivity checks, and CAT discrepancy validation kept its type: ignores and `None in {set}` trick instead of being cleaned up. Two silent behavior changes slipped in: puzzle_decorator handling diverges between endpoints, and address-prefix validation switched semantics. Fix the data model, lift cat_discrepancy to a value type, and pin down the semantic changes explicitly."
+  }
+}

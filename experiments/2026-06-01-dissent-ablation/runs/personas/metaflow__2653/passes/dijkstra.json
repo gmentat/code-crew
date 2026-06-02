@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "No invariant stated for the read loop; correctness rests on a hand-waved 'POSIX guarantee'",
+        "detail": "The patch claims blocking read() returns 0 only after writer close AND buffer drain. That holds for a single writer on a pipe, but the precondition (exactly one writer, no dup'd fds in surviving children) is nowhere stated or enforced. Without a written invariant for the inner while-True, the author cannot prove termination or completeness. UNREASONED.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "130-167",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Smuggled goto: two `break` statements and a discarded outer loop replace structured control flow",
+        "detail": "The function now contains an inner `while True` with a `break`, followed by an outer `break`, inside an outer loop whose poll/select machinery is silently bypassed once data arrives. A reader cannot follow the flow without simulating it. This is goto wearing the costume of iteration. SMUGGLED-GOTO.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-146",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Termination function for the new blocking loop is unstated and not obviously well-founded",
+        "detail": "If the writer never closes the FIFO (subprocess hangs after first byte), the inner blocking read loop has no timeout, no poll, no escape. The previous code used select.poll() precisely to detect hangs. The patch trades an intermittent truncation bug for a guaranteed deadlock on writer hang. Loop does not terminate on all admissible inputs.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-145",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BlockingIOError handler reduced to `pass`, silently masking a state the author no longer reasons about",
+        "detail": "Previously BlockingIOError with content meant 'file closed, break.' Now it means 'continue.' But once we have switched to blocking mode, BlockingIOError on this fd is impossible \u2014 so the handler is either dead code or evidence that the author has not characterised which fd states reach it. State the postcondition or delete the clause.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Defensive-as-substitute: no test exhibits the original race, none exercises the new blocking path",
+        "detail": "The PR cites an intermittent JSONDecodeError at char 86672 and offers a fix justified by a POSIX appeal. No regression test, no fault-injection harness, no proof obligation discharged. Correctness rests entirely on prose. TESTED-NOT-PROVED, and in fact not even tested.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl mode flip is not restored; frame condition on fifo_fd is mutated without being documented",
+        "detail": "The function takes fifo_fd and silently clears O_NONBLOCK as a side effect visible to any caller that reuses the descriptor. The frame \u2014 what this function may change \u2014 is not stated. Trivial to fix; symptomatic of the larger discipline failure.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "136-137",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The patch substitutes one race for one deadlock and calls it a fix. The author can cite a POSIX clause but cannot state the precondition (single writer, no fd inheritance), the loop invariant, or the termination function \u2014 and the inner unbounded blocking read has no termination function on a hung writer. Control flow has degenerated into nested `break`s that bypass the outer poll machinery: structured programming under a polite name, but goto in substance. No test exercises the failure mode or the new path; correctness is asserted, not demonstrated. REFUSED until the spec, invariant, termination argument, and a timeout/escape from the blocking branch are written down."
+  }
+}

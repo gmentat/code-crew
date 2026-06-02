@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Bedrock client created per LLMContextFrame causes connection churn and credential staleness",
+        "detail": "process_frame opens a fresh `aioboto3.Session().client('bedrock-agentcore', ...)` on every incoming context frame. For a streaming voice pipeline this means repeated TLS handshakes and credential resolution per turn. The client should be created once (e.g., in start/setup) and reused, or cached at minimum.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "208-216",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unhandled JSON / network exceptions will propagate and break the pipeline",
+        "detail": "`default_response_to_output_transformer` calls `json.loads(response_line)` with no try/except, and `invoke_agent_runtime` and the async iteration over `response['response']` are unguarded. Any malformed event or transient AWS error will raise inside `process_frame`, crashing the processor. Wrap with try/except and log/push an error frame.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "78-81, 207-251",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public parameter `agentArn` violates PEP 8 and Python conventions used elsewhere in pipecat",
+        "detail": "The constructor exposes `agentArn` (camelCase) as a public kwarg while every other parameter uses snake_case (`aws_access_key`, etc.). This is a public API surface; once shipped it is painful to rename. Use `agent_arn` and keep camelCase only at the AWS API boundary.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "125, 154, 159",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Timeout-based end-of-response detection can fire mid-stream and produce wrong bookends",
+        "detail": "`_close_output_response_after_timeout` sleeps 1s and emits `LLMFullResponseEndFrame`. If the agent stream has a >1s gap between chunks, End is pushed prematurely, then the next chunk re-opens a new response \u2014 splitting one logical turn into multiple. Since the stream end is known when the async-for exits, the explicit close at the bottom is enough; the timer is dangerous.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "180-184, 247-251",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Naive `data: ` SSE parsing drops multi-line data and ignores other event fields",
+        "detail": "The parser splits on `\\n` and slices `line[6:]`, but real SSE allows multi-line `data:` values concatenated by the client, comment lines starting with `:`, and event/id fields. Lines that don't start with `data: ` (e.g., `event: ...`) currently log a warning every time, which will be noisy and may indicate dropped content.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "228-243",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Default transformer skips assistant messages and silently no-ops on tool/specific messages",
+        "detail": "`default_context_to_payload_transformer` only accepts the last message if its role is `user` or `system`. If the last message is `assistant` (common after tool calls or follow-up) or an `LLMSpecificMessage`, the processor returns silently with no log, making misconfiguration hard to diagnose. At least log a debug message explaining why no payload was sent.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "46-71",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "summary": "New AWS Bedrock AgentCore processor is straightforward but has several pre-merge concerns. The most important are a per-frame client construction pattern, unguarded JSON/AWS exceptions that will crash the pipeline, and a timeout-based response-end heuristic that can split a single agent turn. Public API naming uses camelCase (`agentArn`) inconsistent with the rest of pipecat, and SSE parsing is fragile. No tests are added for the new module."
+  }
+}

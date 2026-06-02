@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__2362",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently widened from boolean to namespace-scoped pointer without spec",
+        "detail": "ACL.root changed from bool to *namespace.Namespace; AllowOperation now grants root via ns.HasParent(a.root). The new invariant ('root policy in N grants root in N and descendants') is nowhere stated, HasParent's reflexivity is unproved, and the precondition on NewACL callers is undocumented. Any caller constructing with an attacker-influenced ns self-authorizes that subtree.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 100-110, 339-360",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub unconditionally returns false while wired into security-sensitive callers",
+        "detail": "Core.NamespaceSealed is documented as a real seal check but always returns false with a TODO. ListAllNamespaces, loadLoginMFAConfigs, countActiveTokens, and metrics route through it, so the seal-aware path is dead until SealManager lands. Either make it fail closed, gate callers behind a build tag, or land both halves together.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ErrNamespaceSealed dispatch uses substring matching on error text instead of errors.Is",
+        "detail": "AdjustErrorStatusCode calls errwrap.Contains(err, consts.ErrNamespaceSealed.Error()), a substring search for 'namespace is sealed'. Any wrapped error whose text happens to contain that phrase is silently coerced to 503. Errors are values, not strings; switch to errors.Is on the sentinel for robust, structured classification.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation returns empty ACLResults on missing-namespace context before root fast-path",
+        "detail": "FromContext error now returns empty ret (deny) as the first statement, ahead of the root check. Previously a root ACL granted access regardless of ctx state; now it silently denies with no diagnostic, indistinguishable from a normal deny. Either preserve prior root behavior or document the new 'ctx must carry a namespace' precondition explicitly.",
+        "file": "vault/acl.go",
+        "lines": "339-360",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces swapped to ListNamespaces at call sites without contract clarity",
+        "detail": "loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, and countActiveTokens were moved from ListAllNamespaces(ctx, true) to ListNamespaces(ctx). The postconditions (includes sealed? unsealed only?) are not stated in the diff, so MFA enforcement, locked-user updates, and token counts may silently skip sealed namespaces. Document each method's contract before merge.",
+        "file": "vault/core.go, vault/core_metrics.go, vault/counters.go",
+        "lines": "3287, 3395, core_metrics 416, counters 31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength uses obscurantist byte-indexing of a string literal for separator length",
+        "detail": "Encoding the separator as \".\"[1] inside an arithmetic expression is clever but unclear. A named constant (e.g. NSTokenSeparator = '.') with plain addition expresses intent, survives delimiter changes, and stops leaking the namespaced-token format through literal arithmetic at every call site.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on three blocking concerns: ACL.root was silently broadened from a boolean to a namespace-scoped pointer with no stated invariant or precondition, NamespaceSealed ships as a permanently-false stub wired into live security paths, and sealed-error classification uses substring matching where errors.Is is the structured form. Secondary concerns include the reordered AllowOperation deny-on-missing-ctx path and undocumented divergence between ListAllNamespaces and ListNamespaces at swapped call sites. The data-structure consolidation around NamespaceView and the switch in AdjustErrorStatusCode are net positive, but contracts and invariants must be stated explicitly before this lands."
+  }
+}

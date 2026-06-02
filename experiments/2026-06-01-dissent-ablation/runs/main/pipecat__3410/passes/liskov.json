@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__3410",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "FrameSerializer contract for serialize() is not honored: AudioRawFrame returns variable-sized bytes, breaking the substitutability assumption that callers (the transport) had",
+        "detail": "The abstract data type FrameSerializer.serialize() promises 'a serialized payload that the transport sends as-is'. Vonage's implementation returns raw PCM whose size depends on input frame size and resampling ratio. The FastAPI transport had to add a side-channel buffer (fixed_audio_packet_size) to compensate. This is a textbook LSP-VIOLATION: the new subtype weakens the implicit postcondition that 'one serialize() output equals one wire message'. The fix is either to strengthen the supertype contract (serialize may return an iterable of payloads with framing semantics owned by the serializer) or to push packetization into the serializer where the format knowledge lives.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "63-91",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary is drawn around the wrong responsibility: protocol framing requirements leak from the serializer into the transport's configuration",
+        "detail": "Vonage's wire format requires fixed-size PCM packets at a real-time pace. That knowledge belongs inside VonageFrameSerializer (it is part of the Vonage protocol contract). Instead, the transport now exposes fixed_audio_packet_size as a generic FastAPIWebsocketParams field that the caller must set correctly for Vonage to work. This is WRONG-BOUNDARY: a caller wiring Vonage must know an implementation detail (640 bytes = 20ms @ 16kHz PCM16 mono) that the abstraction was supposed to hide. A better design exposes packet size on the serializer (or has serialize() yield correctly-sized chunks), and the transport's contract becomes 'send what the serializer gives me'.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59, 366-371, 498-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Real-time pacing is mentioned in the contract but not implemented; postcondition of fixed_audio_packet_size is weaker than advertised",
+        "detail": "The docstring and PR description both claim fixed_audio_packet_size supports 'strict audio framing and real-time pacing'. The implementation only does framing: when a large payload arrives, the while loop emits every full packet back-to-back with no inter-packet delay. Vonage Audio Connector expects ~20ms wall-clock cadence; bursting N packets in one tick will overflow the remote jitter buffer or trip rate enforcement. Either remove the real-time pacing claim from the contract (postcondition: framing only), or implement the pacing using self._send_interval / self._next_send_time that already exist in this class.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "498-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "InputParams documents sample_rate as 'Optional override for pipeline input sample rate' but it is only consulted at setup() and never validated against frame.audio_in_sample_rate",
+        "detail": "The contract is ambiguous: does sample_rate override only the input direction, both directions, or change the pipeline rate observed by the serializer? Currently self._sample_rate is used for the deserialize() output frame's sample_rate, but the output path resamples FROM frame.sample_rate (the producer's rate) regardless. State the precondition: sample_rate, if set, must equal the pipeline's audio_in_sample_rate (or is meant to override it). Otherwise downstream callers can observe an InputAudioRawFrame whose sample_rate disagrees with the pipeline configuration.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "39-49, 60-66",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "deserialize() silently swallows malformed events; postcondition 'returns None if unhandled' is conflated with 'returns None on protocol error'",
+        "detail": "Both 'event I do not handle' and 'JSON I could not parse' and 'DTMF with invalid digit' all return None. A caller cannot distinguish a benign unknown event from a protocol-level failure. Either document this explicitly in the contract (postcondition: None means 'no frame to emit, possibly due to error already logged') or split: raise on malformed JSON, return None on unknown event. The current behavior is defensible for a streaming transport but should be stated in the spec rather than left implicit.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "115-182",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Invariant on the audio send buffer is not preserved across a serializer swap or StartFrame restart",
+        "detail": "self._audio_send_buffer is only cleared on InterruptionFrame. If the pipeline restarts (a new StartFrame) or if a caller hot-swaps the serializer, stale bytes from a prior session can be prepended to the next stream's PCM, corrupting frame alignment. State the invariant clearly ('buffer is empty at session boundary'), then clear on StartFrame and on serializer setup. Minor, because typical lifecycle does not exercise this, but it is exactly the long-lived multi-team failure mode this discipline exists to prevent.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "366-371, 430-433",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The Vonage serializer and FastAPI transport changes mostly work, but the abstraction discipline is weak in two specific places. First, the FrameSerializer contract is not precise enough about whether serialize() output is one wire message or a stream of bytes the transport may re-frame; Vonage's subtype effectively weakens that postcondition, which is why a side-channel buffer had to appear in the transport. Second, the protocol-specific knowledge of 'Vonage needs 20ms PCM packets at real-time cadence' has leaked out of the serializer (where it belongs as part of the Vonage ADT) into a generic transport parameter that callers must configure correctly. The 'real-time pacing' postcondition advertised in the docstring is also not delivered by the implementation: framing is done, pacing is not. Tighten the FrameSerializer contract, move packet-size knowledge inside the serializer, and either implement pacing or remove the claim. Smaller spec issues around sample_rate override semantics, deserialize() error vs unknown-event handling, and buffer-clear invariants at session boundaries should also be written down."
+  },
+  "raw": ""
+}

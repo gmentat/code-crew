@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "pipecat__3113",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Per-invocation client creation defeats connection pooling and adds latency",
+        "detail": "process_frame opens a new aioboto3 client via `async with self._aws_session.client(...)` on every LLMContextFrame. For a streaming voice pipeline this means TCP/TLS handshake and credential resolution on every turn. The client should be created once (e.g., in start()/setup) and reused, with proper cleanup on stop/cancel.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "203-210",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public constructor parameter `agentArn` violates Python/PEP8 naming and Pipecat conventions",
+        "detail": "Other constructor args use snake_case (aws_access_key, aws_region) but `agentArn` is camelCase. This is a public API and renaming later is a breaking change. Use `agent_arn` now, before users adopt it.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "118",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Unhandled JSON/decode/AWS exceptions will crash the processor mid-stream",
+        "detail": "default_response_to_output_transformer calls json.loads with no try/except; invoke_agent_runtime and the async response iteration can raise ClientError, BotoCoreError, decode errors, etc. Any malformed line or AWS hiccup will propagate out of process_frame, potentially leaving _output_response_open True (no End frame) and breaking the pipeline.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "75-78, 203-251",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Output response can be left open if processor is cancelled or errors after Start frame",
+        "detail": "Once LLMFullResponseStartFrame is pushed, _output_response_open is True. If an exception is raised during streaming, or the task is cancelled, the End frame is never pushed and downstream aggregators may hang waiting for it. Wrap the streaming loop in try/finally that always emits LLMFullResponseEndFrame and cancels _close_task.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "203-251",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Default transformer rejects assistant-led contexts and silently drops the frame",
+        "detail": "default_context_to_payload_transformer returns None whenever the last message's role isn't user/system, or when it's an LLMSpecificMessage. In a normal pipeline the last message before invocation is typically the user message, but for context reuse or tool-result follow-ups this returns None and the frame is silently swallowed (not even forwarded). At minimum log a warning, and consider scanning for the last user message rather than requiring it to be last.",
+        "file": "src/pipecat/services/aws/agent_core.py",
+        "lines": "42-71, 211-212",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`from .agent_core import *` with no `__all__` leaks helpers into public namespace",
+        "detail": "agent_core.py defines no __all__, so the star-import in services/aws/__init__.py exposes asyncio, json, os, aioboto3, logger, and every imported frame/context class at pipecat.services.aws top level. Define __all__ = [\"AWSAgentCoreProcessor\", ...] to avoid namespace pollution and accidental API surface.",
+        "file": "src/pipecat/services/aws/__init__.py",
+        "lines": "11",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "The new AWSAgentCoreProcessor has solid intent but several production-quality concerns. Biggest risks are per-frame AWS client creation (latency), unhandled exceptions that can leave LLMFullResponseStartFrame unmatched and stall downstream aggregators, and a public camelCase parameter (`agentArn`) that will be hard to rename later. The default context transformer silently drops frames in common cases, and the star-import leaks helper modules into the public namespace. None are blockers for functionality but all should be addressed before this becomes a stable public processor."
+  }
+}

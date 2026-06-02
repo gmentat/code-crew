@@ -1,0 +1,76 @@
+{
+  "task_id": "ratelimit__996",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared *RateLimit returned from the descriptor tree, corrupting state across requests",
+        "detail": "The handler reassigns Stats and FullKey on the shared rateLimit pointer from nextDescriptor.limit, so concurrent and subsequent calls observe whichever runtime value was written last. Sequential tests never witness the race. Fix by returning a per-request RateLimit view or computing Stats without rewriting shared config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Override guard compares enhancedKey against rateLimit.FullKey before FullKey is established on the non-detailed path",
+        "detail": "FullKey is only assigned in the detailed_metric branch; on the value_to_metric path it is the zero value or whatever a prior request left behind (compounded by the aliasing bug). The comparison therefore has no defined precondition and is meaningless as a correctness predicate. Establish FullKey as a single invariant at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-432",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical branches in the value_to_metric block collapse to a single rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default arm each independently check valueToMetric and append key plus optional '_'+value. The whole block reduces to: append value iff (valueToMetric or matched-with-value) and value is non-empty. Replace with one predicate to make the postcondition explicit.",
+        "file": "src/config/config_impl.go",
+        "lines": "352-388",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel key builders run through the descriptor walk with overlapping rules",
+        "detail": "detailedMetricFullKey and valueToMetricFullKey are both appended each iteration, then reconciled by a post-hoc NewRateLimit reconstruction that discards an intermediate stats allocation. Collapse to one builder driven by a per-level decision (include value? yes/no) and a single NewStats call at the end. Data should drive the algorithm.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "pike",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Key-segment formatting leaks descriptor internals into the lookup loop instead of living behind a descriptor method",
+        "detail": "GetLimit reaches into nextDescriptor.valueToMetric while building segments for the current entry, conflating which descriptor's flag controls which segment. A descriptor-owned metricSegment(entry, matchKind) helper would state the contract once and make detailed/value_to_metric/default visibly substitutable. Document cross-level semantics (parent vs leaf flag) in the README.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-385",
+        "flagged_by": [
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unbounded-cardinality footgun and missing tests for unmatched-descriptor edge",
+        "detail": "value_to_metric injects unbounded runtime strings into metric names with no length cap, sanitization, or stats-creation guard; enabling on a high-cardinality key allocates indefinitely. Tests also miss the nil-nextDescriptor fallback where the else branch still appends entry.Key, potentially trailing garbage. Add a cardinality guard and an unmatched-descriptor test.",
+        "file": "src/config/config_impl.go",
+        "lines": "384-388",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on two P0 correctness defects: GetLimit mutates the shared *RateLimit pointer returned from the descriptor tree (creating a race invisible to sequential tests), and the override guard compares against a FullKey that is unset on the value_to_metric path. At P1, the implementation duplicates key-building logic across three near-identical branches and two parallel builders, when a single per-level predicate plus one NewStats call at the end would suffice; the descriptor's segment-formatting responsibility also leaks into the caller. Fix the aliasing by producing a per-request RateLimit, collapse the key construction to one rule behind a descriptor method, document the cross-level value_to_metric contract, and add tests for unmatched-descriptor and high-cardinality scenarios."
+  }
+}

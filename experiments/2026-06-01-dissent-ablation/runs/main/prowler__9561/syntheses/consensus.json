@@ -1,0 +1,152 @@
+{
+  "task_id": "prowler__9561",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "summary": "The panel converges strongly on one core concern: the refactor replaces an explicit CATEGORY_LABELS data table with a three-rule heuristic plus an empty SPECIAL_CASES dictionary, and this silently regresses known IDs (most concretely 'trustboundaries' -> 'Trustboundaries' instead of 'Trust Boundaries'). Five of six reviewers flag this as a P1; the fix is to restore the explicit mapping as the primary lookup and demote the heuristic to a fallback (or populate SPECIAL_CASES and add a regression test pinning the legacy labels). Secondary issues with broad agreement: the empty SPECIAL_CASES is dead scaffolding, SEVERITY_ORDER now aliases 'Info' and 'Informational' to ordinal 4 (breaking injectivity \u2014 normalize at the boundary instead), HorizontalBarChart recomputes Math.max inside .map and uses divergent formulas for width vs. displayed percentage, CategorySelector reserves the magic string 'all' and carries a dead empty-string branch, and the active-filter badge for category was removed without a replacement path. The PR also bundles a 'Threat Score' -> 'Prowler ThreatScore' rename that should have been split out. None of this is unshippable, but the label-fidelity regression and SEVERITY_ORDER aliasing should be fixed before merge.",
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getCategoryLabel silently regresses known category IDs after replacing the explicit label table with a heuristic",
+        "detail": "The old adapter had an explicit CATEGORY_LABELS map (e.g., 'trustboundaries' -> 'Trust Boundaries', 'forensics-ready' -> 'Forensics Ready', 'iam' -> 'IAM'). The new lib/categories.ts replaces it with a three-rule heuristic (special-cases dict, version-suffix regex, short-word uppercase, otherwise capitalize). For 'trustboundaries' the heuristic yields 'Trustboundaries' instead of 'Trust Boundaries', and any future multi-word ID without a hyphen will silently misrender across the radar, findings filter, badges, and tooltips. Restore an explicit mapping table (or populate SPECIAL_CASES) as the primary lookup, keep the heuristic only as a fallback, and add a regression test enumerating the known IDs and their expected labels.",
+        "file": "ui/lib/categories.ts",
+        "lines": "1-54",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Empty SPECIAL_CASES dictionary ships as placeholder scaffolding",
+        "detail": "SPECIAL_CASES is exported as an empty Record with a 'add entries here if needed' comment. It is dead code that pretends to be a value but carries no facts \u2014 either populate it now with the cases the old explicit map covered (trustboundaries, etc.) and use it as the primary lookup, or delete the indirection and add it when the first counter-example arrives. Shipping empty scaffolding is hostile to the next reader and signals the author already expects the heuristic to miss.",
+        "file": "ui/lib/categories.ts",
+        "lines": "5-8",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "PR bundles three independent concerns (radar feature, ThreatScore rename, bar-chart refactor)",
+        "detail": "The diff combines the Risk Radar + category selector feature, a wholesale 'Threat Score' -> 'Prowler ThreatScore' rename across unrelated files, and a horizontal-bar-chart width/percentage refactor. These have independent risk profiles and should be reviewed and reverted independently. Split into separate commits/PRs so future bisects on a bar-chart regression don't have to read a category-selector diff, and so a marketing-driven rename revert doesn't entangle the radar work.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HorizontalBarChart uses divergent formulas for bar width vs. displayed percentage",
+        "detail": "calculatedWidth falls back to value/maxValue*100 (relative to the largest bar), while displayPercentage falls back to value/total*100 (share of total). When item.percentage is undefined, the bar geometry and the label text represent different quantities, breaking the implicit invariant that 'the rendered bar length matches the percentage shown next to it.' Either unify the formula, or extract a single helper computePercentages(item, total, maxValue) returning {width, display} and document the divergence explicitly.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "60-190",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "SEVERITY_ORDER aliases 'Info' and 'Informational' to the same ordinal, breaking injectivity",
+        "detail": "Adding Info: 4 alongside Informational: 4 papers over an upstream inconsistency about how that severity is named. The map is no longer injective: any caller doing reverse lookup, key enumeration, or equality on ordinals sees ambiguity. Normalize 'Info' -> 'Informational' at the boundary (adapter/ingestion) and keep a single canonical key in the order map, rather than widening the domain in place.",
+        "file": "ui/components/graphs/shared/constants.ts",
+        "lines": "13-22",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CategorySelector reserves the magic string 'all' inside the value space of category IDs",
+        "detail": "handleValueChange treats value === 'all' (and '') as the null/clear sentinel, but category IDs come from the API as arbitrary strings. If the API ever introduces a category with id 'all' (or empty string), the selector will silently coerce it to 'no selection.' Use a separate UI state for 'no selection' or a non-collidable sentinel, push the conversion into one adapter so the rest of the code only sees string | null, and document the precondition that category IDs cannot equal 'all'.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "22-46",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HorizontalBarChart recomputes Math.max(...data.map(...)) inside the per-row .map callback",
+        "detail": "maxValue is computed once per bar via Math.max(...data.map(d => d.value)), making the total work O(n^2) instead of O(n). n is small in practice, but the fix is free and makes the invariant 'maxValue is constant across rows' explicit. Hoist maxValue (and total) above the map so each bar is a pure transformation of (item, max, total).",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "61-73",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CategorySelector carries a dead empty-string branch in handleValueChange",
+        "detail": "`if (value === '' || value === 'all')` \u2014 the SelectItem values are 'all' and the category IDs, so empty string is never emitted by this component. Either delete the dead branch, or document the producer (e.g., 'shadcn select may emit empty string when cleared programmatically'). Dead-but-defensive code without a stated reason trains readers to mistrust the structured flow.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "22-28",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "category__in badge removed from DEFAULT_FILTER_BADGES without a replacement path",
+        "detail": "The diff removes the 'category__in' entry from DEFAULT_FILTER_BADGES while findings-filters.tsx now passes a labelFormatter. There are now two parallel mechanisms for filter display (DEFAULT_FILTER_BADGES vs. labelFormatter), and unless another code path registers a Category badge, applying the filter will render no badge or a generic fallback. Either keep both representations consistent (formatter applies to badge too) or commit to a single value->label function as the canonical place, and state the rationale in the commit message.",
+        "file": "ui/components/filters/active-filter-badge.tsx",
+        "lines": "40-55",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DataTableFilterCustom passes a formatted label into getBadgeLabel where a raw value was expected",
+        "detail": "Previously getBadgeLabel(entity, value) received the raw value; the new code passes displayLabel (already formatted). If getBadgeLabel uses that argument as an identifier (keying, lookup, or comparison against entity fields), behavior changes silently for any filter that supplies a labelFormatter. Either rename the parameter and document it is presentational only, or pass the raw value here and the formatted label separately to the renderer.",
+        "file": "ui/components/ui/table/data-table-filter-custom.tsx",
+        "lines": "150-165",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "HorizontalBarChart percentage fallback semantics changed from || to ?? without spec update",
+        "detail": "The expressions use (item.percentage ?? <fallback>), which fires only on null/undefined and not on 0. If the previous code used (item.percentage || ...), a legitimate item.percentage === 0 now renders width 0 and label 0% where it previously fell back to the computed ratio. State explicitly whether item.percentage is allowed to be 0 and what the intended display is, or pick one operator with documented semantics.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "61-75",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": []
+  },
+  "raw": ""
+}

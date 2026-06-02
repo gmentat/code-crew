@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "pipecat__3410",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Fixed-packet pacing buffer has no flush or drain semantics on stream end",
+        "detail": "The packetizer holds back the trailing remainder forever until enough bytes accumulate. On stream end, a final short audio segment may sit in _audio_send_buffer and never be sent. The data structure is right (a bytearray as a sliding window), but there is no terminal flush path. Either pad-and-flush on end-of-stream or document the truncation.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization in _write_frame conflates two concerns; would be cleaner as a filter",
+        "detail": "_write_frame now does serialize + buffer + chunk + send. That is three responsibilities welded together. A small stateless-ish chunker (input: bytes + size, output: iterable of full packets and a remainder) would make the algorithm self-evident from the data shape and keep _write_frame as a thin dispatcher. COULD-BE-A-FILTER.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization assumes pacing but does no pacing; name oversells",
+        "detail": "The PR description and changelog promise 'real-time pacing,' but the code only chunks bytes. _send_interval/_next_send_time are unchanged for this path, and the while-loop emits all full packets back-to-back. Either implement the pacing or rename to fixed_audio_packet_size only as framing. Honesty in naming matters.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF parsing reaches into two shapes; pick one or pin the protocol",
+        "detail": "deserialize() tries message['digit'] then message['dtmf']['digit']. That is defensive coding around an unknown data shape. Pick the documented Vonage shape and parse that; log-and-drop the other. Right now the data structure is fuzzy, so the algorithm has to guess.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "150-165",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "InputParams.sample_rate override duplicates StartFrame state without a clear owner",
+        "detail": "self._sample_rate is set from params.sample_rate or frame.audio_in_sample_rate. Two sources for one value invites drift if setup() runs more than once or params change. A single source of truth (frame at setup, params validated against it) keeps the data shape honest.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "60-75",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Serializer event dispatch could be a small table instead of an if-elif ladder",
+        "detail": "The text-message branch is a chain of event-string comparisons that each log and return None, with one real handler (dtmf). A dict from event-name to handler function would make the data drive the code, shrink the function, and make it trivial to add events. Small thing, but exactly the Pike rewrite.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "120-180",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The Vonage serializer is a straightforward filter (bytes/text in, frames out) and mostly earns its keep \u2014 SMALL-AND-COMPOSABLE in shape, though the text-event branch is an if-elif ladder that wants to be a small dispatch table and the DTMF shape is fuzzy. The FastAPI transport change is the more interesting one. Adding fixed-size packetization is reasonable, but the buffering, chunking, and sending are welded into _write_frame when a tiny chunker function would make the data flow obvious \u2014 COULD-BE-A-FILTER. The remainder also never flushes on stream end, and the PR oversells 'pacing' that the code does not actually do. Strip what does not earn its keep: extract the chunker, add a terminal flush, and align the name with the behavior."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ACL.root field complects authorization decision with namespace identity in a single overloaded pointer",
+        "detail": "Using a *namespace.Namespace pointer to encode both 'is this a root policy' and 'which namespace owns it' is COMPLECTED. nil-as-false and non-nil-as-true is a classic place-oriented trick that hides the actual value: a (bool, owner) pair. A small struct or explicit RootScope value would separate the two concerns and make the time semantics (when does ownership matter?) explicit at read sites.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 104-108, 342-361",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed is a stub returning false; callers cannot distinguish 'not sealed' from 'not yet implemented'",
+        "detail": "INCIDENTAL-COMPLEXITY introduced for a future SealManager. A stub that lies (always returns false) is worse than no stub: every caller now encodes a falsehood as a fact about the world. Either gate behind a build tag, return an explicit ErrNotImplemented, or do not introduce the method until SealManager lands. The TODO comment does not prevent silent misuse.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Sealed-namespace detection relies on substring matching error messages rather than typed values",
+        "detail": "errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) matches by string. This is EASY-NOT-SIMPLE: errors.Is with the sentinel is the simple form and survives wrapping correctly. String-contains will false-positive on any error whose message happens to embed 'namespace is sealed' and false-negative on translated/wrapped variants. Treat errors as values.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-166",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent semantics for root-policy ancestry check are unstated and load-bearing for authorization",
+        "detail": "The new fast-path delegates the entire root-token blast radius to ns.HasParent(a.root). Whether HasParent is reflexive (a namespace is its own parent), how it handles the root namespace, and whether Path comparison is canonicalized are all unstated here. This is the authorization boundary; the predicate's exact semantics must be pinned down in tests covering self, direct child, grandchild, sibling, and root cases. Test currently covers only ns1 vs root.",
+        "file": "vault/acl.go",
+        "lines": "351-361",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Replacing namespaceMountEntryView with NamespaceView().SubView() is a real decomposition win",
+        "detail": "SIMPLE. The previous code complected 'is this root?' branching with view construction at every call site. Collapsing to NamespaceView(barrier, ns).SubView(prefix) pushes the root-vs-child distinction into one place and lets callers treat all namespaces uniformly. This is the right direction; keep going and audit remaining ns.ID == RootNamespaceID branches elsewhere.",
+        "file": "vault/expiration.go",
+        "lines": "450-456",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength = TokenLen + \".\"[1] + nsID encoding complects token identity with namespace location",
+        "detail": "PLACE-ORIENTED. Embedding namespace ID inside the token string makes the token both a value (the secret) and a location pointer (where it lives). Parsers will now need to split-on-dot everywhere, and any namespace rename or move breaks the token. Consider keeping the token as an opaque value and looking up its owning namespace via a separate index; preserves the time-vs-identity split.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The PR moves in a genuinely simpler direction by collapsing root-vs-namespace view construction into NamespaceView().SubView(), which removes real complecting at call sites. The new ACL.root *namespace.Namespace field, however, overloads one pointer to encode two concerns (is-root and owning-namespace) and the authorization decision now hinges on an unspecified HasParent predicate with thin test coverage. The NamespaceSealed stub returning false and the substring-based ErrNamespaceSealed matching in response_util.go are both EASY-NOT-SIMPLE shortcuts that lie about facts: callers cannot distinguish 'not sealed' from 'not implemented', and errors.Is would treat errors as values instead of strings. The question that should have been asked first: what is the value, identity, and time model of a 'sealed namespace'? Until SealManager lands, the surface area introduced here encodes assumptions the system cannot yet honor."
+  }
+}

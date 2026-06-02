@@ -1,0 +1,74 @@
+{
+  "persona": "hickey",
+  "task_id": "protocompile__569",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Rename from `working` to `walking` collapses two state values into one; needs justification that the merge preserves semantics",
+        "detail": "The old code had three non-terminal states: `unsorted`, `working` (set when first descending into a node's children), and `walking` (referenced in `push` for cycle detection). After this PR, `working` is removed and `walking` is reused for what `working` used to mean. This may be correct \u2014 perhaps `walking` was never actually reachable before, making it dead code \u2014 but the diff doesn't make that argument. Collapsing two state values is a values/identity/time question and needs the commit message to say why the two phases are actually one.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "24-30, 86-91, 113-116",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cleanup-in-defer changes time semantics: state is now valid only during iteration, gone immediately after",
+        "detail": "Previously `clear(s.state)` ran at the start of the next Sort (lazy reset), so after one Sort completed the final classification of every node was still inspectable on the Sorter. The new code clears state and stack inside `defer`, so as soon as the iterator finishes \u2014 or the caller breaks out of yield \u2014 the Sorter forgets everything. This is a deliberate buffer-reuse choice but it complects 'finished iterating' with 'forget the result'. Worth verifying no caller depends on post-sort inspection of `s.state`.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "71-77",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Marking `sorted` moved inside the `if state != sorted` branch and after `yield`; on early return, the popped node is left in state `walking`",
+        "detail": "The old code unconditionally wrote `s.state[k] = sorted` after popping. The new code writes it only when the node had not yet been sorted, and only after a successful `yield`. If `yield` returns false, the early `return` happens with the just-yielded node still in state `walking`. With the new defer-clear this doesn't affect reuse, but it is a subtle reordering of when a value becomes 'sorted'. The previous unconditional write was easier to reason about; the new placement should be intentional, not incidental.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "98-104",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Original `s.stack = s.stack[0:]` was a no-op typo \u2014 fix is correct but reveals stack was never being reset",
+        "detail": "`s.stack[0:]` is identical to `s.stack` and does not truncate. So on a reused Sorter, the previous run's stack contents were still present at the start of every Sort. The PR title acknowledges this. The new `s.stack = s.stack[:0]` in the defer is the right call. This is textbook place-oriented programming biting back: a mutable buffer reused across calls accumulated stale state because the 'reset' was misspelled. A value-oriented version \u2014 local state per Sort, returned to a pool only as an optimization \u2014 would have made the bug impossible.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "64, 74-76",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment update has typos ('visisted', 'its') and is less precise than the state machine deserves",
+        "detail": "The new comment reads 'the state tracks whether this node has been visisted and if its the first or second visit'. Two typos. More importantly: this PR is about clarifying the state model, and the comment is the right place to name the three states (`unsorted`, `walking`, `sorted`) and what each one means. Documenting the values explicitly is the simple-not-easy move and would prevent the next reader from re-deriving the algorithm.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "82-86",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Sorter struct complects three concerns: allocation pool, traversal state, and re-entrancy guard",
+        "detail": "The Sorter holds (a) reusable allocations (`state` map, `stack` slice), (b) the in-progress traversal of one Sort call, and (c) an `iterating` flag for re-entrancy. This bug existed because (a) and (b) were entangled: 'reset for new sort' and 'free buffers after sort' were the same operation, done in the wrong place, with a typo no test caught. A cleaner decomposition: traversal state is local to the iterator closure; the Sorter is only the pool. Then there is no shared mutable state to reset and the defer just returns buffers. Not blocking \u2014 current fix works \u2014 but the shape is what allowed the bug.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "62-77",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "COMPLECTED, with a correct but incomplete fix. The root bug \u2014 stale stack contents across Sort calls \u2014 is the predictable consequence of place-oriented programming: a mutable buffer reused across iterations, with a typo'd reset (`s.stack[0:]` instead of `s.stack[:0]`) that no test caught. The PR repairs the symptom by moving cleanup to a defer and collapsing one state value, which is reasonable. The deeper issue is that the Sorter struct conflates three concerns \u2014 allocation pool, traversal state, and re-entrancy guard \u2014 and until those are decomposed, similar bugs will recur. The rename from `working` to `walking` merges what looked like two distinct DFS phases into one; the diff doesn't show enough context to confirm safety and the commit message should explain why the merge preserves semantics. Recommended: land the fix, document the three-state machine, and follow up by moving per-sort state into the iterator closure so the pool and the traversal are separated."
+  },
+  "raw": ""
+}

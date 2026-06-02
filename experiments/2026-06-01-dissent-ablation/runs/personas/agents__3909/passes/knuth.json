@@ -1,0 +1,70 @@
+{
+  "name": "knuth",
+  "task_id": "agents__3909",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "send_task lacks loop invariant and termination analysis for the audio framing loop.",
+        "detail": "The 50ms framing loop has no stated invariant about which bytes are buffered vs sent, nor what happens when audio_bstream.flush() returns partial frames. A reader cannot verify that no audio is dropped at stream end or that closing_ws is set exactly once. State the invariant: every byte from _input_ch is base64-encoded into exactly one outbound chunk, in order, before closing_ws=True.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "175-205",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Per-frame base64 encoding and JSON serialization is the wrong data structure for hot path audio.",
+        "detail": "At 16kHz with 50ms chunks, this allocates a fresh dict, JSON-encodes it, and base64-encodes 1600 bytes 20 times per second per stream. Asymptotically O(n) but constants are heavy: dict allocation, json.dumps, str->bytes. Pre-build the static envelope once or use a bytes template; this is the critical 3% where measurement will reward optimization.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "192-203",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Parameter range constraints are documented but not enforced.",
+        "detail": "Docstring states vad_silence_threshold_secs must be in [0.3, 3.0], vad_threshold in [0.1, 0.9], duration fields in [50, 2000], yet __init__ performs no validation. The contract is asserted in prose only; an out-of-range value fails opaquely on the server after WS connect. Validate at construction so the precondition is checked where it is stated.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "78-95",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_speaking state machine for committed_transcript with empty text is ambiguous and untested.",
+        "detail": "The protocol uses an empty committed_transcript as end-of-segment, but a non-empty committed_transcript keeps _speaking=True. If the server ever emits a non-empty commit followed by no empty terminator (network drop, reconnect), _speaking gets stuck True and START_OF_SPEECH is never re-fired. State the invariant on _speaking and prove termination across reconnects; currently _reconnect_event does not reset it.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-372",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "audio_format is derived by string formatting without validating sample_rate against STTAudioFormat literal set.",
+        "detail": "typing.cast to STTAudioFormat suppresses the type check; passing sample_rate=11025 silently produces 'pcm_11025' which the Literal type forbids and the server will reject. Either constrain sample_rate to the documented set {8000,16000,22050,24000,44100,48000} explicitly, or map through a dict so the failure is local and readable.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "115-116",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reconnect path discards in-flight audio and partial state without literate explanation.",
+        "detail": "On _reconnect_event the gather is cancelled and ws closed, but the AudioByteStream buffer inside send_task is abandoned (held in a cancelled coroutine's frame) and _speaking carries over from the previous session. A reader cannot tell whether this is intentional. Either document the invariant 'reconnect drops the in-flight chunk and re-emits START_OF_SPEECH' or preserve the buffer.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "232-260",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "UNDER-AUDITED, with one WRONG-DATA-STRUCTURE concern on the hot path. The streaming logic is plausibly correct but no loop invariants are stated for the framing loop, the _speaking state machine, or the reconnect path; a careful reader cannot verify these without running the code. The per-50ms dict+json+base64 cycle is the critical 3% where measurement is warranted before shipping. Parameter ranges are documented in prose but not enforced, and sample_rate->audio_format coupling is cast rather than checked. NEEDS-LITERATE-COMMENT on the commit-empty-text end-of-segment protocol \u2014 that subtle contract deserves the explanation."
+  }
+}

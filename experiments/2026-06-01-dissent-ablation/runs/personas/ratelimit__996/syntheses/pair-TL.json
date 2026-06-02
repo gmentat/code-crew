@@ -1,0 +1,74 @@
+{
+  "task_id": "ratelimit__996",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates shared RateLimit's Stats/FullKey on every request, causing a data race under concurrent traffic",
+        "detail": "rateLimit is a pointer into the shared config tree. Reassigning rateLimit.Stats and rateLimit.FullKey inside GetLimit without locking is a textbook race \u2014 concurrent requests with different runtime values will stomp each other. Stats must be resolved per-call into a local view, not written back into shared descriptor state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Stats counters allocated and discarded on every GetLimit call, leaking into the stats store per request",
+        "detail": "When the enhanced key differs from FullKey, statsManager.NewStats is effectively called twice \u2014 once via the original NewRateLimit and again for enhancedKey \u2014 with the first thrown away. On the per-request hot path this registers counters in the store every call. Build the right key once and allocate Stats once.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Enhanced-key branch compares against rateLimit.FullKey before it is guaranteed to be set on non-detailed paths",
+        "detail": "The new code checks `enhancedKey != rateLimit.FullKey`, but FullKey is only assigned in the detailed_metric branch. On non-detailed paths FullKey may be zero-valued or stale from a prior call, so the comparison is undefined against the documented contract. The precondition that FullKey reflects the current stats key is not established before the check.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-432",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Metric-key construction is duplicated three times inside the lookup loop instead of being abstracted",
+        "detail": "The matchedViaWildcard, matchedUsingValue, and default-key arms all compute essentially the same thing: append key, optionally with `_` + value. Three near-identical branches should collapse into one helper (e.g. a descriptor-owned `metricSegment(entry, matchKind)` method) so each mode's contract is stated once and the lookup loop stops leaking descriptor internals.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-388",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature duplicates detailed_metric with hand-waved precedence rather than generalizing the existing axis",
+        "detail": "detailed_metric already supports putting the runtime value into the metric key. value_to_metric adds a parallel mechanism with its own state, its own builder, and an under-specified precedence rule. README does not specify behavior when parent and leaf descriptors disagree, or wildcard interactions. Either extend detailed_metric with a per-level scope or document the cross-level invariant precisely.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literals for rateLimitDescriptor are fragile against future field additions",
+        "detail": "Two call sites construct `&rateLimitDescriptor{map{}, rateLimit, nil, descriptorConfig.ValueToMetric}` positionally. Any new field will silently shift argument meanings at every call site with no compile error if types line up. Use named-field initialization so the struct's contract is explicit at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The panel agrees the feature is reasonable but the implementation has serious correctness problems: GetLimit mutates a shared RateLimit pointer from the config tree on every request, which is both a data race and a per-request allocation leak into the stats store. The enhanced-key comparison also reads rateLimit.FullKey on paths where it is not guaranteed to be set. Beyond correctness, the metric-key builder duplicates three near-identical branches inside the lookup loop and largely re-implements detailed_metric with hand-waved precedence. Fix the race by computing Stats per-request without mutating shared state, collapse the key-builder into a descriptor-owned helper, and either extend detailed_metric or document why a parallel axis is required."
+  }
+}

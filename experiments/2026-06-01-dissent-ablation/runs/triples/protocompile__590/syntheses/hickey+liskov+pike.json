@@ -1,0 +1,75 @@
+{
+  "task_id": "protocompile__590",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() relocates the nil-deref upstream instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() is nil, run() returns bare nil, breaking the previously universal postcondition that run() yields a non-nil *result. Every caller downstream must now handle nil where one was guaranteed. The leader-panic-cleanup path should produce a sentinel *result with Fatal set and a closed done channel, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Overloading nil in t.result is the wrong data structure for leader-failure",
+        "detail": "t.result (atomic *result) now encodes three distinct facts via the same nil sentinel: not-started, leader-panicked-cleanup, and waiter-should-bail. This place-oriented overload is what made the race surface. Storing a failed-result value with Fatal set and a pre-closed done channel would close the race by construction and let waitUntilDone work uniformly, deleting the new nil-check branch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Cycle check skipped on the CAS-failure slow path where it previously ran",
+        "detail": "Previously checkCycle ran whenever t.result.Load() was non-nil at entry. After the refactor, when CAS fails because another goroutine became leader, control jumps straight to waitUntilDone with no checkCycle call. A caller in a cycle that races into this branch will deadlock on output.done instead of erroring with ErrCycle. Reinstate the cycle check on the slow path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment inverts the meaning of the panic-recovery branch",
+        "detail": "The comment reads 'Leader panicked but we did see a result' but the branch fires precisely when output is nil \u2014 i.e. we did NOT see a result. Comments are part of the spec; an inverted comment on a subtle concurrency branch will mislead future maintainers about when this path fires and whether returning nil is intended.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Leader-panic invariant and new waitUntilDone snapshot contract are undocumented",
+        "detail": "The fix depends on an invariant \u2014 when the leader panics it CASes t.result back to nil \u2014 that lives in cleanup code and is invisible at the run() call site. Similarly, waitUntilDone's new *result parameter changes its contract to wait on the caller-supplied snapshot, not whatever t.result currently advertises. Both invariants need to be documented at the type boundary so future edits don't silently break them.",
+        "file": "experimental/incremental/task.go",
+        "lines": "451-550",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproduces the leader-panic race; the fix is unverified",
+        "detail": "The diff adds no test exercising the leader-panic-then-waiter-reads-nil path. A race fix without a race test is folklore. A small test that panics the leader goroutine and asserts the waiter neither derefs nil nor deadlocks would lock in the invariant and document the intended behavior.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the cycle-check extraction and passing *result explicitly into waitUntilDone are clean wins that remove the TOCTOU window. But the core fix is judged unsound: returning bare nil from run() breaks a universal postcondition and just relocates the nil-deref one frame up. The root cause is overloading nil in t.result to encode multiple distinct states; the correct fix is to store a failed-result sentinel with Fatal set and a closed done channel on leader panic. Additionally, the cycle check is now skipped on the CAS-failure path, a comment inverts the actual semantics, key invariants are undocumented, and no test reproduces the race."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "chia-blockchain__20321",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "cat_spend with empty additions list now triggers CreateSignedTransaction.__post_init__ ValueError",
+        "detail": "Previously `cat_spend` with `additions=[]` (not None) would skip the fallback to single `amount/inner_address` and produce empty amount/puzzle_hash lists. The new code passes the empty list directly to `CreateSignedTransaction`, whose `__post_init__` requires `len(self.additions) < 1` and raises. The test was modified to dodge this case by injecting a zero-amount Addition rather than fixing the regression. This is an API-visible behavior change.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2013-2030",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "MAX_COIN_AMOUNT explicit check removed from cat_spend without confirmed replacement",
+        "detail": "The old `cat_spend` explicitly raised `ValueError(f\"Coin amount cannot exceed {MAX_COIN_AMOUNT}\")` for each addition. The new delegation to `create_signed_transaction` does not visibly perform this check at the same layer. If the downstream validation differs in message, code path, or omits this check, callers relying on the specific error semantics will break.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Memos no longer utf-8 encoded at this layer; relies on downstream handling",
+        "detail": "Both old endpoints did `mem.encode(\"utf-8\")` to produce `list[bytes]` before passing to `generate_signed_transaction`. The new path stuffs raw `request.memos` (list[str]) into `Addition.memos`. This is only safe if the downstream `create_signed_transaction` consistently encodes Addition.memos to bytes; if it differs from prior behavior, memos could be malformed or double-encoded.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1531, 2013-2038",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test masks the regression rather than asserting correct behavior",
+        "detail": "In `test_wallet_rpc.py`, `additions=[]` was changed to `additions=[Addition(amount=uint64(0), puzzle_hash=bytes32.zeros)]` solely to avoid the new `__post_init__` failure. A zero-amount addition to zero puzzle_hash is not a meaningful test fixture and hides the empty-additions regression. Either restore prior semantics or update the test to a realistic non-zero addition.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "send_transaction now forwards full puzzle_decorator list instead of just first element",
+        "detail": "The original code did `[request.puzzle_decorator[0].to_json_dict()]`, taking only the first decorator. The new code passes the entire `request.puzzle_decorator` list via the new field. This is a behavior change for callers that previously supplied multiple decorators expecting only the first to apply; downstream now sees all of them.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1531",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Addition constructed positionally; relies on field ordering",
+        "detail": "`Addition(request.amount, decode_puzzle_hash(...), request.memos)` uses positional args. Since Addition is a Streamable dataclass, field reordering would silently misalign arguments. Using keyword args (`amount=`, `puzzle_hash=`, `memos=`) here and in the `send_transaction` site would be safer and more readable.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1513-1525, 2020-2032",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "summary": "This PR sensibly consolidates `send_transaction` and `cat_spend` onto `create_signed_transaction`, but the refactor introduces several subtle behavior changes that need attention. The empty-additions case in cat_spend now hits the `CreateSignedTransaction.__post_init__` guard and raises, which the test sidesteps with a synthetic zero-amount addition rather than fixing. The MAX_COIN_AMOUNT explicit check and the utf-8 memo encoding are dropped at this layer and rely on downstream behavior matching exactly. `send_transaction` also silently changes from forwarding `puzzle_decorator[0]` to forwarding the full list. Worth validating these paths before merge."
+  }
+}

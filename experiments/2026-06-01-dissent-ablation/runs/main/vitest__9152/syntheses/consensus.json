@@ -1,0 +1,118 @@
+{
+  "task_id": "vitest__9152",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) silently changes path semantics without a stated precondition on `from` or a unit test",
+        "detail": "The one-line fix in DecodedMap changes resolve(s, from) to resolve(from, '..', s). The intent \u2014 resolve sources relative to dirname(from) per the source-map spec \u2014 is correct, but the change silently assumes `from` is always a file path. If `from` is a directory, a URL, or a virtual Vite id, `..` walks one level too high or behaves wrongly. The new postcondition of resolvedSources is nowhere documented and is only validated by a snapshot four layers up the stack. Add a JSDoc invariant and a direct unit test pinning behavior for relative, absolute, URL-like, and empty source entries.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getSourceMap performs unbounded synchronous readFileSync on every external stack frame with no memoization",
+        "detail": "getSourceMap is invoked per frame during parseErrorStacktrace, and for each external file it does existsSync + readFileSync of the entire file, then a full-file regex scan via convert-source-map (which may then readFileSync a sibling .map). With no cache, a deep stack across the same external module re-reads and re-parses the same bytes O(N) times on the reporter hot path. Add a Map<absolutePath, SourceMap|undefined> memoization scoped to the run (or at least the error), and replace existsSync+readFileSync with a try/catch on the read to remove the TOCTOU double-stat.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-187",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getSourceMap contract is unspecified \u2014 return type, error semantics, and failure-mode disjunction are implicit",
+        "detail": "The new getSourceMap hook has no documented contract for what to return for inlined modules, external modules with no map, external modules with broken/unreadable maps, or modules with missing sourcesContent. The readFileSync and convertSourceMap.fromSource calls are not wrapped in try/catch, so a malformed inline sourcemap comment or a binary file that passes existsSync will throw out of the stack-trace formatter \u2014 the worst possible place to throw. Total the function: wrap in try/catch, return undefined on any failure, and write down the precondition/postcondition on the option type so future hook implementations (coverage, browser mode, workers) substitute correctly.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "173-187",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Snapshot is the only correctness witness \u2014 no unit tests pin the behavior at the unit boundaries",
+        "detail": "The only evidence the fix works is an updated stacktraces.test.ts.snap showing .ts line numbers instead of .js. Snapshots verify the current end-to-end string; they do not document the contract. Add unit tests at the DecodedMap.resolvedSources boundary (fixtures: relative s, absolute s, URL-like from, missing sources) and at extractSourcemapFromFile (inline map, external .map, missing .map, malformed comment) so the value semantics are durable and the next regression is caught without anyone reading a stack trace.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "56-78",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns the literal string '{}' as a sentinel for missing map files",
+        "detail": "When the referenced .map file is absent, the helper returns the string '{}' so convert-source-map parses an empty object rather than throwing. This conflates 'no map' with 'broken map' and laundering absence through a fake parseable value hides the case from callers and logs. Either return '' (or undefined) and handle the absence explicitly at the caller, or \u2014 at minimum \u2014 replace the vague 'fallback to empty source map to avoid errors' comment with a literate statement of the invariant convert-source-map relies on. Consider a debug log so misconfigured builds produce a diagnostic instead of a silently-unmapped stack.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "moduleGraph.getModuleById(file) assumes the stack-frame path equals a Vite module id",
+        "detail": "parseErrorStacktrace hands getSourceMap whatever string appears in the frame's file position; Vite's moduleGraph keys modules by id, which is not necessarily the same string (Windows leading-slash differences, querystrings, virtual ids, file URLs). When the lookup misses for reasons unrelated to externalness, the code falls through to existsSync(file) and may read and apply a source map for an inlined module. Extract a named predicate isExternalModule(file) with a stated contract, and tighten the hedge in the inline comment ('should be empty for external modules') so a future change populating transformResult on externalized modules doesn't silently break this branch.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-184",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Source-map extraction helpers live in test-run.ts instead of the source-map module",
+        "detail": "extractSourcemapFromFile and createConvertSourceMapReadMap are general-purpose, stateless 'bytes + path -> SourceMap | undefined' transformations that have nothing to do with TestRun's responsibility. Their natural home is packages/utils/src/source-map.ts alongside DecodedMap and parseErrorStacktrace, with test-run.ts holding only the thin shell that decides 'is this module external?' This separation makes the pure core trivially testable without booting Vitest and prevents future callers (coverage reporter, browser-mode reporter) from duplicating the logic or reaching into test-run.ts.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "316-343",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert-source-map added as a dependency for ~30 lines of logic already covered by existing tooling",
+        "detail": "convert-source-map and its @types are added as runtime+types dependencies to provide fromSource and fromMapFileSource \u2014 essentially a regex for the trailing //# sourceMappingURL comment plus base64 decoding. The package already depends on @jridgewell/trace-mapping, and a 30-line local helper (modeled on the Vite implementation referenced in the diff comment) would cover both uses without expanding the dependency surface. Worth confirming the trade-off before shipping.",
+        "file": "packages/vitest/package.json",
+        "lines": "198-217",
+        "flagged_by": [
+          "knuth",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the patch fixes a real bug \u2014 external module stack frames bypassed Vite's transform pipeline and weren't being source-mapped \u2014 and the direction is correct. The unanimous P1 concerns are: (1) the load-bearing resolve(from, '..', s) change in DecodedMap silently alters path semantics with an unstated precondition on `from` and no direct unit test, and (2) the new getSourceMap callback does unbounded synchronous readFileSync on every external stack frame with no memoization, on the reporter hot path. A majority also flags that the getSourceMap hook has no specified contract for its failure modes and lacks try/catch, so a malformed map will throw out of the stack-trace formatter. Recurring P2 themes: the '{}' string sentinel conflates absence with corruption, snapshot-only verification doesn't pin the unit-boundary contracts, the moduleGraph.getModuleById heuristic is a leaky proxy for 'external', and the extraction helpers belong next to DecodedMap rather than in test-run.ts. Land after: writing down the DecodedMap and getSourceMap contracts, adding direct unit tests for both boundaries, memoizing the per-file extracted map, and totaling the hook with try/catch."
+  },
+  "raw": ""
+}

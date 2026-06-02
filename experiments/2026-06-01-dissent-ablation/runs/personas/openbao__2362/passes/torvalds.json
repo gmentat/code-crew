@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub that lies \u2014 returns false always while ACLs and listing already trust it",
+        "detail": "core.go adds (*Core).NamespaceSealed that always returns false with a TODO. Meanwhile ListAllNamespaces, root-token paths, and the new ErrNamespaceSealed handling are being wired to it as if it works. That's not a stub, that's a security regression with a comment on it. Ship the SealManager in the same patch or return an error/panic until it exists; do not let production code paths call a function that silently claims 'nothing is sealed.'",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "THREE-PATCHES \u2014 ACL semantics change, response_util refactor, ctx plumbing, and stubs jammed into one diff",
+        "detail": "This is at least three patches: (1) ACL root becomes namespace-scoped with HasParent ancestry check, (2) sdk response_util rewritten from if-chain to switch, (3) wholesale s/context.Background()/namespace.RootContext(t.Context())/ across dozens of tests plus stubs. Each deserves independent review and bisectability. The ACL change alone is a security-critical semantic shift and should land alone with focused tests.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ACL fast-path silently returns deny on namespace.FromContext error instead of failing loud",
+        "detail": "AllowOperation now does ns, err := namespace.FromContext(ctx); if err != nil { return ret }. Empty ACLResults means denied with no log, no signal. Previously the root fast-path didn't need ns at all. Now a missing namespace in context silently denies every root operation. At minimum log; better, distinguish 'no namespace' from 'denied' \u2014 this is exactly the kind of silent failure that bites at 3am.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HasParent ancestry check for root tokens needs an explicit security test, not just a happy-path child-ns test",
+        "detail": "The semantic change is: a root token issued in ns A now grants root in any descendant of A. testACLRoot only checks self-ns allow and root-context deny. Where's the test for sibling namespace denial? Cousin? Deeply nested descendant allow? Root-of-root behavior when a.root is RootNamespace? This is the ACL \u2014 the table you do not get wrong. Cover the matrix exhaustively or this lands as a latent privilege escalation waiting for the right ns tree.",
+        "file": "vault/acl_test.go",
+        "lines": "156-189",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "errwrap.Contains on ErrNamespaceSealed.Error() string-matches 'namespace is sealed' anywhere in any error",
+        "detail": "Reusing the same errwrap.Contains(err, ...Error()) pattern means any error message containing the substring 'namespace is sealed' \u2014 including ones constructed by handlers, plugins, or audit logs \u2014 will be coerced to 503. The existing ErrSealed pattern has the same flaw; you're propagating it. Prefer errors.Is on the sentinel. While you're refactoring this function into a switch anyway, fix the actual bug.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-178",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength = TokenLen + \"\\\".\\\"[1] + nsID is cute; just write TokenLen + 1 + NSIDLen",
+        "detail": "Indexing into a string literal to get the byte value of '.' as a length contribution is the kind of cleverness that wastes the next maintainer's two minutes. If it's a constant length, write the constant. If '.' is the separator, name a const Separator = \".\" and use len(Separator). BAD-TASTE \u2014 not wrong, just gratuitously opaque for a length arithmetic.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The ACL change is the real patch here and it is a security-critical semantic shift \u2014 root tokens now grant root across descendant namespaces via HasParent \u2014 wrapped in a diff that also rewrites response_util, retrofits ctx plumbing across a dozen test files, and ships a NamespaceSealed stub that returns false while callers already depend on it. THREE-PATCHES at minimum. Split the ACL change out, write the full ancestry permission matrix in tests (sibling/cousin/deep-descendant), do not land a stub that lies about seal state in production code paths, and stop string-matching error messages \u2014 use errors.Is on the sentinel. Refuse until the SealManager exists or NamespaceSealed errors loudly until then."
+  }
+}

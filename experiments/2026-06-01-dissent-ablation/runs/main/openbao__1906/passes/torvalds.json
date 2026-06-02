@@ -1,0 +1,74 @@
+{
+  "persona": "torvalds",
+  "task_id": "openbao__1906",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "RevokeErr is exposed to API consumers without scrubbing \u2014 the author themselves flagged this as an open security question",
+        "detail": "The PR description explicitly asks 'Is it safe to display the revoke error? It could contain sensitive information.' That's the author admitting they don't know. Revoke errors come from backend plugins (database, PKI, AWS, etc.) and can absolutely contain connection strings, partial credentials, internal hostnames, stack traces, or upstream API error bodies. 'It should not contain sensitive info because it gets logged' is not a security argument \u2014 logs and API responses have different threat models and different ACLs. Either scrub/whitelist the error before returning, gate it behind a separate capability/sudo, or get a maintainer sign-off documented in the commit. Shipping a question mark is not shipping.",
+        "file": "vault/logical_system.go",
+        "lines": "2197-2199",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three patches submitted as one",
+        "detail": "This diff conflates: (1) rename FetchLeaseTimes -> FetchLeaseInfo and leaseTimesForExport -> leaseInfoForExport across the codebase, (2) expose Path + namespace in the lookup response, (3) expose RevokeErr in the lookup response (the security-sensitive one). Splitting these makes the rename a trivial mechanical patch, makes the path/namespace addition a clean feature, and isolates the revoke_error change for the security discussion it actually needs. As one patch, a maintainer can't accept the safe parts without buying the unsafe part.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Drive-by context change unrelated to the patch",
+        "detail": "Line 2450 of expiration_test.go changes namespace.RootContext(nil) to namespace.RootContext(t.Context()) while the sibling call site at line 3104 keeps nil. If you want to modernize the context plumbing, do it everywhere in its own patch. Mixing it in here is exactly the kind of unrelated churn that wastes the maintainer's diff-reading time.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage is thin for what's being added",
+        "detail": "TestSystemBackend_leases gets one new assertion checking path == 'secret/foo'. Nothing tests namespace_path being populated, nothing tests namespace_path being absent for root namespace, nothing tests revoke_error being populated, nothing tests the cached vs irrevocable vs storage-loaded code paths now all return the extended fields. Three new response fields, one assertion. Add the table-driven tests.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "API schema marks path as Required but the cached/irrevocable paths can return empty Path",
+        "detail": "logical_system_paths.go declares path as Required: true. leaseInfoForExport copies le.Path unconditionally, which is fine for normal leases, but the response builder always sets resp.Data['path'] = leaseInfo.Path even when it's the empty string. If any code path produces a leaseEntry without Path set, the Required contract is violated silently. Either guarantee Path is always non-empty for any lease that can reach this handler (and document it), or drop Required.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Function comment grammar \u2014 minor but the comment is the documentation",
+        "detail": "'FetchLeaseInfo is used to fetch non sensitive information of a lease entry.' Should be 'non-sensitive' and the sentence reads awkwardly. Also 'Returns redacted leaseEntry for outside callers' \u2014 'redacted' is misleading; it's not redacted, it's a constructed subset. Call it what it is: 'Returns a leaseEntry containing only the fields safe to expose to outside callers.' The naming matters because the next person reading this needs to know exactly what the safety contract is \u2014 especially given the open question about RevokeErr.",
+        "file": "vault/expiration.go",
+        "lines": "1706-1707, 1739",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The rename and the path/namespace_path additions are fine \u2014 small, mechanical, and the diff is readable. The revoke_error field is not fine: the author literally wrote 'Is it safe to display the revoke error?' in the PR description and shipped it anyway. That's a question, not a patch. Revoke errors are generated by backend plugins and there's no contract preventing them from leaking credentials, internal hostnames, or upstream error payloads. This should be three patches \u2014 rename, path/namespace, revoke_error-behind-a-discussion \u2014 and the third one needs a maintainer-level security call before it lands. Verdict: NEEDS-WORK. Split the patch, scrub or gate RevokeErr, add real test coverage for the new fields, and drop the unrelated t.Context() change."
+  },
+  "raw": ""
+}

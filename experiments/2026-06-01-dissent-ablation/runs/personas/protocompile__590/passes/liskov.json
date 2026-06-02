@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "waitUntilDone contract violated: returning nil breaks the postcondition that run() yields a non-nil *result",
+        "detail": "The new fast path returns `nil` when `t.result.Load()` is nil after a failed CAS. Every other return path in run() yields a non-nil *result, and callers downstream (e.g., output.Fatal assignment, completion handling) rely on that postcondition. Silently returning nil propagates a new nil-deref risk one layer up. The contract should be: on leader-panic, return a sentinel result with Fatal set, not nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Cycle check skipped on the slow path where a waiter joins an already-pending task",
+        "detail": "Previously cycle detection ran whenever `t.result.Load() != nil` at entry. After the refactor, when CAS fails (another goroutine became leader between the initial Load and CAS), control jumps straight to waitUntilDone with no checkCycle call. A caller in a cycle that races into this branch will now deadlock on `output.done` instead of erroring with ErrCycle. The contract `run() detects immediate-path cycles` is no longer uniformly enforced.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Snapshot semantics of waitUntilDone's new `output` parameter are under-specified",
+        "detail": "waitUntilDone now takes `output *result` instead of re-reading `t.result.Load()`. The contract change is meaningful: callers must pass the result they intend to wait on, and the function promises to wait on *that* result's done channel, not whatever the task currently advertises. This invariant should be documented in the function comment, and callers audited to ensure they never pass a stale or foreign result.",
+        "file": "experimental/incremental/task.go",
+        "lines": "534-550",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment typo inverts the meaning of the panic-recovery branch",
+        "detail": "The comment reads `Leader panicked but we did see a result.` \u2014 it should be `did NOT see a result`. Comments are part of the spec; an inverted comment on a subtle concurrency branch will mislead future maintainers about when this path fires and whether returning nil is intended behavior.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Leader-panic invariant (`t.result` set to nil) is asserted but not documented at the module boundary",
+        "detail": "The fix depends on an invariant: when the leader panics, it CASes `t.result` back to nil. That invariant lives somewhere in the recover/cleanup logic but is not visible at the call site in run(). The abstract data type `task` should state this invariant explicitly so future edits to leader cleanup don't silently break the waiter's nil-check. SPEC-MISSING on the pending->nil transition.",
+        "file": "experimental/incremental/task.go",
+        "lines": "451-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable shadowing of `output` inside run() reduces readability",
+        "detail": "Inside the CAS-failure branch, a new `output := t.result.Load()` shadows the outer `output` returned by the leader path. Both are *result but represent different roles (this goroutine's own result vs. the leader's). Renaming the inner one (e.g., `leader`) would make the substitution relationship explicit and prevent accidental misuse in future edits.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The patch correctly extracts checkCycle and snapshots the result pointer before waiting, which fixes the immediate nil-deref. However, two contract regressions remain: returning bare `nil` from run() weakens a previously universal postcondition, and the cycle check is now skipped on the CAS-failure path where it previously ran. The new waitUntilDone signature also changes its contract (caller-supplied snapshot) without documenting it, and an inverted comment obscures the panic-recovery invariant. Fix the nil return to a Fatal-carrying sentinel, reinstate checkCycle on the slow path, and write the spec down."
+  }
+}

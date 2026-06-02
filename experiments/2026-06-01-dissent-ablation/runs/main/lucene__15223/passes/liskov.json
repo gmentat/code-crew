@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "lucene__15223",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "LSP violation: KnnVectorsFormat/FlatVectorsFormat subtypes that throw on fieldsWriter() weaken the supertype contract",
+        "detail": "The supertype KnnVectorsFormat (and FlatVectorsFormat) promises that fieldsWriter(SegmentWriteState) returns a usable writer; the legacy subtypes now unconditionally throw UnsupportedOperationException. That strengthens the precondition (callers must know never to call fieldsWriter on a legacy format) and weakens the postcondition (no writer returned). This is exactly Liskov's substitution failure: an instance of the legacy format cannot stand in wherever a KnnVectorsFormat is expected. The right fix is to lift a read-only capability into the type system (e.g., a ReadOnlyKnnVectorsFormat supertype or a supportsWriting() predicate baked into the contract) so callers can statically distinguish read-only legacy formats from writable ones, rather than discovering the restriction via runtime exception.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "fieldsWriter override",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Inheritance-for-reuse: Lucene99RW* test subclasses override fieldsWriter to re-enable writing, abusing subtyping",
+        "detail": "Lucene99RWScalarQuantizedVectorsFormat and Lucene99RWV1HnswScalarQuantizationVectorsFormat extend the legacy read-only formats solely to override fieldsWriter and put writing back. This is inheritance used as a code-reuse mechanism to escape the supertype's stated restriction (\"Old codecs may only be used for reading\"), and it produces subtypes that violate the supertype's intent rather than refining it. A composition-based test helper (a writer factory that uses package-private constructors of the writer class directly) would honor the contract without subclassing a type whose contract explicitly forbids writing.",
+        "file": "lucene/backward-codecs/src/test/org/apache/lucene/backward_codecs/lucene99/Lucene99RWScalarQuantizedVectorsFormat.java",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: protected fields widened to package-private and constants/methods downgraded from public, but the test package depends on them",
+        "detail": "OffHeapQuantizedByteVectorValues's previously protected fields (dimension, size, scalarQuantizer, slice, byteBuffer, etc.) are demoted to package-private final fields, and Lucene99ScalarQuantizedVectorsFormat constants (QUANTIZED_VECTOR_COMPONENT, DIRECT_MONOTONIC_BLOCK_SHIFT, NAME) and calculateDefaultConfidenceInterval are demoted from public to package-private. The test-only RW subclasses then rely on this package-private surface to reconstruct writers. That is the implementation leaking through the abstraction boundary: the \"hidden\" state of the legacy format is only hidden from external callers, while the package itself (including tests) takes a hard dependency on internals. Either the writer machinery should move alongside the format as a stated SPI for back-compat writes, or the test harness should not reach into package privates of a frozen legacy format.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/OffHeapQuantizedByteVectorValues.java",
+        "lines": "41-54",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wrong module boundary: backward-codecs reaches back into core lucene99 (Lucene99HnswVectorsFormat/Reader/Writer, Lucene99FlatVectorsFormat) for legacy reads",
+        "detail": "Moving Lucene99ScalarQuantizedVectorsFormat into backward_codecs while it still imports org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat, Lucene99HnswVectorsReader, and Lucene99FlatVectorsFormat from core inverts the intended dependency direction (backward_codecs depends on core's current lucene99, not the other way around, but the legacy read path is now coupled to whatever core's lucene99 looks like over time). The contract of the backward-codecs module is \"read-only support for old on-disk formats, isolated from the evolving core\"; this PR partially honors that for the new symbols but leaves the legacy reader tethered to live core classes that may themselves evolve or move. Decide which side owns Lucene99HnswVectorsFormat/Reader (and the flat format) and draw the boundary cleanly; otherwise a future core refactor will silently break legacy reads.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "imports",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Spec missing: the new \"legacy format = read-only\" invariant is communicated only by exception message",
+        "detail": "The contract \"Old codecs may only be used for reading\" is asserted at runtime via UnsupportedOperationException strings on two distinct classes, but is not stated as a documented invariant on the format types, on the backward-codecs module, or as a typed marker. For a multi-team, multi-year codebase, the read-only-after-rotation policy should be a written contract (javadoc on a base class or marker interface, with the substitution implication called out) so future codec authors don't have to re-derive it from grep results. Add an explicit policy comment at minimum, and consider a ReadOnlyVectorsFormat marker if this pattern will repeat with future format rotations.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsFormat.java",
+        "lines": "fieldsWriter",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Frame change: removed numMergeWorkers/mergeExec fields silently change observable behavior of the constructor contract",
+        "detail": "Lucene99HnswScalarQuantizedVectorsFormat still accepts numMergeWorkers and ExecutorService parameters but no longer stores them. The constructor's postcondition (\"the format will use these for merges\") quietly becomes \"the format ignores these.\" Since writing is now disabled this is harmless in practice, but the constructor signature still advertises options the format does not honor. Either remove the parameters from the constructor (acceptable since this is now a back-compat read path that won't be instantiated by user code in normal flow), or document on the constructor that these arguments are accepted only for source compatibility and have no effect.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "constructor",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The move physically relocates Lucene99 scalar-quantized formats into backward_codecs and disables writing by throwing from fieldsWriter, but the abstraction story is unfinished. KnnVectorsFormat's contract promises a usable writer; subtypes that throw at runtime are an LSP violation that should be lifted into the type system (a read-only marker or explicit policy) rather than communicated by exception. The test-only RW subclasses re-enable writing via inheritance, which is exactly inheritance-for-reuse working around the supertype's stated invariant; composition through a writer factory would be cleaner. The new module boundary also leaks: legacy code in backward_codecs still depends on core's evolving lucene99 classes (HnswVectorsFormat/Reader, FlatVectorsFormat), and package-private demotions in OffHeapQuantizedByteVectorValues and the format constants expose internals to test scaffolding rather than fixing the boundary. None of these block correctness for read-only back-compat, but for a long-lived multi-team codebase the read-only-after-rotation policy should be made a written contract before this pattern is repeated for future format rotations."
+  },
+  "raw": ""
+}

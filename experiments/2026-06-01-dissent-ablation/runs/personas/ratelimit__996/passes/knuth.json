@@ -1,0 +1,70 @@
+{
+  "name": "knuth",
+  "task_id": "ratelimit__996",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit creates and discards a stats counter on every value_to_metric call (UNBOUNDED ALLOCATION)",
+        "detail": "In the override branch, code calls statsManager.NewStats(rateLimit.FullKey) just to throw it away, then calls NewStats(enhancedKey). NewStats typically registers a counter in the stats store; this is invoked on every request, not at config load. The first allocation is pure waste and the second re-registers per request. Hot-path allocation that should happen once at load.",
+        "file": "src/config/config_impl.go",
+        "lines": "415-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ASYMPTOTICALLY-OK-PRACTICALLY-SLOW: per-request strings.Builder + NewStats lookup unconditionally",
+        "detail": "valueToMetricFullKey is built for every GetLimit call regardless of whether any descriptor sets valueToMetric. GetLimit is the hottest path in the service. The invariant should be: do nothing unless at least one descriptor in the matched chain has valueToMetric=true. Track a boolean and skip the builder + the NewStats override entirely otherwise.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "UNDER-AUDITED: loop invariant for valueToMetricFullKey is not stated and has a subtle bug when nextDescriptor is nil mid-traversal",
+        "detail": "When nextDescriptor==nil the code still appends entry.Key to the builder, but the original loop then breaks out of matching (the `if nextDescriptor==nil break` branch is implicit in current code). The resulting enhancedKey can include trailing segments past the actual matched leaf, producing a key that does not correspond to any limit. State and prove the invariant: builder length matches matched-segment count.",
+        "file": "src/config/config_impl.go",
+        "lines": "362-386",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three near-identical branches in the key-building switch collapse to one",
+        "detail": "matchedViaWildcard, matchedUsingValue, and default-key branches all do: write key; if valueToMetric and value!='' write _value. The wildcard-without-flag branch writes only key. This reduces to: alwaysWriteKey; if (matchedUsingValue || (nextDescriptor.valueToMetric && value!='')) writeUnderscoreValue. Current form is 30 lines for a 3-line decision; readability suffers and the equivalence is non-obvious.",
+        "file": "src/config/config_impl.go",
+        "lines": "353-386",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NEEDS-LITERATE-COMMENT: rateLimit mutation via NewRateLimit reconstruction is opaque",
+        "detail": "The comment 'Recreate to ensure a clean stats struct, then set to enhanced stats' does not explain why reconstruction is needed at all when the next line overwrites Stats and FullKey directly. If it's not needed, delete it. If it is (shared pointer aliasing?), state the aliasing invariant explicitly. As written a reader cannot tell whether the NewRateLimit call is load-bearing or vestigial.",
+        "file": "src/config/config_impl.go",
+        "lines": "425-430",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile",
+        "detail": "`&rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric}` relies on field order. Future field additions will silently shift meaning. Use named fields: `{descriptors: ..., limit: ..., valueToMetric: ...}`. Same applies to the domain root construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The feature is correct on the happy paths and well tested, but the implementation is UNDER-AUDITED on the hot path. GetLimit now unconditionally builds an auxiliary key and, when value_to_metric differs, allocates two stats objects per request (one immediately discarded) \u2014 that is the kind of premature pessimization the profiler would flag first. The three-branch key-building switch collapses to one rule and would read better as such. State the loop invariant for the builder, gate the entire override behind a \"any descriptor in chain enabled it\" flag computed at load time, and remove the throwaway NewStats call. Tests are thorough but do not cover the hot-path allocation cost or partial-match traversal."
+  }
+}

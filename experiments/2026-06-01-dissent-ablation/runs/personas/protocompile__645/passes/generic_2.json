@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "protocompile__645",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Directs() still dereferences i.publicEnd inside closure after nil guard, risking panic on nil receiver",
+        "detail": "In ir_imports.go Directs(), the outer slice is guarded against nil, but the closure body still calls `n < i.publicEnd` and `i.publicEnd <= n`. If i is nil, slice is empty so closure never runs in normal iteration, but methods like Indexer.At(j) on a nil-backed slice with j>=len returns nothing safely. Still, the closure references i unconditionally; if any code path invokes it on a nil receiver, this panics. Worth capturing publicEnd/importEnd locally for safety.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-220",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DescriptorProto on nil imports differs from non-nil empty: silently returns nil vs descriptor file",
+        "detail": "imports.DescriptorProto() now returns nil when i is nil, but for a non-nil imports with empty files it returns imported{}.file (also nil). The asymmetry isn't a bug per se, but File.IsDescriptorProto() now returns false for nil files - meaning the zero File no longer reports as descriptor.proto even though the original logic compared interned paths. Verify callers don't rely on nil-safe equivalence semantics.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "148-153",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "AllMembers iterator on nil File yields a nil seq but increments i unnecessarily",
+        "detail": "In ir_file.go AllMembers(), when f is nil, raw is a nil iter.Seq. iterx.Map over nil Seq should be empty, but verify iterx.Map handles nil Seq without panicking. The closure still captures i via increment; harmless but worth confirming iterx.Map's nil-tolerance contract.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "296-313",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-based zero test skips methods returning functions and may miss panics in deeper accessors",
+        "detail": "zero_test.go's testZeroAny only invokes zero-arg methods on the value receiver. Pointer-receiver methods on *T won't be discovered for value T, and methods returning iter.Seq (Kind==Func) are skipped without consuming them - so AllMembers' iterator is never iterated, meaning a panic inside the closure would not be caught.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "100-135",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Special-cased ValueNodeIndex returning -1 is undocumented at the type level",
+        "detail": "Element.ValueNodeIndex() now returns -1 for zero values, documented inline. However, callers that use the result as an index (per the example `e.Value().MessageKeys().At(-1)`) will panic. The doc mentions 'returns -1' but doesn't warn callers to check. Consider explicit guidance or a separate Ok() pattern.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Repeated nil-guard pattern across File accessors invites drift; consider helper",
+        "detail": "ir_file.go now has ~10 near-identical `var x T; if f != nil { x = f.field }` blocks. Each new accessor must remember to add this guard or risk regression. A small helper or a `(f *File) safeTypes() []id.ID[Type]` style indirection would reduce repetition and make the invariant enforced in one place.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "210-365",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR systematically nil-guards accessors on IR types so zero values don't panic, and adds a reflection-driven zero test to enforce the contract. The approach is sound and the test design is clever, but the reflection harness has gaps (skips func-returning methods, doesn't exercise pointer-receiver methods on value receivers) so some accessors may still panic without coverage. The Directs() closure still references the nil receiver inside the callback, and the repeated guard pattern across ir_file.go is a maintenance risk. Overall safe to merge after addressing the iter.Seq coverage gap and verifying Directs() doesn't deref nil i."
+  }
+}

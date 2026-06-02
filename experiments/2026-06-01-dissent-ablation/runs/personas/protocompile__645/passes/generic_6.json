@@ -1,0 +1,70 @@
+{
+  "name": "generic_6",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Directs() still dereferences i.publicEnd on a nil receiver inside the closure",
+        "detail": "In ir_imports.go Directs(), the nil guard sets `slice` to nil before reading `i.files`, but the returned closure still captures `i` and reads `i.publicEnd`/`i.weakEnd` etc. when invoked. For a nil receiver `slice` is empty so the closure won't fire, but if `i` is non-nil and `i.files` is non-empty while other fields are inconsistent, the original semantics are preserved \u2014 yet the new code path silently returns an empty Indexer instead of panicking when callers expect data. Reviewer should confirm tests cover the closure invocation, not only Len().",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-220",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FeatureSet() on nil *File returns FeatureSet{} but other methods like Deprecated still panic on nil",
+        "detail": "ir_file.go adds nil checks to many accessors (Imports, Types, Options, FeatureSet, Symbols, etc.) but leaves File.Deprecated(), InternedPath(), Path(), Package(), InternedPackage(), ImportFor(), and File.AST() unguarded. The zero test only covers a subset, so callers of those methods on a nil *File will still panic. This is an inconsistent contract \u2014 either guard all accessors or document which are nil-safe.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "148-360",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test reflection loop skips methods returning functions, weakening coverage",
+        "detail": "In zero_test.go testZeroAny, the loop `continue`s when a return value's Kind is Func, so any accessor that returns a closure/iter.Seq (e.g., AllMembers returning iter.Seq[Member]) is never actually exercised. The whole point \u2014 verifying the closure doesn't panic when invoked on zero \u2014 is bypassed. Consider invoking iter.Seq returns with a no-op yield to ensure the inner body doesn't panic.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "118-126",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "AllMembers index counter `i` is captured but reset semantics unclear on repeated iteration",
+        "detail": "ir_file.go AllMembers declares `i := 0` outside the returned iter.Seq closure. If the returned Seq is iterated multiple times, `i` continues from where it left off, producing wrong IDs on the second pass. This bug predates the diff but the refactor touches the function; worth fixing while in the area by moving `i := 0` inside the iterx.Map closure scope or resetting per iteration.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "298-312",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Repeated `var x; if !IsZero { x = ... }` pattern is verbose; consider a helper",
+        "detail": "ir_type.go and ir_file.go duplicate the same five-line guard pattern roughly a dozen times. A small helper like `func safeSlice[T any](z zeroable, get func() []T) []T` or restructuring around an early-return zero Indexer would reduce repetition and make future accessors harder to forget to guard. Not blocking, but a maintenance smell as more methods are added.",
+        "file": "experimental/ir/ir_type.go",
+        "lines": "417-490",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex sentinel change from 0 to -1 may break existing callers",
+        "detail": "Element.ValueNodeIndex previously returned whatever the search produced (potentially 0) for any element. The new code returns -1 for the zero element. Callers like the doc-comment example `e.Value().MessageKeys().At(e.ValueNodeIndex())` would now pass -1 into At(), which likely panics. Verify no existing call site treats the return as an unconditional valid index.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "summary": "The PR adds defensive nil/zero guards across many ir accessors and a reflection-based zero test. The approach is sound and the test scaffolding is nice, but the nil-safety contract is inconsistent \u2014 several File accessors (Deprecated, Path, AST, ImportFor) remain unguarded, and the test's reflection loop skips closure-returning methods, so iter.Seq accessors like AllMembers aren't truly verified. The repeated `var x; if !IsZero` guard pattern would benefit from a helper. Also worth confirming the new -1 sentinel from ValueNodeIndex doesn't break any callers feeding it back into At()."
+  }
+}

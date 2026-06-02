@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "protocompile__569",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Original cleanup-on-entry was correct; moving clear() to defer breaks reuse if caller stops iterating early without draining",
+        "detail": "Original code cleared state at Sort() entry. New code clears in defer. If the caller breaks out of iteration before the defer runs (yield returns false path does run defer, fine), but if a panic occurs in user dag()/Key() the deferred clear runs - good. However if Sort() is called and the returned iter.Seq is never invoked, state from prior run persists. Verify this is intentional; the original entry-time clear was defensive against this.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "63-78",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "THREE-PATCHES: state rename, stack-reset bug, and yield-ordering fix are three independent changes squashed into one diff",
+        "detail": "Patch does (1) collapse working/walking into one state, (2) fix s.stack[0:] -> s.stack[:0] with clear(), (3) move s.state[k]=sorted inside the yield branch. Each is a separate bug with separate reasoning. Squashing them makes bisect useless and review harder. Split.",
+        "file": "internal/toposort/toposort.go",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Behavior change: sorted marker now only set when yield succeeds; previously set unconditionally after pop",
+        "detail": "Old code: s.state[k]=sorted ran even after yield returned false (caller bailed). New code: only set if yield(node) returns true. This changes semantics on early termination. Probably correct since iterator is dead anyway and defer clears state, but the commit message says nothing about this. State-machine changes need explicit justification.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "98-104",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment update introduces two typos: 'visisted' and 'if its'",
+        "detail": "'visisted' should be 'visited'. 'if its the first' should be 'if it's the first'. If you're rewriting the comment to explain the simplified state model, get the spelling right. Maintainer six years from now reads this comment.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "84-86",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Original s.stack = s.stack[0:] was a no-op bug; new clear() + s.stack[:0] is correct but belongs in its own patch",
+        "detail": "s.stack[0:] is literally s.stack - doesn't reset length. That was a real bug: stale entries from prior Sort() runs would be visible via len(s.stack)>0. GOOD-TASTE on the fix (clear nils out refs to allow GC, then truncate). But this is a one-line bugfix that deserved its own commit with a clear message.",
+        "file": "internal/toposort/toposort.go",
+        "lines": "72-76",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test added or referenced for the state-reuse bug being fixed",
+        "detail": "PR title says 'Fix state reuse'. Where's the test that demonstrates the bug? A regression test calling Sort() twice on the same Sorter would lock in the fix. Without it, the next refactor will silently reintroduce the bug. Show me the test.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The underlying fixes are real bugs (s.stack[0:] is a no-op; sorted-marker placement was racy with early yield termination; the working/walking duplication was gratuitous). But this is three patches masquerading as one, the new comment has two typos, and there's no regression test for a PR whose entire purpose is fixing state reuse. Split it, fix the comment, add a Sort()-twice test, and it lands. The taste of collapsing working/walking is correct - one state was always sufficient."
+  }
+}

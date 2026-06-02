@@ -1,0 +1,114 @@
+{
+  "task_id": "stylelint__8953",
+  "variant": "naive",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Normalization only handles ClassName nodes; IDs, attributes, pseudos, and tag selectors with escapes are still false negatives",
+        "detail": "The fix narrowly targets `parser.isClassName(node)`, but escape-sequence equivalence applies to other selector types too (e.g., `#u-m\\00002b` vs `#u-m\\+`, `[data-x=\"\\00002b\"]`, `:is(...)`, pseudo-class arguments, type selectors). The PR title and changeset are framed broadly as \"escaped selectors,\" but only class selectors are normalized. Either the scope should be expanded (postcss-selector-parser exposes the same getter/setter pattern for Identifier/Tag/Attribute/Pseudo) or the changeset and tests should be narrowed to claim only class-selector coverage.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "97-105",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Self-assignment relies on undocumented postcss-selector-parser internals and is fragile",
+        "detail": "`node.value = node.value` triggers re-escaping only because postcss-selector-parser's ClassName setter happens to overwrite `raws.value`. This is an implementation detail of that library, not a documented API contract. If postcss-selector-parser changes its setter behavior (or adds a fast-path that no-ops on equal assignment), the fix silently regresses. Consider either calling a dedicated normalize API, manually clearing `raws.value`, or adding a regression test that asserts the post-normalization stringification \u2014 not just the rule outcome.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "100-104",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changeset is labeled `minor` but this is a bug fix",
+        "detail": "The changeset declares `\"stylelint\": minor`, but the PR fixes a false-negative bug in an existing rule. Per typical semver and stylelint's own conventions for rule bug fixes, this should be `patch`. A `minor` bump would only be warranted if this changed documented rule behavior or added new options.",
+        "file": ".changeset/fix-escaped-selector-duplicates.md",
+        "lines": "1-5",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage misses several escape-equivalence cases worth pinning",
+        "detail": "The reject tests cover hex-vs-character and short-vs-long hex on a class selector. Missing: trailing-space-terminated hex (`\\2b ` vs `\\2b`), uppercase vs lowercase hex (`\\2B` vs `\\2b`), and mixed-case selectors that previously normalized via other paths. Adding a couple of these would lock in the contract this PR is asserting and would also surface the type-selector/ID gap noted above.",
+        "file": "lib/rules/no-duplicate-selectors/__tests__/index.mjs",
+        "lines": "90-113",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`@ts-expect-error` swallows a real typing gap rather than fixing it",
+        "detail": "The `raws.value` access is suppressed via `@ts-expect-error` with a comment about performance. Since `raws` is a real (if undocumented) property on selector nodes, the cleaner fix is to declare a narrow local type or augment the import \u2014 `@ts-expect-error` will silently break if upstream types are updated to include `raws`, masking unrelated type regressions.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "101-102",
+        "flagged_by": [
+          "single_agent"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Helper is called twice per node via both the explicit call and the walk callback",
+        "detail": "`normalizeSelector` calls `normalizeNodeEscaping(node)` directly, then `node.walk(...)` will visit the same node's descendants but also re-walk in a pattern that mirrors the existing whitespace normalization. This matches the pre-existing structure, so it's not a regression \u2014 but it's worth confirming `walk` does not include the root node itself; if it ever did, double-normalization on classes is harmless but wasteful given the `raws.value` short-circuit. A brief comment clarifying the intentional root-then-descendants pattern would help future readers.",
+        "file": "lib/utils/normalizeSelector.mjs",
+        "lines": "13-19",
+        "flagged_by": [
+          "single_agent"
+        ]
+      }
+    ],
+    "dissents": [
+      {
+        "topic": "Scope of normalization: classes-only vs all selector types",
+        "positions": [
+          {
+            "persona": "pragmatic_shipper",
+            "position": "Ship the class-only fix now \u2014 it resolves the filed issue (#3972) with a small, surgical change and minimal risk. Other selector types can be addressed in a follow-up when there's a concrete bug report."
+          },
+          {
+            "persona": "abstraction_discipline",
+            "position": "The bug is fundamentally about escape-sequence equivalence; gating on `isClassName` encodes the wrong abstraction boundary. The normalization helper should iterate over all node types that expose value getter/setter normalization, or the PR should be honestly scoped (title, changeset, tests) to class selectors only."
+          }
+        ]
+      },
+      {
+        "topic": "Reliance on `node.value = node.value` self-assignment",
+        "positions": [
+          {
+            "persona": "formal_correctness",
+            "position": "This depends on an undocumented side effect in a third-party library's setter. The behavior should either be guaranteed by a contract test against postcss-selector-parser or replaced with an explicit `delete node.raws.value` to make the intent legible."
+          },
+          {
+            "persona": "pragmatic_shipper",
+            "position": "The PR links the exact upstream source lines that guarantee the behavior, adds a no-self-assign eslint suppression with a clear comment, and the test suite locks in the observable outcome. That's sufficient documentation and regression protection."
+          }
+        ]
+      },
+      {
+        "topic": "Changeset bump level",
+        "positions": [
+          {
+            "persona": "semver_strict",
+            "position": "Bug fixes to existing rules are `patch` by convention. Calling this `minor` inflates the release significance and may confuse downstream consumers tracking changelogs."
+          },
+          {
+            "persona": "stylelint_convention",
+            "position": "stylelint historically treats new rule behavior \u2014 even bug-fix-shaped \u2014 as `minor` because it can newly flag previously-passing CSS. Under that lens, `minor` is correct because users may see new warnings after upgrading."
+          }
+        ]
+      }
+    ],
+    "summary": "The fix is small, well-motivated, and includes targeted tests that prove the reported bug is resolved. The core concerns are scope and durability: normalization is gated to ClassName only, leaving IDs, attributes, type selectors, and pseudos with the same latent false negatives despite the PR's broader framing. The mechanism \u2014 `node.value = node.value` to trigger the library's setter \u2014 is clever but depends on undocumented postcss-selector-parser internals, so a regression test against the stringification (not just the rule's warning output) would harden it. The `minor` changeset bump is debatable under stylelint's conventions but worth confirming. Recommend addressing the scope/title mismatch and tightening the typing suppression before merge; no P0 blockers."
+  },
+  "raw": ""
+}

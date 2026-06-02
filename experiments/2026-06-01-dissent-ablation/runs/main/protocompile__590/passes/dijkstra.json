@@ -1,0 +1,94 @@
+{
+  "persona": "dijkstra",
+  "task_id": "protocompile__590",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Comment contradicts the code it documents",
+        "detail": "The new branch reads `output := t.result.Load(); if output == nil { return nil // Leader panicked but we did see a result. }`. The predicate has just established `output == nil`, i.e. we did NOT see a result. The comment is the opposite of the truth. An UNREASONED comment on a concurrency fix is a red flag: it signals the author has not held the state machine clearly in their head.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~456-459",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run violates its contract and pushes the nil-check to every caller",
+        "detail": "`run` returns `*result`. Callers throughout the package presumably assume a non-nil result (e.g. they read `.Fatal`, `.done`, or pass it onward). Smuggling a new nil sentinel into the return type silently changes the postcondition of `run` and does not update any caller in this diff. This is DEFENSIVE-AS-SUBSTITUTE: a nil guard inserted where the correct fix is to ensure the leader's panic path produces a well-formed result with `Fatal` set and `done` closed, so no caller ever sees nil.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~456-459",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Termination of waitUntilDone in the panic case is not proved",
+        "detail": "The fix protects against `t.result.Load()` returning nil at deref time, but the precondition for `select { case <-output.done: }` to ever fire is that someone closes `output.done`. If the leader panics and only nils `t.result` without closing `output.done`, every waiter that captured `output` before the nil-out blocks until `caller.ctx.Done()`. That is correctness by accident, not by reasoning. State the termination function and prove the leader's panic path closes `output.done` before nilling `t.result`; if it does not, fix that, not the call site.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~547-550",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The pending branch passes an `output` whose binding at that point is not shown to be non-nil",
+        "detail": "After refactoring, the pending branch calls `t.waitUntilDone(caller, output, async)` where `output` is the function's named return. The diff does not show where `output` is assigned before this branch. If `output` is still the zero-value nil from the function preamble at that line, the select inside `waitUntilDone` dereferences nil. Without seeing the full function the reader cannot verify this, and the author owes the proof, not the reviewer.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~444-446",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test accompanies a concurrency fix",
+        "detail": "The claim is `fix race condition causing nil pointer dereference`. The diff contains zero tests. Testing shows the presence of bugs, not their absence \u2014 but for a panic-window race, a deterministic reproduction (e.g. a query that panics, with synchronization to force the waiter through the new code path) is the minimum evidence that the diagnosis matches reality. Without it, this is neither tested nor proved.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Partial fix shipped with admitted unfinished reasoning",
+        "detail": "The PR description states `A follow up PR will be added for dependency cycles` and notes that the current cycle detection only checks the immediate call path, so the cycle check is run only on the branch where the caller may already be a child. Concurrency code with self-acknowledged incomplete reasoning around the interaction of panic recovery and cycle detection should not land in one half-step. The state machine \u2014 CAS-won, CAS-lost-and-pending, CAS-lost-and-leader-panicked, cycle-detected \u2014 should be enumerated and each transition proved, then the patch can be one well-shaped change rather than two coupled ones.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is a clean, semantics-preserving refactor",
+        "detail": "The extraction of cycle detection into its own method is REASONED: same control flow, same returned cycle, clearer call site. This is the one part of the diff that should survive a rewrite. Praise here is precise: it does not redeem the rest.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The fix is at the wrong layer",
+        "detail": "The race is: leader panics, nils `t.result`, waiter dereferences. The correct discipline is to make the result object's lifecycle the invariant: once a `*result` is published via CAS, it MUST have `done` closed before any further mutation of `t.result`. Fix the producer's panic handler to satisfy that invariant and the consumer needs no nil checks at all. Patching the consumer is SMUGGLED-GOTO of the original bug \u2014 the unstructured exit (panic-without-close) is being papered over downstream instead of fixed at its source.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "REFUSED in its current form. The checkCycle extraction is clean and should be kept. The actual race fix is wrong-shaped: it adds a nil-check on the consumer side, returns a bare nil from a function whose callers expect a non-nil `*result`, carries a comment that contradicts its predicate, and offers no proof that `output.done` is ever closed when the leader panics \u2014 so waiters that captured `output` before the nil-out may block until context cancellation rather than terminate on the channel as intended. The correct discipline is to fix the producer: the leader's panic recovery must close `output.done` (with `Fatal` set to the panic) before mutating `t.result`, preserving the invariant that any published `*result` is always closeable-to-completion. Then no consumer needs to know about nil. No test accompanies a concurrency fix, and the author admits cycle handling is incomplete; the state machine should be enumerated and each transition proved before this lands."
+  },
+  "raw": ""
+}

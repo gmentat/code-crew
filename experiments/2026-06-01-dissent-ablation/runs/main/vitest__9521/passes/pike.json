@@ -1,0 +1,84 @@
+{
+  "persona": "pike",
+  "task_id": "vitest__9521",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles path comparison may mismatch absolute vs relative shapes",
+        "detail": "In `isIncluded`, `filename` is the (possibly absolute) path passed in, run through `cleanUrl` and `slash`. But `changedFiles` comes from `VitestGit.findChangedFiles`, whose output shape (typically absolute, slashed) is not normalized at the boundary before `this.changedFiles.includes(filename)`. The data structure here is a flat array used as a set, and the join key is implicit \u2014 if git ever returns a path with a different prefix or casing, every file silently drops out of coverage. Make the data structure explicit: normalize both sides to a single canonical form (slash + resolve) and store as a `Set<string>` for O(1) lookup and clearer intent.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-176",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Array.includes on changedFiles is O(n*m) across all coverage checks",
+        "detail": "`isIncluded` is called once per candidate file and now does `this.changedFiles.includes(filename)` \u2014 linear scan per call. For a large monorepo with hundreds of changed files and thousands of candidates this is needless quadratic work. Pick the right data structure: a `Set<string>` built once in `onTestRunStart`. Pike's rule 5 applies in reverse here \u2014 measure \u2014 but the fix is so cheap and obvious there's no reason to ship the array form.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "173-175",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook is wired in three call sites by hand",
+        "detail": "The same line `await this.coverageProvider?.onTestRunStart?.()` is repeated immediately after `this._testRun.start(...)` in three places in `core.ts`. That's a data/control-flow duplication: 'test run started' is one event, but it's being announced by three callers who must each remember to call the hook. A junior maintainer will add a fourth `_testRun.start` call and forget the hook, and coverage filtering will silently break. Either fold the hook into `_testRun.start` (one event, one announcement) or expose a small helper that pairs them \u2014 so the composition is enforced by structure, not by discipline.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-885",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform duplicates the boolean-string coercion logic already used elsewhere",
+        "detail": "The `transform` for `coverage.changed` open-codes `'true'|'yes'|true` / `'false'|'no'|false` recognition. The top-level `--changed` flag has the same semantics; if the coercion isn't already shared, this is the second copy and a future third one is inevitable. Small composable helper: `parseBooleanOrString(value)` \u2014 one function, used by both. Data structure: the input is `string | boolean`, the output is `string | boolean`, the rule is uniform; centralize it.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-321",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance from test.changed conflated with coverage.changed semantics",
+        "detail": "`resolveConfig` copies `resolved.changed` into `resolved.coverage.changed` when the latter is undefined, and `onTestRunStart` then branches on `this.options.changed` vs `this.ctx.config.changed` and re-runs git in the first branch. After resolveConfig inheritance, both will normally be set, so the `else if (this.ctx.config.changed)` branch is dead in practice \u2014 except when a user explicitly sets `coverage.changed: false` to opt out, in which case `this.ctx.config.changed` is still truthy and the else branch quietly re-enables filtering using `config.related`. Worth pinning down the intended truth table in one place (a small struct of resolved state) rather than two branches reading two different fields.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test file mode changed to executable (0755) for no reason",
+        "detail": "`test/coverage-test/test/changed.test.ts` had its mode bit flipped from 0644 to 0755 in this diff. TypeScript test files don't need the executable bit; it's almost certainly a stray `chmod +x` from the author's environment. Strip it.",
+        "file": "test/coverage-test/test/changed.test.ts",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "changedFiles cache invalidation relies on caller ordering",
+        "detail": "`onTestRunStart` calls `this.globCache.clear()` after populating `changedFiles`, which is correct \u2014 but the cache is keyed only on filename, not on the (filename, changedFiles-set) pair. If a long-lived process ever re-runs with a different `changedFiles` set without going through `onTestRunStart` (watch mode, for instance), stale cache entries decide inclusion. Either key the cache on a tuple, or make the lifecycle of the cache explicit in the data: e.g., reset the Map reference itself in `onTestRunStart`. Composition over discipline.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "340-344",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature is small and the data flow is mostly straightforward \u2014 a `changedFiles` list, computed once at test-run start, intersected with the include glob. Two data-structure choices hurt it: `changedFiles` is an array used as a set (linear `includes` on every candidate file) and the join key between git output and `isIncluded` input is implicit, not normalized at the boundary. The `onTestRunStart` hook is also wired into `core.ts` by repeating the same line at three call sites, which invites future drift; a junior maintainer will eventually add a fourth `_testRun.start` and forget the hook. Strip the duplicated CLI boolean coercion into a shared helper, drop the stray 0755 mode bit on the test file, and pick the right data structure (a `Set` populated once, normalized once) and most of this code becomes self-evident. Verdict: TOO-CLEVER on the hook plumbing, WRONG-DATA-STRUCTURE on `changedFiles`; the rest is SMALL-AND-COMPOSABLE."
+  },
+  "raw": ""
+}

@@ -1,0 +1,60 @@
+{
+  "name": "hickey",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR title and Deepgram docs say CloseStream, code sends type Close",
+        "detail": "The description cites Deepgram's contract as {\"type\": \"CloseStream\"} but _CLOSE_MSG is json.dumps({\"type\": \"Close\"}). That is a value mismatch between the fact-on-the-wire and the documented fact. Either the docs are wrong or the message is. One of them must be reconciled before this is correct.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_close_ws complects three concerns: flush, close handshake, and socket teardown",
+        "detail": "One method now sends a Flush, sends a Close, awaits one arbitrary frame, swallows all exceptions, and closes the socket. Flush semantics (drain audio) and Close semantics (end session) are different values with different time meaning. Decomposing into _flush, _drain_until_closed, _close would make the time model explicit instead of implicit in a 1s sleep-equivalent.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "127-143",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout is place-oriented thinking about a stream of events",
+        "detail": "A graceful close is a sequence of events ending in a CloseResponse or socket close, not one frame. Awaiting exactly one receive treats a value-stream as a single place. Either drain until close/CloseResponse (bounded by total timeout) or do not wait at all. The current shape will silently pass with the first stray binary frame.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "134-138",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare except Exception over the send/receive sequence hides essential failure facts",
+        "detail": "Wrapping send_str and wait_for in except Exception and logging a warning conflates expected ConnectionResetError with programming errors. The fact 'we could not signal close' is different from 'we crashed mid-send.' Narrow to ConnectionError/aiohttp errors so the log carries real information instead of a generic warning.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "139-140",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Class-level _FLUSH_MSG/_CLOSE_MSG belong with the other protocol constants as data",
+        "detail": "These are protocol messages, same kind of fact as whatever the STT plugin already encodes. Defining them as mutable class attributes typed str invites drift between STT and TTS encodings of the same Deepgram control vocabulary. A small module-level dict of control messages (or shared with STT) keeps the wire protocol as one value in one place.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The fix moves in the right direction \u2014 making the close handshake an explicit value sent on the wire rather than relying on TCP teardown \u2014 but it complects flush, close, and drain into one method whose time model is a 1-second sleep with a one-frame receive. The message name in code (\"Close\") does not match the message name in the PR description and Deepgram reference (\"CloseStream\"); that is the load-bearing fact to verify before merge. The broad except Exception erases the difference between expected and unexpected failures. Decompose into flush, drain-until-closed, and close, share the control-message vocabulary with the STT plugin, and reconcile the wire constant against Deepgram's actual contract."
+  }
+}

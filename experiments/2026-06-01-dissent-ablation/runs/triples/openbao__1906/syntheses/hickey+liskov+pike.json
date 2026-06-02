@@ -1,0 +1,79 @@
+{
+  "task_id": "openbao__1906",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "RevokeErr surfaced to API callers without sanitization or documented redaction contract",
+        "detail": "All three reviewers flag this: RevokeErr is backend-supplied error text (DB drivers, upstream API responses, possibly secrets) now propagated verbatim to the lookup response. The PR author raised the concern but did not resolve it. Either redact/truncate at write time, gate behind a sudo capability, or document and enforce that backends must not put secrets in revoke errors before merge.",
+        "file": "vault/logical_system.go",
+        "lines": "2197-2201",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "FetchLeaseTimes -> FetchLeaseInfo rename broadens contract without spec or compatibility shim",
+        "detail": "The old name encoded a narrow projection (times); the new name implies general info but the postcondition (a partially-populated *leaseEntry with implicit field set) is unstated. It is also an exported API break with no deprecated alias. Either document the exact projection as the postcondition or return a distinct LeaseInfo type, and add a compatibility wrapper.",
+        "file": "vault/expiration.go",
+        "lines": "1703-1745",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "leaseInfoForExport reuses *leaseEntry instead of a distinct DTO, complecting authoritative record and redacted view",
+        "detail": "The same struct serves both the in-memory entry and the export projection, so callers cannot tell from the type which fields are guaranteed populated, redacted, or absent. It also leaks the unexported namespace field across an ambiguous boundary. Define an explicit ExportedLeaseInfo struct with the exact exported fields to fix the abstraction and prevent future leaks via the same path.",
+        "file": "vault/expiration.go",
+        "lines": "1735-1755",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Response schema marks path Required:true but le.Path may be empty for some lease shapes",
+        "detail": "The OpenAPI declaration claims path is always present, but leaseInfoForExport copies whatever le.Path holds, including empty for edge cases (token leases, irrevocable entries loaded with missing fields). Either enforce a non-empty Path invariant for every lease reaching handleLeaseLookup or drop Required:true so the schema matches reality.",
+        "file": "vault/logical_system_paths.go",
+        "lines": "2690-2694",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests only cover the happy path; namespace_path and revoke_error branches are unasserted",
+        "detail": "TestSystemBackend_leases checks resp.Data[\"path\"] but does not exercise the two new conditional fields: empty vs populated namespace, and empty vs populated RevokeErr (including redaction expectations). Add three small cases to pin the contract the PR actually introduces.",
+        "file": "vault/logical_system_test.go",
+        "lines": "1228-1230",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inconsistent context invariant in test changes: t.Context() in one site, nil in sibling",
+        "detail": "Line 2450 was updated to namespace.RootContext(t.Context()) while the parallel test at line 3104 still passes namespace.RootContext(nil). Either FetchLeaseInfo's ctx precondition allows nil and both should match, or it does not and both should pass a real context. Pick one shape for this file.",
+        "file": "vault/expiration_test.go",
+        "lines": "2450, 3104",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees this is a small, well-shaped change adding three fields to a lease lookup response, but with one unresolved boundary decision the author already surfaced: RevokeErr is backend-supplied text propagated verbatim to API clients with no sanitization or capability gate, and needs a documented redaction contract before merge. The rename FetchLeaseTimes -> FetchLeaseInfo broadens the contract without restating the postcondition and breaks an exported API without a shim. The projection function wants to be an explicit ExportedLeaseInfo DTO rather than a partial *leaseEntry copy; that would also fix the namespace-field leak and make the OpenAPI Required flags honest. Tests cover only the path field, leaving the two genuinely new conditional branches unasserted."
+  }
+}

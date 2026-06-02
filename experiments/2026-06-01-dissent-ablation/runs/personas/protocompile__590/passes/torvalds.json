@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil result silently swallows a leader panic instead of propagating it",
+        "detail": "When CompareAndSwap fails and t.result.Load() comes back nil, the new code returns nil. Every caller of run() that I can see treats *result as non-nil. The comment even says 'Leader panicked but we did see a result' which is either a typo for 'didn't' or a lie. Either way, returning nil from run papers over the panic instead of surfacing it. State what the contract is and honor it.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race is not actually fixed; t.result can still be cleared between Load and use",
+        "detail": "The pending branch at the top of run() still calls output := t.result.Load() and then hands it to checkCycle/waitUntilDone. If the leader panics and nils t.result after this Load returns a non-nil result but before done is closed, you're fine on the channel read but the whole 'set t.result to nil on panic' protocol is being reasoned about by vibes. Document the memory ordering or use a single atomic snapshot path. Right now two call sites handle the nil case differently. That's the bug, not a fix.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Commit/PR does two things: race fix and a refactor extraction",
+        "detail": "Extracting checkCycle is fine. Fixing the nil-deref race is fine. Doing both in one diff makes the actual fix harder to bisect and harder to review. THREE-PATCHES, or at minimum two: one pure refactor with zero behavior change, one minimal race fix. The PR description even admits a follow-up is needed for dependency cycles, so the author already knows how to split work.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for the panic-while-waiting race",
+        "detail": "This is a concurrency bug that produced a nil deref in production-ish code. The diff adds zero tests. A race like this needs a deterministic reproducer (inject a panic in the leader, have N waiters, assert they all get a sensible error rather than nil or panic) or it will regress. Bad taste to fix a race without locking it down.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Shadowed output variable in run() is gratuitously confusing",
+        "detail": "Inside the !CompareAndSwap branch you write `output := t.result.Load()`, shadowing the named return `output` from the function signature. The outer output was already assigned earlier. Either reuse it or pick a different name. Reading this in six months, the maintainer has to stop and ask which output is which. Small thing, real cost.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment 'Leader panicked but we did see a result' reads as a typo",
+        "detail": "Pretty sure that should be 'did not see a result' given the surrounding logic. If the comment is correct, the code is wrong. If the code is correct, the comment is wrong. Either way fix it; comments that contradict the code are worse than no comments.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The extraction of checkCycle is a fine cleanup and I have no quarrel with the shape of it. But the actual race fix is half-done: in the CompareAndSwap-failed branch you now return a bare nil when t.result.Load() comes back nil, which just relocates the nil-deref from the channel read into every caller of run(). Meanwhile the pending-output branch above still trusts t.result.Load() without the same guard, so the two paths handle the same race inconsistently. Split this into a refactor patch and a race-fix patch, add a deterministic test for the panicking-leader case, and decide on one contract: either run() never returns nil, or every caller checks. Right now it's neither."
+  }
+}

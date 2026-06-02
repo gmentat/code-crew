@@ -1,0 +1,76 @@
+{
+  "task_id": "protocompile__590",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() relocates the nil-deref upward instead of fixing it",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, run() returns nil \u2014 violating the previously universal postcondition that every exit path yields a non-nil *result. Downstream callers (Fatal assignment, completion handling, parent tasks) now risk the same nil-deref one frame up. The leader's panic-cleanup path should produce a sentinel failed *result with a pre-closed done channel and Fatal set, not a nil escape hatch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment inverts the meaning of the panic-recovery branch",
+        "detail": "The comment reads \"Leader panicked but we did see a result\" yet the branch fires precisely when output is nil \u2014 i.e. we did NOT see a result. Comments are part of the spec; an inverted comment on a subtle concurrency branch will mislead future maintainers about when this path fires and whether returning nil is intended.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "t.result lifecycle invariant (pending \u2192 nil on leader panic) is undocumented",
+        "detail": "The fix depends on the leader CASing t.result back to nil on panic, but that invariant is neither shown in the diff nor stated at the module boundary. Without an explicit spec of t.result's state machine across leader panic, CAS failure, and waiter contention, future edits to the cleanup path will silently break the waiter's nil-check. Document the ADT invariant explicitly.",
+        "file": "experimental/incremental/task.go",
+        "lines": "451-459",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No test reproduces the leader-panic-with-waiter race",
+        "detail": "The diff adds no test exercising the leader-panic-then-waiter-reads interleaving. A race fix without a race test is folklore. A small test that panics the leader goroutine and asserts the waiter doesn't deref nil (under go test -race) would lock in the invariant and document the intended behavior.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "t.result overloads nil to mean multiple distinct states",
+        "detail": "nil currently means \"not started,\" \"in-progress-leader-died,\" and now \"caller should bail.\" Overloading the tombstone is why this race surfaced. A sentinel failed-result with a pre-closed done channel and Fatal error would let waitUntilDone work uniformly and delete the new nil-check branch entirely. Data dominates \u2014 fix the type, not the branch.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "waitUntilDone's new snapshot-parameter contract is under-specified",
+        "detail": "waitUntilDone now takes an explicit *result instead of reloading t.result. The shape is correct (removes TOCTOU), but the new contract \u2014 callers must pass the result they intend to wait on, and the function waits on that snapshot's done channel \u2014 is undocumented. Add the contract to the function comment and audit callers to ensure no stale or foreign result is passed.",
+        "file": "experimental/incremental/task.go",
+        "lines": "534-550",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the cycle-check extraction and threading *result through waitUntilDone are clean wins that remove a TOCTOU window. However, the core fix has a fundamental flaw: returning bare nil from run() relocates the nil-deref one frame upstream rather than resolving it, violating a previously universal postcondition. An inverted comment misrepresents the branch's intent, and the t.result lifecycle invariant the fix depends on is nowhere documented. The right fix is a sentinel failed *result with a pre-closed done channel \u2014 not a nil escape hatch \u2014 accompanied by a race-reproducing test."
+  }
+}

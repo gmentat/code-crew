@@ -1,0 +1,93 @@
+{
+  "task_id": "prowler__9702",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Naming inconsistency: PR title/description say 'multiple_network_interfaces' but check, directory, metadata, and CHANGELOG use 'single_network_interface'.",
+        "detail": "The check's identity is ambiguous across artifacts. PR title and description describe detecting multi-NIC VMs, while CheckID, directory, class, and CHANGELOG use 'single_network_interface' framing. Pick one and align all of: CheckID, directory, class name, metadata, and CHANGELOG so the spec name matches the predicate the check asserts.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection via name-prefix 'gke-' is a brittle heuristic; should use the goog-gke-node label or MIG ancestry.",
+        "detail": "Identifying GKE-managed nodes by instance.name.startswith('gke-') is spoofable (any VM named 'gke-foo' gets MANUAL) and misses real GKE nodes renamed by tooling. The authoritative signal is the goog-gke-node label or managed-instance-group reference. Surface that as a derived is_gke_managed field on the Instance model and key the exemption off the data, not the string.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "28-33",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Contract mismatch: metadata/PR describe PASS/FAIL but code emits a third MANUAL state for GKE.",
+        "detail": "Metadata.json and the PR description specify a two-valued postcondition (PASS=single, FAIL=multiple), but the implementation introduces MANUAL for gke-prefixed instances. Either document MANUAL as a first-class state in metadata and the PR, or remove the GKE branch and handle it via allowlist/muted conventions. Spec and code must agree.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "26-34",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-interface branch silently returns PASS, violating the postcondition and untested.",
+        "detail": "When interface_count == 0, status remains the default PASS while status_extended says 'has no network interfaces'. A VM with zero NICs is not a single-NIC VM, and the branch has no test coverage. Either treat zero as MANUAL/INFO with an explicit decision, or assert it cannot happen per GCP API contract. Add a test either way.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "35-39",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface model drops fields needed to distinguish risky multi-NIC from benign, and duplicates public_ip logic.",
+        "detail": "NetworkInterface stores only name/network/subnetwork (and truncates URLs to short names), discarding accessConfigs/natIP/alias ranges that distinguish cross-trust-boundary bridges from benign multi-NIC. Meanwhile public_ip is computed by a parallel loop on Instance. Enrich NetworkInterface and derive public_ip from it; honor the ip_forward exemption the metadata Notes promise.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "105-135, 603-610",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mutable default '[]' on Pydantic network_interfaces field; prefer Field(default_factory=list).",
+        "detail": "network_interfaces: list[NetworkInterface] = [] uses a shared mutable default at class level. Pydantic v1 copies it safely today, but the idiom is fragile across version changes and subclassing. Field(default_factory=list) makes the per-instance-ownership invariant explicit.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "638",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the check works but ships with multiple structural defects that should block merge. The check's identity is ambiguous (PR title says 'multiple', everything else says 'single'), and the GKE carve-out uses spoofable name-prefix sniffing instead of the authoritative goog-gke-node label. The metadata promises PASS/FAIL but code emits a third MANUAL state, and the zero-NIC branch silently PASSes with no test coverage, violating the stated postcondition. Secondary: the NetworkInterface model strips fields that would let the check distinguish real cross-boundary bridges from benign dual-NIC and duplicates the existing public_ip loop. Reconcile naming, replace the GKE heuristic with label-based detection, document or remove MANUAL, and fix the zero-NIC branch before landing."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "knuth",
+  "task_id": "agents__3608",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "PR description says CloseStream but code sends type Close \u2014 the control message string is unverified against Deepgram's actual API.",
+        "detail": "The PR rationale references {\"type\": \"CloseStream\"} (per Deepgram's Listen V1), but _CLOSE_MSG is {\"type\": \"Close\"}. Speak V1 may indeed use Close, but the discrepancy in the PR description means the invariant the fix depends on \u2014 that this exact string causes graceful drain \u2014 is unaudited. State which message the Speak socket actually accepts and cite it.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout does not establish the invariant that all pending audio has been drained.",
+        "detail": "The stated goal is to wait for the server to flush remaining audio/transcripts before close. But receive() returns on the first frame \u2014 which may be a single audio chunk, a ping, or a control ack \u2014 not on end-of-stream. Either loop until a Close/Closed frame (or until timeout), or document explicitly that this is a best-effort grace period, not a drain.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-139",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Bare Exception catch around send_str swallows cancellation and obscures the actual failure mode.",
+        "detail": "except Exception will catch programming errors (e.g., ws already closed, JSON encoding bugs that won't happen here, type errors) and downgrade them to a warning. Narrow to ConnectionResetError / aiohttp.ClientError / asyncio.TimeoutError. Also: log at debug if the socket is already closed \u2014 that is the expected race, not a warning.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140-141",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Constants are class attributes built at import time via json.dumps \u2014 fine, but the literate comment is missing.",
+        "detail": "_FLUSH_MSG and _CLOSE_MSG are protocol-level control frames whose exact wire format is load-bearing. A one-line comment citing the Deepgram Speak V1 message spec (URL + which message type drains vs terminates) would make the code readable to the next maintainer without a git-blame archaeology trip. This is the literate-comment the fix needs.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "1.0s constant timeout is a magic number with no justification or measurement behind it.",
+        "detail": "The PR claims this prevents 429s from lingering sessions, but 1.0s is unmeasured \u2014 could be too short under network jitter (defeating the fix) or too long for hot paths (latency tax on every close). Either cite the measurement that produced 1.0s, make it a named constant with rationale, or expose it as configurable. Don't optimize what you didn't measure.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "136",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The fix is directionally correct \u2014 sending a drain/close control message before WebSocket close mirrors the STT path and aligns with Deepgram's documented behavior \u2014 but the rigor is missing. The exact control-message string disagrees with the PR description (Close vs CloseStream), the 1-second wait is a single receive() rather than a drain loop, and the 1.0s timeout is an unmeasured magic number. Add a literate comment citing the Speak V1 spec, narrow the exception handler, and either prove or document that one receive() is sufficient. NEEDS-LITERATE-COMMENT."
+  }
+}

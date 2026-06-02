@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "vitest__9521",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles is mutable state on the provider, complecting lifecycle, identity, and value",
+        "detail": "onTestRunStart mutates this.changedFiles and clears globCache as a side effect. The set of changed files is a value computed from (git ref, root); making it an instance field with implicit time semantics means isIncluded()'s answer depends on whether onTestRunStart already ran. Pass the changed-files set explicitly into isIncluded/getUntestedFiles, or compute it once at config-resolve time.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "86-220, 329-348",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "globCache values now depend on hidden state, so the cache key is wrong",
+        "detail": "The cache stores 'included' keyed only by filename, but the answer now also depends on changedFiles. The code papers over this by clearing the cache in onTestRunStart. That is place-oriented programming: a cached value that silently invalidates when an unrelated field mutates. Either key the cache on (filename, changedFiles identity) or separate the glob match (pure, cacheable) from the changed-file filter (applied after).",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-180",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two changed-file sources are conflated under one field with implicit precedence",
+        "detail": "onTestRunStart picks either options.changed (re-running git) or ctx.config.related (already computed by test.changed). Same field, two different value provenances, decided by an if/else. These are different facts: 'files changed for coverage scoping' vs 'files related to changed tests.' Name them, or pick one source of truth in resolveConfig and stop branching at runtime.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "329-345",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Boolean-or-string option type complects 'enabled' with 'which ref'",
+        "detail": "changed?: boolean | string makes the value carry two concerns: whether the feature is on and which git ref to diff. Callers must check truthiness then re-check string-ness. A normalized resolved shape like { enabled: boolean, ref: string } at config-resolve time would let downstream code consume one value, not a tagged union.",
+        "file": "packages/vitest/src/node/types/coverage.ts",
+        "lines": "280-287",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform silently accepts non-boolean strings as refs",
+        "detail": "The transform special-cases 'true'/'yes'/'false'/'no' and returns everything else as a ref. 'tru', 'flase', or accidental flag values become git refs and fail later inside VitestGit with confusing errors. Validate the input shape at the boundary; do not push parsing burden onto the consumer.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-320",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "onTestRunStart called from three sites; lifecycle is incidental, not essential",
+        "detail": "core.ts now calls coverageProvider?.onTestRunStart?.() in three places. Each site is a place where someone might forget the call in the future. The essential question 'what files am I scoping coverage to' should be answered once per run, not re-asked at every entry point. Consider resolving changedFiles when the run object is constructed and passing it as a value.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-885",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The feature is small and the diff is mostly fine, but it adds incidental complexity around how 'changed files' flows through the coverage provider. A mutable field (changedFiles) with implicit lifecycle (onTestRunStart) complects value, identity, and time, and forces a manual globCache clear to stay consistent. The same field overloads two different facts (coverage-scoped diff vs related-to-changed-tests) and uses a boolean|string shape that conflates enable with ref. The cleaner shape: resolve a single immutable ChangedFilesSet value at config-resolve time and pass it explicitly into isIncluded/getUntestedFiles, instead of mutating provider state across three new call sites in core.ts."
+  }
+}

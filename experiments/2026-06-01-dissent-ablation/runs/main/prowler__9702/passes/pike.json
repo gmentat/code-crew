@@ -1,0 +1,74 @@
+{
+  "persona": "pike",
+  "task_id": "prowler__9702",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Check filename, class, and metadata disagree with PR title/description (single vs multiple)",
+        "detail": "The PR title says 'detect VMs with multiple network interfaces' and the description names the check 'compute_instance_multiple_network_interfaces', but the code, metadata, CHANGELOG and tests all use 'compute_instance_single_network_interface'. Pick one and use it everywhere. The data and the name should agree before this lands; otherwise future readers will be hunting for a check that doesn't exist under the name they were told.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE exemption keyed off instance name prefix is the wrong data structure",
+        "detail": "Deciding 'this is GKE' by `instance.name.startswith('gke-')` is string-sniffing a label that any user can spoof or accidentally match. The right data is already at hand on the GCE instance: the `goog-gke-node` / `goog-gke-*` labels, the `kube-env` metadata key, or membership in a managed instance group owned by GKE. Carry that signal on the Instance struct (e.g. `managed_by: str` or `labels: dict`) and let the check read a field, not parse a name. Same shape, fewer false positives, no string magic.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "28-31",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface model drops the data the check actually needs to be useful",
+        "detail": "The new struct keeps `name`, `network`, `subnetwork` but throws away `accessConfigs`/`natIP`, `networkIP`, `stackType`, and `aliasIpRanges`. `public_ip` is computed once and then the per-interface evidence is gone. Carry the raw-but-typed fields you might need (at minimum networkIP and a `has_external_ip: bool`) so sibling checks (public_ip, ip_forwarding, future cross-VPC-bridge checks) can read from one well-shaped list instead of each one re-parsing the API response. Pick the data structure once; the algorithms will follow.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "108-130",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch: `interface_count == 0` cannot occur and clutters the check",
+        "detail": "GCE instances must have at least one network interface; the `else` branch reporting 'has no network interfaces' is unreachable in practice and leaves a PASS status on what would be a malformed instance anyway. Drop the branch and the check becomes three lines of obvious logic over the data. Smaller and more honest.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "36-40",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded MANUAL/FAIL split could be a config knob, not branching code",
+        "detail": "The GKE carve-out is the first of many ('network virtual appliances may legitimately require multiple NICs' per the metadata Notes). Rather than grow if/elif branches per legitimate-use pattern, lift the exemption to a small data table (label set, name patterns, allowlist of instance IDs) the check iterates. Today's two-branch code is fine; just make sure the next exemption doesn't become a third branch.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "25-37",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test file is mostly copy-paste; a small data-driven table would shrink it ~5x",
+        "detail": "Five tests differ only in the network_interfaces list, the expected status, and the expected status_extended. That's a parametrize table, not five 50-line functions with the same mock.patch scaffolding. Same coverage, a quarter of the lines, and adding the next case (network appliance exemption, dual-stack, etc.) becomes one row. Data dominates here too.",
+        "file": "tests/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface_test.py",
+        "lines": "1-357",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "Decision: TOO-MUCH-CLEVERNESS-IN-THE-WRONG-PLACE / WRONG-DATA-STRUCTURE. The check itself is small and composable, which is good. The problems are upstream of the algorithm: the naming is inconsistent across files (single vs multiple), the GKE exemption is decided by string-prefix on a user-controllable name instead of by labels that GCE actually carries, and the NetworkInterface model throws away exactly the per-interface fields that would let this and sibling checks share one data shape. Fix the name once, carry the right fields on NetworkInterface, key the GKE exemption off a real label rather than a prefix, and the check collapses to a few obvious lines and the test file to a parametrize table. None of this is a security blocker; it's a 'pick the data structure once and the algorithm becomes self-evident' cleanup before this pattern is copied into the next ten checks."
+  },
+  "raw": ""
+}

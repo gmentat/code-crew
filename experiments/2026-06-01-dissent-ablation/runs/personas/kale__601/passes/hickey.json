@@ -1,0 +1,70 @@
+{
+  "name": "hickey",
+  "task_id": "kale__601",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Compiled script content is complected with the compile RPC response instead of being a separately addressable value",
+        "detail": "The compile RPC returns a path AND inlines the file's content. That's two different concerns: 'where the artifact lives' (identity/place) and 'what the artifact is' (value). A separate read-file RPC, called on demand by the download click, would decompose this cleanly. Bundling them couples every compile response to a full file read even when nobody downloads.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-125",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Server already wrote the file to disk; the browser re-materializes it as a Blob from an inlined string",
+        "detail": "The script exists as a value on disk at script_path. The frontend already has a URL/path. Instead, the value is serialized into the RPC payload, deserialized in JS, wrapped in a Blob, given an object URL, anchor-clicked, then revoked. A plain href to a served file would be simpler and avoids holding the entire artifact in two memory representations.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-182",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "File read has no encoding and no size bound; treats arbitrary file as a small in-memory value",
+        "detail": "open(script_path) uses platform-default encoding and reads the whole file unconditionally. The code assumes the compiled script is small and text. Neither is guaranteed as pipelines grow. State the assumption explicitly (encoding='utf-8', size cap) or push the read to a streaming endpoint rather than inlining bytes into JSON.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "119-120",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DOM manipulation imperatively complects identity (the anchor element) with the action (download)",
+        "detail": "createElement, appendChild, click, removeChild, revokeObjectURL is six steps of place-oriented DOM mutation to express one fact: 'user wants this value as a file.' A declarative <a download href={objectUrl}> rendered conditionally, or a small helper that returns a function, would separate the value (blob) from the act of triggering. Minor, but emblematic.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-182",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Object URL lifecycle is tied to a synchronous click; no cleanup on unmount or error",
+        "detail": "URL.createObjectURL allocates a place. The revoke happens inline after click(), which works for the happy path but leaks if click throws or the component unmounts mid-flight. The time semantics of the URL's validity are implicit. If the Blob route is kept, make the lifecycle explicit (useEffect cleanup, or a single ref).",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "176-181",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Filename derivation conflates pipeline.yaml path with the .kale.py artifact being downloaded",
+        "detail": "compiledPath appears to point at the pipeline package (yaml), yet the download writes script_content (the .py source) and falls back to 'pipeline.kale.py'. Two different values are being addressed by one identity. Name them: scriptPath vs packagePath. The fallback name masks the confusion rather than resolving it.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "171-173",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The change works, but it complects two values (the script's location and the script's contents) into one RPC response, then complects the download action with imperative DOM place-mutation in the browser. The essential complication is small: \"let the user save the compiled file.\" The incidental complication is everything around it \u2014 inlining a full file into every compile response whether requested or not, double-buffering it as a Blob, and hand-rolling an anchor-click dance. The question that should have been asked first: is \"download\" a value the server already serves at a URL, or a payload we need to embed? If the former, the frontend needs nothing but an href. If the latter, give it its own endpoint with explicit encoding, size limits, and lifecycle. Either separates concerns the current shape entangles."
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "knuth+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "TritonLoraConfig.is_registered mutated on shared object races under concurrent requests",
+        "detail": "All three reviewers flag this: _get_lora_config returns the same shared TritonLoraConfig; _create_trtllm_generate_request flips is_registered=True without a lock. Two concurrent first-requests both see False, both load weights, only one registration wins, and a losing request may send lora_task_id to a backend without cached weights. Needs a per-LoRA lock or registration done at load time, not a mutable flag on the config dataclass.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "227-243",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "lora_task_id assignment is non-deterministic and risks collisions across model repos",
+        "detail": "task_id starts at 1 and increments per call to _parse_lora_configs with no scoping across repos or restarts. TRT-LLM caches by task_id, so collisions across base models or across frontend restarts (while engines retain caches) can serve the wrong adapter. Derive task_id from a stable hash of (model, lora_name) or scope explicitly per model.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "624-712",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "LoRA .npy weights loaded synchronously on the async request hot path",
+        "detail": "np.load of model.lora_weights.npy happens inline in _create_trtllm_generate_request, blocking the asyncio event loop on the first request per LoRA. For multi-GB adapters this stalls all in-flight requests, and IO failures surface as untyped exceptions. Pre-load at startup or load once in a thread and cache on the config.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-242",
+        "flagged_by": [
+          "knuth",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Stray debug print and traceback.format_exc calls left in production paths",
+        "detail": "print(f\"backend: {backend}\") inside the parser loop and print(traceback.format_exc()) added across routers and the parser's except block are unconditional stdout spam, not logging. Strip them or route through the existing logger at debug level. They also leak internals and should not ride along with the feature patch.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "681, 712, plus routers",
+        "flagged_by": [
+          "knuth",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Return type annotation on _parse_lora_configs / _get_lora_config does not match implementation",
+        "detail": "_parse_lora_configs is annotated as returning tuples but returns List[TritonLoraConfig]; _get_lora_config is annotated -> TritonLoraConfig but returns None and dereferences metadata without a None-check, raising AttributeError on unknown models. Fix the annotations to Optional and guard the lookup.",
+        "file": "python/openai/openai_frontend/engine/triton_engine.py",
+        "lines": "1089-1098",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Variable shadowing: lora_config_path bound to two different paths in the same function",
+        "detail": "lora_config_path is first bound to multi_lora.json then rebound inside the loop to model.lora_config.npy. A reader chasing the name hits two meanings within ~30 lines. Rename one binding to make the data flow obvious.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "658, 696-699",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel reaches strong consensus that this patch is NEEDS-WORK. Two P0 correctness bugs are unanimous: the mutable is_registered flag on a shared TritonLoraConfig races under concurrent requests, and the positional lora_task_id assignment is non-deterministic and can collide across models or restarts, serving the wrong adapter from TRT-LLM's cache. Synchronous np.load on the async request path, scattered debug prints and traceback dumps, and a stale return-type annotation with an unguarded None deref round out the must-fix list. Strip the debug churn, lock or relocate registration state, make task_id stable, and pre-load weights before resubmitting."
+  }
+}

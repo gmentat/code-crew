@@ -1,0 +1,94 @@
+{
+  "persona": "torvalds",
+  "task_id": "pipecat__3598",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "README/docstring claims default v3 speaker is 'aditya' but code sets it to 'shubh'",
+        "detail": "The PR description and the module docstring both state the default speaker for bulbul:v3-beta is 'aditya'. The actual TTS_MODEL_CONFIGS entry sets default_speaker='shubh'. This is exactly the kind of drift between description and code that wastes the next maintainer's time. Pick one and make the other match. Don't ship code where the docs lie about what the defaults are.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent pace clamping hides user error instead of refusing it",
+        "detail": "If a user passes pace=2.5 on a v3 model whose range is 0.5-2.0, the code logs a warning and silently clamps. That is a special case smell. The other out-of-range parameters (pitch on v3, loudness on v3, temperature on v2) just log 'ignored'. Pick one policy. If invalid params are a ValueError elsewhere (model name, prompt/mode incompatibility) then they should be a ValueError here too. Bad taste to validate one way for some params and 'helpfully' rewrite others.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "'ignored' warnings fire on the user-facing defaults, not on user intent",
+        "detail": "The checks 'elif params.pitch != 0.0', 'elif params.loudness != 1.0', 'elif params.temperature != 0.6' compare against the Field defaults. If a v2 user explicitly passes temperature=0.6 they get no warning; if a v3 user passes temperature=0.6 they also get no warning even though the default is being silently ignored. Worse, anyone constructing InputParams() and passing it to a v3 model gets a spurious 'pitch is ignored' if they pass pitch=anything-but-0.0. This conflates 'user set this' with 'value happens to differ from default'. Use Optional[...] = None as sentinels or track explicit-set, don't infer intent from value equality.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "input_audio_codec silently dropped from STT connect kwargs",
+        "detail": "The previous connect_kwargs included 'input_audio_codec': self._input_audio_codec. The new code removes that line entirely with no explanation in the diff or commit message. If this is intentional because v3 doesn't accept it, then v2 paths just lost a feature. If it's accidental, it's a regression. Either way the diff is doing two things \u2014 adding v3 plumbing and removing a v2 parameter \u2014 without saying so. THREE-PATCHES: split the codec removal out, or restore it.",
+        "file": "src/pipecat/services/sarvam/stt.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead/unreachable fallback in get_speakers_for_model",
+        "detail": "The function checks 'if model in TTS_MODEL_CONFIGS' and otherwise falls back to v2 speakers for 'unknown models'. But the __init__ already raises ValueError for any model not in TTS_MODEL_CONFIGS, so this fallback path is unreachable from normal use. Either make this function the single source of truth and let __init__ call it, or drop the dead branch. Don't ship code paths that lie about being defensive.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two enums + a tuple-of-strings is one representation too many",
+        "detail": "SarvamTTSSpeakerV2 and SarvamTTSSpeakerV3 enums exist, then TTSModelConfig.speakers is built as 'tuple(s.value for s in SarvamTTSSpeakerV3)', then voice_id is typed as plain str and validated nowhere against the enum. The enums add ceremony without enforcement. Either type voice_id as the enum union and validate, or drop the enums and keep the tuple. Pick one. Right now you have the cost of both and the benefit of neither.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR bundles three logical changes into one patch",
+        "detail": "This diff does: (1) refactor STT model dispatch from string-sniffing 'saaras' in model.lower() to a config table, (2) add saaras:v3 support, (3) the same refactor + v3-beta addition for TTS. The refactor stands on its own merit; the v3 additions stand on theirs. As submitted, reviewers can't tell which behavior change is from the refactor vs the new model wiring. THREE-PATCHES would have been cleaner: refactor STT, add STT v3, refactor+add TTS v3.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "InputParams field types remain Optional with non-None defaults",
+        "detail": "Fields like 'vad_signals: bool = None' and 'high_vad_sensitivity: bool = None' (pre-existing) and now 'pitch: Optional[float] = Field(default=0.0, ...)' mix Optional typing with non-None defaults. This is the pattern that bites later when someone tries to distinguish 'user set 0.0' from 'user left default'. Not load-bearing for this patch but the v3 work makes it worse, not better.",
+        "file": "src/pipecat/services/sarvam/tts.py",
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The refactor from in-line string-sniffing ('saaras' in model.lower()) to a ModelConfig table is GOOD-TASTE \u2014 it eliminates a special case that was about to get worse with v3. The patch is mostly readable, the diff is mostly scoped, and the validation logic is clearer than what it replaces. NEEDS-WORK on four counts: the docstring/code disagreement on the v3 default speaker (aditya vs shubh) is the kind of drift that humiliates a maintainer; silent pace clamping is a different validation policy than the rest of the file uses; the 'ignored parameter' warnings conflate 'user set this' with 'value differs from default'; and input_audio_codec was silently dropped from the STT connect call without justification. Fix those four and this lands. The enums-plus-tuples representation and the dead fallback in get_speakers_for_model are taste cleanups that can ride along or follow up."
+  },
+  "raw": ""
+}

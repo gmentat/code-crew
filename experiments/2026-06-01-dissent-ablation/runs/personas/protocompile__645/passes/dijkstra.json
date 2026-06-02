@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "protocompile__645",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Defensive nil-checks substituted for a stated precondition on *File receivers",
+        "detail": "The patch sprinkles `if f != nil` across roughly a dozen accessors rather than stating and enforcing the precondition for a File method. Either nil is a legal receiver (then document it and lift the check into a single helper), or it is not (then the caller is wrong and the panic was correct). The current shape is DEFENSIVE-AS-SUBSTITUTE: behaviour smeared across many sites, none of which justifies why nil is admissible.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "148-365",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "imports.Directs still dereferences i.publicEnd after the nil guard, masking a residual panic",
+        "detail": "In `Directs`, the guard sets `slice = nil` when `i == nil`, but the closure captured below still reads `i.publicEnd` and `i.weakEnd`/`i.usedEnd` (via the surrounding code). With a non-nil receiver and an empty slice that is harmless; with a nil receiver the closure is never invoked because the slice is empty, but the invariant is unstated and one refactor away from re-introducing the panic. State the invariant or refuse the pattern.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-215",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ValueNodeIndex sentinel -1 invents a new postcondition without updating the spec",
+        "detail": "Previously the postcondition was \"returns an index into MessageKeys\". Now it returns -1 for the zero element. The doc comment mentions this in passing but the type signature is unchanged and callers that do `e.Value().MessageKeys().At(e.ValueNodeIndex())` will index by -1 and panic. The fix has merely relocated the failure. Either return `(int, bool)` or refuse the call on zero.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-583",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "TESTED-NOT-PROVED: reflective test asserts \"does not panic\" rather than a stated specification",
+        "detail": "The test enumerates exported methods via reflection and checks that returns are zero-valued or empty. This is testing for the presence of panics, not their absence in general: methods with non-accessor signatures are silently skipped (`NumIn != 1`), and `Context`/`IsZero`/`ValueNodeIndex` are special-cased ad hoc. The contract \"every zero value is safely traversable\" is nowhere written down; the test approximates it.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "85-137",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symbol.RawData zero-handling lives in export_test.go, divorced from production code",
+        "detail": "The IsZero guard for `Symbol.RawData` is added in the test-export shim rather than in the real accessor. If production callers use `Raw().data` directly they remain exposed; if they do not, the test is verifying a method the package itself does not ship. Either way the invariant is in the wrong file.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "38-41",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Duplicated `var slice = ...; if !x.IsZero() { slice = ... }` boilerplate begs for a single helper",
+        "detail": "The same five-line pattern recurs in `ir_file.go`, `ir_type.go`, and `ir_imports.go` for at least a dozen accessors. This is mechanical and error-prone: one missed `IsZero` and a panic returns. A single generic helper `zeroSafeSlice` (or making `seq.NewFixedSlice` tolerate a zero indexable) would eliminate the entire class. Elegance is not optional.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "212-320",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The patch correctly identifies a real class of bug \u2014 accessors panicking on zero values \u2014 but resolves it by scattering ad-hoc nil and IsZero guards across roughly twenty call sites rather than stating the precondition once. This is DEFENSIVE-AS-SUBSTITUTE for a written contract. The reflective zero test is clever but is TESTED-NOT-PROVED: it enumerates methods and asserts non-panic, not a specification. `ValueNodeIndex` returning -1 quietly invents a new postcondition that callers indexing into `MessageKeys().At` will violate. I would accept the intent and refuse the shape: lift the guards into one helper and document, in one place, that zero receivers are legal traversable empties."
+  }
+}

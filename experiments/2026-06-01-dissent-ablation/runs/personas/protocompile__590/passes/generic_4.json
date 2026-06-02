@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "protocompile__590",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() when leader panicked likely violates caller's non-nil contract",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the new code returns nil. Callers of run() (e.g., the deferred done(output) on line ~408 and other code paths) likely dereference output, leading to a new nil panic instead of the original. The comment 'we did see a result' appears to be a typo for 'did NOT see', and no recovery/retry is attempted.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Cycle-detection branch skipped when output is captured before pending check",
+        "detail": "In the pending branch (top of run), `output := t.result.Load()` is captured once. If it is non-nil and pending, checkCycle runs and then waitUntilDone is called with the captured output. But the snapshot may become stale: between Load and select, the leader could panic and store nil. The select then waits on the captured output.done, which the panicking leader may never close, causing a hang.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-448",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Race window between CompareAndSwap failure and second Load is still possible",
+        "detail": "After CAS fails, the second t.result.Load() may still observe nil if the leader panics between the failed CAS and the Load. The fix handles that, but if Load returns non-nil and the leader subsequently sets result back to nil during waitUntilDone, the captured output's done channel may never be closed. Need to confirm leader always closes done before nilling result.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-459",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Typo in comment inverts the intended meaning",
+        "detail": "The comment reads 'Leader panicked but we did see a result' \u2014 based on context (returning nil because output is nil), it should be 'did NOT see a result'. As written, future readers will be confused about the control flow and may incorrectly reason about the nil return.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test accompanies the race-condition fix",
+        "detail": "This PR fixes a nil-pointer deref triggered by a panicking leader goroutine, but the diff contains no test reproducing the race (e.g., via a query that panics with concurrent waiters under -race). Without a test, the fix is unverified and the bug can regress. A targeted concurrency test should be added.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle walks caller.path twice when a cycle is found",
+        "detail": "The extracted checkCycle walks caller.path.Walk() to find a match, then re-walks to build the cycle slice. For deep call paths this is O(2n). A single pass that records nodes while walking would be cleaner and faster, though cycles are presumably rare so impact is minimal.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR addresses a real race condition where a panicking leader goroutine could leave t.result as nil, causing waiters to nil-deref on t.result.Load().done. The fix captures output before the select and handles the nil case after a failed CAS. However, returning bare nil from run() when the leader panicked is likely to propagate a nil result to downstream callers, and the comment 'we did see a result' appears to be a typo (should be 'did NOT'). The cycle-detection refactor is a clean extraction but no test reproduces the race, leaving the fix unverified."
+  }
+}

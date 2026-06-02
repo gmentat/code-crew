@@ -1,0 +1,78 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates a shared RateLimit object's Stats/FullKey per request, causing a data race",
+        "detail": "rateLimit is a pointer into the shared config tree. Reassigning Stats and FullKey inside GetLimit without locking is a textbook race under concurrent traffic, and weakens the descriptor-bound contract of the returned limit. Resolve Stats per-call into a local, or return a per-request copy, instead of writing back into shared config state.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Stats counters allocated and discarded on every GetLimit call, inflating the stats store per request",
+        "detail": "When the enhanced key differs from FullKey, NewStats is called twice (once via NewRateLimit with the stale FullKey, then again for enhancedKey) and the first is thrown away. GetLimit is on the hot path; this allocates and registers counters per request. Build the right key once during the walk and allocate once at the end.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-430",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three branches of the value_to_metric key builder collapse into a single rule",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default-key arms all compute the same thing: if valueToMetric or matched-with-value, append key+'_'+value; else append key. That is a few lines, not thirty. Collapse the special cases into one general rule driven by a single boolean.",
+        "file": "src/config/config_impl.go",
+        "lines": "344-388",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel metric-key builders duplicate the descriptor walk with overlapping rules",
+        "detail": "detailedMetricFullKey and valueToMetricFullKey are both appended on every iteration, then reconciled post-hoc by comparing to FullKey and reconstructing RateLimit. The right shape is one builder driven by a per-level decision (detailed || valueToMetric || matchedUsingValue || matchedViaWildcard), with one NewStats call at the end. The current data flow fights the algorithm.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-429",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Feature duplicates detailed_metric with hand-waved precedence rather than generalizing it",
+        "detail": "detailed_metric already supports putting runtime values into metric keys. value_to_metric adds a parallel mechanism with its own state and a rule that detailed_metric wins, but the README does not specify cross-level interaction (parent vs leaf flags, wildcard parents, etc.). Either extend detailed_metric with per-level scope or document the precise invariant before merge.",
+        "file": "src/config/config_impl.go",
+        "lines": "316-430",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Positional struct literals for rateLimitDescriptor are fragile to future field additions",
+        "detail": "Both call sites construct rateLimitDescriptor positionally: {map{}, rateLimit, nil, descriptorConfig.ValueToMetric}. Any future field addition silently shifts argument meanings at every call site with no compile error if types align. Use named-field literals so the struct's contract is explicit at construction.",
+        "file": "src/config/config_impl.go",
+        "lines": "188, 265",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel agrees the feature is reasonable but the implementation has two serious bugs and pervasive bad taste in the key-builder. GetLimit mutates a shared config-tree RateLimit's Stats and FullKey per request (a data race) and allocates throwaway Stats objects on the hot path. The value_to_metric logic runs two parallel key builders with three near-identical branches that collapse to one rule, and is a near-duplicate of detailed_metric with under-specified precedence. Fix the race and allocation, collapse the special cases into a single builder, justify or unify with detailed_metric, and switch to named struct literals before merge."
+  }
+}

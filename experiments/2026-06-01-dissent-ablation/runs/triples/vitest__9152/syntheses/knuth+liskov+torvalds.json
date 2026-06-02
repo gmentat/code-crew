@@ -1,0 +1,79 @@
+{
+  "task_id": "vitest__9152",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Synchronous readFileSync inside getSourceMap callback runs per stack frame with no memoization.",
+        "detail": "parseErrorStacktrace invokes getSourceMap for every frame, causing repeated existsSync+readFileSync of the same file and its referenced map during error serialization. This is O(frames * fileSize) where O(uniqueFiles * fileSize) suffices. Add a Map<file, SourceMap|undefined> cache to avoid blocking the event loop on noisy test runs.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-188",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) change in DecodedMap lacks stated invariant and direct unit test.",
+        "detail": "The one-line semantic change assumes `from` is always a file path so `..` strips the filename; if `from` is empty, a directory, or a URL, results diverge silently. The fix is correct per spec but the contract is unstated and the only evidence is a snapshot diff in test/cli. Document the precondition and add a focused unit test on DecodedMap.resolvedSources.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "createConvertSourceMapReadMap returns '{}' sentinel, leaking a convert-source-map quirk and silencing real failures.",
+        "detail": "Returning the literal string '{}' conflates 'file missing' with 'empty JSON map' and depends on convert-source-map tolerating that shape. This hides broken sourceMappingURL comments and missing .map files behind a silent no-op. Return undefined/null and handle absence at the caller, or document the convention explicitly.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixing 'pathe' and 'node:path' in the same file invites Windows path-separator bugs.",
+        "detail": "The file already imports resolve from 'pathe' but new code imports node:path and uses path.resolve/path.dirname. pathe normalizes separators cross-platform; node:path does not. On Windows the targetPath for sourceMappingURL resolution may diverge from the rest of Vitest. Use pathe consistently to match the codebase voice.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "19-25, 339",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "readFileSync on the error-reporting hot path has no try/catch and can throw.",
+        "detail": "existsSync + readFileSync is racy and readFileSync can still throw on EACCES, EISDIR, or symlink loops. If it throws inside the getSourceMap callback, error reporting dies and users see a sourcemap error instead of their test failure. Wrap in try/catch and fall through to no source map; specify undefined-on-failure as the documented contract.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "180-186",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Missing negative-path tests for the new source-map extraction contract.",
+        "detail": "The snapshot encodes the happy path (external modules resolve to original .ts sources) but nothing pins behavior when the map is missing, malformed, or the file has moved. Add tests asserting fallback to transpiled location when getSourceMap returns undefined, so the contract survives future refactors.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "56-78",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The panel agrees this is a real, directionally correct fix: the DecodedMap one-liner aligns resolvedSources with the sourcemap spec, and the new external-module path restores mapping of stack frames to original .ts sources. But the implementation is under-audited and shows deadline smell. Three concerns are unanimous: per-frame synchronous I/O with no cache, an unstated invariant on the resolve change with no direct unit test, and a '{}' sentinel that lies to convert-source-map about missing files. Tighten these screws, add try/catch and pathe consistency, and pin negative-path behavior before landing."
+  }
+}

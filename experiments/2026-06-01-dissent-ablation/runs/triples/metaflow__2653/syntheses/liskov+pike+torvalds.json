@@ -1,0 +1,76 @@
+{
+  "task_id": "metaflow__2653",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Inner blocking read loop has no timeout or process-exit backstop, risking indefinite hang",
+        "detail": "Once the code flips to blocking mode, every safety net from the original (poll timeout, check_process_exited) is gone. A writer that opens the FIFO, writes one byte, then hangs forever will hang the parent indefinitely. The fix trades an intermittent truncation for a potential deadlock. Keep a timeout or process-exit check on the blocking drain path.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-144",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "fcntl mode switch is unguarded and leaks blocking state across the function boundary",
+        "detail": "F_GETFL/F_SETFL can raise OSError, and even on success the fd is never restored to its prior flags. Since fifo_fd is passed in by the caller, mutating its blocking state is an observable side effect on the caller's frame. Wrap the transition in try/finally and restore flags, or document and own the fd fully.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-137",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Patch bundles the race fix with deletion of a macOS-specific workaround without justification",
+        "detail": "The removed block existed precisely because POSIX EOF behavior wasn't observed on macOS FIFOs in practice. The commit asserts POSIX guarantees subsume it but provides no evidence. Either prove the new approach works on macOS or split the patch so the macOS change is reviewable on its own.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "139-158",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel read loops where one would do; extract a blocking drain helper",
+        "detail": "The function now has an outer poll/non-blocking loop and an inner blocking drain loop that both append to content and both decide EOF. The data is a byte stream until EOF; the code should be two named phases: wait_for_first_byte() then drain_blocking(fifo_fd) -> bytes. That also makes the unit-testable surface obvious.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test for an intermittent race condition fix",
+        "detail": "Intermittent JSON truncation at 86KB is exactly the kind of bug that regresses. A test that writes a large payload and closes the writer fast would lock this in. Race fixes without tests get re-broken by the next refactor.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError handler is now vestigial and has_blocking_error semantics dropped silently",
+        "detail": "After switching to blocking mode on first read, BlockingIOError can only fire pre-data, so the except reduces to pass and the old has_blocking_error tracking is gone. Either delete the branch (poll gates readiness) or add a comment explaining why it remains. Don't leave dead control flow that obscures the new invariant.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-157",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the diagnosis is correct and the poll-until-first-byte then blocking-drain shape is right, but execution is sloppy. The two P0s: unguarded fcntl transitions leak blocking state across the caller boundary, and the inner blocking read loop has no timeout or process-exit backstop, trading truncation for potential deadlock. Secondary concerns: the patch silently deletes a macOS workaround without justification, ships no regression test for a race, duplicates a read loop that should be one extracted helper, and leaves vestigial BlockingIOError handling. Verdict: needs-work \u2014 fix error handling and the hang risk, add a test, then resubmit."
+  }
+}

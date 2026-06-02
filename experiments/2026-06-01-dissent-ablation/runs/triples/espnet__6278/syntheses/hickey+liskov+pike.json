@@ -1,0 +1,79 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: code reads 'max_step' while docstring/config specify 'max_steps'",
+        "detail": "__init__ reads trainer_args['max_step'] (singular) but the docstring and intended config use 'max_steps' (plural). Callers writing to the documented contract will KeyError. The untyped dict-as-API is the root cause; lift trainer_args into a small dataclass so the data shape and algorithm cannot drift.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "44-66",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "val_interval is documented but never used; validation actually fires every save_interval",
+        "detail": "run() calls self.valid() and save_checkpoint unconditionally after each train() block, which exits after save_interval steps. val_interval is advertised in trainer_args but never read. Either drive validation off val_interval or remove the dead knob. One number is silently controlling three different cadences.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "147-188",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DeepSpeedTrainer silently depends on a global wandb.run with no precondition check or injection",
+        "detail": "The docstring warns wandb must be initialized externally, but __init__ mutates wandb.config and run() calls wandb.log with no assert and no injected logger. This hidden global is part of the contract yet invisible at the interface. Inject a logger sink (or a no-op logger on non-zero ranks) so the value flow is explicit and testable.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "18-25, 67, 175, 207",
+        "flagged_by": [
+          "hickey",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Data specifier strings are a stringly-typed mini-language re-parsed in multiple places",
+        "detail": "'task:name:data_json[:factor]' is split with .split() in train.py and re-parsed downstream, with the grammar living only in --help text. Parse once at the CLI boundary into a small dataclass {task, name, path, factor} and pass the value. As written, paths with colons or spaces are silently mishandled.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-89, 187-204",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_load_checkpoint conflates filesystem name parsing with stored step and silently falls back on missing resume_path",
+        "detail": "Discovery globs 'step_*' and sorts by int(name.split('step_')[-1]) while also reading global_step from client_state \u2014 two sources of truth, and a renamed directory crashes mid-run. Additionally, an explicit resume_path that does not exist silently falls through to step 0 instead of raising. Use an index file or symlink, and fail loudly on missing explicit paths.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-141",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats has a surprising frame: mutates tensors in place and rebinds dict entries",
+        "detail": "all_reduce mutates tensors in place, then stats[key] = stats[key] / world_size replaces the entry with a new tensor. Callers holding references see partial mutation and type drift. Return a new dict (or NamedTuple) to make the transform pure and the data flow obvious; async_op buys nothing since every handle.wait() precedes the next use.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "118-152",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on two real bugs and a cluster of structural concerns rooted in the same cause: trainer_args is an untyped dict and the data shape has drifted from the algorithm. P0s are the 'max_step' vs 'max_steps' key mismatch and the unused val_interval knob (validation actually fires every save_interval). P1s cover the hidden wandb global dependency, stringly-typed data specifiers re-parsed everywhere, fragile filename-based checkpoint discovery with a silent missing-path fallback, and the surprising mutate-and-rebind frame in _all_reduce_stats. Lifting trainer_args and specifiers into small typed records and injecting the logger would eliminate most of these in one pass."
+  }
+}

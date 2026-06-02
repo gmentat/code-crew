@@ -1,0 +1,77 @@
+{
+  "task_id": "pip__13482",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver.resolve() postcondition silently weakened; returned requirements may no longer be fully prepared.",
+        "detail": "The resolver previously guaranteed every returned requirement had prepared=True and needs_more_preparation=False. That loop is deleted without restating the contract, shifting the obligation onto every caller. Any consumer (third-party, plugin, future command) relying on the old guarantee is silently broken. Document the new postcondition on resolve() or restore the invariant.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "prepare_linked_requirements_more is copy-pasted across three commands instead of centralized in a helper or resolver flag.",
+        "detail": "download.py, install.py, and wheel.py each independently invoke the same call after resolve(). This is three places to forget when a fourth command (e.g., lock) needs the same step. Either push it back into resolve() behind a dry_run flag, or extract a single shared helper. Sprinkled incantations are not decoupling.",
+        "file": "src/pip/_internal/commands/",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist caches metadata-only distribution with no invalidation after full download lands.",
+        "detail": "_fetch_metadata_only stores a metadata-only BaseDistribution in self._distribution; get_dist() prefers it over metadata_directory and local_file_path. After prepare_linked_requirements_more fully downloads the wheel, the stale metadata-only dist still wins. If the two diverge (RECORD, file list, install paths), silent wrong behavior follows. Invalidate _distribution on full prep or document the precedence rule.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-620",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist introduced without docstrings, preconditions, postconditions, or invariants.",
+        "detail": "set_dist accepts any BaseDistribution with no constraints on when it is valid to call and no statement of what callers may assume. For a mutable cache on a long-lived object touched by resolver, preparer, and installer, the spec is the contract. Document that it stores a metadata-only view, may be superseded, and the precedence rule used by get_dist.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info populated via direct_url_from_link(req.link, req.source_dir) when source_dir may be unset in metadata-only/dry-run mode.",
+        "detail": "At the point _fetch_metadata_only succeeds, nothing has been unpacked and req.source_dir is typically unset. direct_url_from_link's behavior with a missing source_dir is undemonstrated. With a VCS URL this could produce a malformed DirectUrl, silently corrupting pip lock / --report output. State the precondition or add a test covering dry-run + VCS + --report.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-543",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No tests in the diff exercise the headline behavior (dry-run avoids full wheel download) or new precedence rules.",
+        "detail": "The PR's stated property \u2014 --dry-run no longer downloads full wheels when PEP 658 metadata exists \u2014 is a one-line functional assertion. The diff contains zero tests for that, for pip lock emitting download_info from metadata-only paths, or for the new set_dist/get_dist precedence. Add a test that fails without the patch and passes with it.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the intent is sound \u2014 eager full-download inside resolve() was a real defect, and deferring it for dry-run / pip lock is the right direction. But the execution silently weakens resolve()'s postcondition, scatters the replacement call across three command modules instead of one helper, and introduces a set_dist/get_dist cache with no invalidation when the full download eventually lands. Contracts for the new methods, the resolver/preparer boundary, and download_info's producers are undocumented. No tests exercise the headline behavior. NEEDS-WORK: document the new contracts, consolidate the call site, fix the cache invariant, and add a dry-run-no-download test."
+  }
+}

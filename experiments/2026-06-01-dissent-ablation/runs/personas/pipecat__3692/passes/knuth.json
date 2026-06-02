@@ -1,0 +1,60 @@
+{
+  "name": "knuth",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Storing a live FrameProcessor on a control frame couples the frame to mutable runtime identity and risks lifecycle leaks",
+        "detail": "ServiceSwitcherRequestMetadataFrame.service holds a reference to a FrameProcessor instance. Control frames are typically value-like; embedding a processor reference invites pickling/serialization breakage, garbage-collection retention of swapped-out services, and equality surprises if active_service is later replaced by a wrapper. A service name or id would preserve the invariant (\"target the active service\") without the coupling.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Identity comparison via == on FrameProcessor relies on default object identity and is not stated as an invariant",
+        "detail": "The suppression rule `frame.service == self.strategy.active_service` works only because FrameProcessor inherits default __eq__. If a subclass ever overrides equality, the switcher silently stops suppressing the frame and downstream sees an internal control frame. State the invariant explicitly (use `is`) or compare by a stable id, and document it.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-237",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Loop invariant of push_frame's suppression logic is implicit; a one-line literate comment would make it auditable",
+        "detail": "The new branch needs the reader to reconstruct: \"the request frame is emitted only by the targeted service after handling, therefore arriving here means handled-by-active.\" That chain belongs in the comment. Without it, a future reader cannot tell whether non-active services could also route through here.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "222-237",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference type \"FrameProcessor\" on the dataclass field is unresolved and unimported in frames.py",
+        "detail": "The annotation is a string, so dataclass construction works, but tooling (dataclasses.fields with get_type_hints, pydantic adapters, IDEs) will fail to resolve it unless FrameProcessor is importable in this module's namespace. Either add a TYPE_CHECKING import or weaken the annotation to Any with a docstring contract.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Behavior change: non-targeted services now see a ServiceSwitcherRequestMetadataFrame they previously never saw, but only the active service handles it",
+        "detail": "queue_frame on the active service propagates downstream; STTService now re-pushes the frame after handling. Inactive STT services downstream of the switcher will never receive it (suppressed at push_frame), which is correct \u2014 but the contract \"only the targeted service acts\" should be asserted in STTService's handler too, otherwise a future refactor that broadcasts the frame will cause duplicate metadata emission.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The rename and targeting refinement is structurally sound and the test coverage tracks the behavior change. The principal rigor concern is data-structure choice: embedding a live FrameProcessor reference inside a control frame couples a value-like message to mutable runtime identity, and the suppression check leans on default object equality without stating that invariant. A short literate comment on the suppression rule, a stable identifier instead of the processor reference, and a defensive guard in STTService's handler would close the audit. UNDER-AUDITED on invariants; otherwise sound."
+  }
+}

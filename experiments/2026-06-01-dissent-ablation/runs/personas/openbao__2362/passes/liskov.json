@@ -1,0 +1,70 @@
+{
+  "name": "liskov",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "ACL root contract silently broadened from boolean to ancestor-namespace check without spec update",
+        "detail": "The `root` field changed from `bool` to `*namespace.Namespace`, and `AllowOperation` now grants root privileges when `ns.HasParent(a.root)` holds. The previous contract was 'root policy exists only in root namespace; if set, full privileges.' The new contract is 'root policy in namespace N grants root in N and all descendants.' This is a substitutability break: callers relying on the old invariant (root only in root NS) now see root tokens in child namespaces. No spec, no comment block stating the new invariant, no migration note. SPEC-MISSING + LSP-VIOLATION at the ACL boundary.",
+        "file": "vault/acl.go",
+        "lines": "38-39, 100-110, 339-360",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed stub silently returns false, violating its stated contract",
+        "detail": "`(*Core).NamespaceSealed` is documented as 'checks if there's a namespace (in direct ancestry line) that is currently sealed' but unconditionally returns false. Any caller wired against this method now has a precondition-free, postcondition-empty operation masquerading as a real check. `ListAllNamespaces` reportedly depends on it. This is a LEAKY-ABSTRACTION through a stub: the interface promises sealing semantics, the implementation promises nothing. Mark the method as panic-or-error until SealManager lands, or gate callers behind a build tag.",
+        "file": "vault/core.go",
+        "lines": "1399-1405",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ErrNamespaceSealed matched by substring conflation with ErrSealed handling",
+        "detail": "In `response_util.go`, both `ErrSealed` and `ErrNamespaceSealed` map to 503 via `errwrap.Contains(...Error())`. The substring 'namespace is sealed' does not contain 'Vault is sealed,' so they are distinct \u2014 good. But the contract for HTTP status differentiation between whole-vault-sealed vs single-namespace-sealed is now indistinguishable to clients. Consider a distinct status header or error code so callers can substitute the right retry/escalation behavior. ADT contract for the seal error hierarchy is underspecified.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-167",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "ListAllNamespaces replaced with ListNamespaces at multiple call sites without contract clarity",
+        "detail": "Calls to `c.namespaceStore.ListAllNamespaces(ctx, true)` were swapped to `c.ListNamespaces(ctx)` in loadLoginMFAConfigs, runLockedUserEntryUpdates, entityGaugeCollector, countActiveTokens. The PR description says ListAllNamespaces now 'includes sealed namespaces' yet callers were moved off it. The two methods' postconditions (what is in the returned set: sealed? unsealed? all?) are not stated in this diff. Risk: MFA enforcement, locked-user updates, and token counts now silently skip sealed namespaces. State the contract for each method.",
+        "file": "vault/core.go, vault/core_metrics.go, vault/counters.go",
+        "lines": "3287, 3395, core_metrics 416, counters 31",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation returns empty ACLResults instead of error when namespace missing from context",
+        "detail": "FromContext error path now returns an empty `ret` (deny) early, before any other check. Previously the same path existed but only after root fast-path. The new ordering changes behavior for root-policy ACLs called without a namespace in context: previously a root ACL granted access regardless; now it denies. This is a postcondition weakening for the root subtype \u2014 an LSP-style violation across a code path that callers (background jobs, tests) may hit. Document the precondition 'ctx must carry a namespace' explicitly, or preserve prior root behavior.",
+        "file": "vault/acl.go",
+        "lines": "339-360",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength derived from string indexing rather than a named constant",
+        "detail": "`NSTokenLength = TokenLen + \".\"[1] + nsID` (per PR description) uses byte indexing of a literal as a separator length. The separator is a domain concept (namespace token delimiter); name it (`const NSTokenSeparator = '.'`) and derive lengths from that. Otherwise the abstraction of 'namespaced token format' leaks through literal arithmetic at every call site, and future delimiter changes touch many files.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "This PR widens the ACL root-policy contract from 'root-namespace only' to 'any namespace, applies to descendants via HasParent,' but the change is not stated as a spec anywhere \u2014 only inferred from the code. That is the central LSP concern: a subtype of ACL (root-in-child-ns) now has different substitutability than the parent contract promised. The `NamespaceSealed` stub returning false unconditionally is a leaky abstraction shipped behind a real-looking interface; the dependent ListAllNamespaces semantics inherit that hollow guarantee. Multiple call sites were swapped from `ListAllNamespaces(ctx, true)` to `ListNamespaces(ctx)` without clarifying which postcondition (includes-sealed vs not) each caller requires. Recommend: write the new ACL.root contract explicitly in a doc comment, make NamespaceSealed return an error until implemented (or gate callers), and document the ListNamespaces vs ListAllNamespaces contract divergence before merge."
+  }
+}

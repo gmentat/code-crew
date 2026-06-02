@@ -1,0 +1,78 @@
+{
+  "task_id": "pip__13482",
+  "triple_key": "hickey+liskov+pike",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver.resolve() postcondition silently weakened; prepared/needs_more_preparation flags no longer cleared, pushing an undocumented obligation onto callers.",
+        "detail": "The deleted resolver block previously guaranteed every returned requirement had prepared=True and needs_more_preparation=False. That obligation now lives in each command, undocumented and unenforced. Third-party resolvers, plugins, or a future command will forget the call and silently consume half-prepared dists. Document the new contract on resolve(), or centralize the transition inside prepare_linked_requirements_more.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist conflates metadata-only and fully-installed distributions behind one accessor with implicit precedence and no spec.",
+        "detail": "get_dist() now resolves across four sources (_distribution, metadata_directory, local_file_path+is_wheel, editable) with no documented precedence. After full preparation, the cached metadata-only dist still wins, violating the expectation that get_dist reflects the most-prepared state. Either invalidate _distribution on full prep, split into get_metadata_dist/get_installed_dist, or document the cache-wins invariant.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-621",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download_info is backfilled as a side effect inside _fetch_metadata_only, entangling fetch with reporting.",
+        "detail": "_fetch_metadata_only now synthesizes download_info via direct_url_from_link guarded by 'if req.download_info is None' so pip lock and --report keep working. This complects metadata fetch with reporting and adds a second producer of download_info with no documented precedence relative to the full-download path (hashes, archive_info may differ). Compute download_info once at link time, or return it explicitly.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "prepare_linked_requirements_more call is duplicated across download, install, and wheel commands instead of composed once.",
+        "detail": "Each of download.py, install.py, and wheel.py independently calls preparer.prepare_linked_requirements_more right after resolve(). The same three-line ritual in three places invites drift and ensures the next command will forget it. A finish_preparation helper, a lazy dist accessor that triggers prep on demand, or a thin wrapper would prevent that.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-425",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a ceremony-only setter with no invariant, validation, or documented contract.",
+        "detail": "set_dist just assigns to self._distribution: no docstring, no constraints on when it is valid to call, no statement of what callers may assume afterward. For a mutable cache on a long-lived object touched by resolver, preparer, and installer, the spec is the contract. Either enforce an invariant (set-once, name match, metadata-only tag) or drop the method.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No regression test asserts that --dry-run actually avoids fetching the wheel for PEP 658 metadata-only paths.",
+        "detail": "The diff moves call sites but adds no test pinning the behavior that motivated the change. A small integration test with a mock index that fails on wheel GET under --dry-run would prevent a future refactor from silently reintroducing the download. Without it, the fix is unprotected.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix is directionally correct \u2014 defer final preparation out of the resolver so --dry-run no longer downloads wheels \u2014 but the implementation pushes an undocumented protocol onto callers and grows InstallRequirement's mutable surface without specifying contracts. The resolver's postcondition is silently weakened, get_dist now conflates metadata-only and installed distributions behind implicit precedence, and download_info is backfilled as a side effect inside the metadata-fetch path. Three commands duplicate the same finalize call, and set_dist ships as ceremony without invariants. Recommend documenting the new resolver/preparer boundary, splitting or invalidating the dist cache, composing the finalize step in one place, and adding a regression test that no wheel is fetched under --dry-run."
+  }
+}

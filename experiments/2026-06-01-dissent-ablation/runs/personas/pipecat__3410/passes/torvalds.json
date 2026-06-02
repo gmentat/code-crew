@@ -1,0 +1,70 @@
+{
+  "name": "torvalds",
+  "task_id": "pipecat__3410",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size path applies to all bytes payloads, not just audio frames",
+        "detail": "_write_frame buffers any bytes payload into _audio_send_buffer whenever the param is set. A serializer that emits a non-audio bytes message (control payload, anything not PCM) gets sliced into packet_bytes chunks and corrupted. Gate on frame type (AudioRawFrame) before treating payload as PCM, or document the contract in the serializer.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-510",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization path drops _next_send_time pacing logic that exists elsewhere",
+        "detail": "The early return after the while loop skips whatever pacing/bookkeeping _write_frame normally does after send. If real-time pacing was the motivating use case (per the PR description), the code that should enforce pacing is the one bypassed here. Either the existing pacing already handles this and the comment is misleading, or this path silently breaks it. Make the contract explicit.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-512",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Resampler tail not flushed on serializer; trailing audio is dropped",
+        "detail": "Both serialize and deserialize discard resampler output when len == 0, but there is no flush at end-of-stream or on StopFrame. For a streaming resampler that buffers internally, the last partial frame is lost. Either document that the resampler has no tail, or wire a flush.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "92-105, 130-141",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Misleading comment: \"16-bit linear PCM\" is asserted but never enforced",
+        "detail": "Comments in serialize/deserialize claim 16-bit linear PCM, but nothing checks frame.format or sample width. If something upstream hands you 8-bit or float audio, you resample garbage and ship it. A one-line assert or check beats a comment.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "91, 119",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Renaming audio_packet_bytes to fixed_audio_packet_size is a breaking change with no shim",
+        "detail": "Changelog notes the rename but the param sits on a public dataclass. Any existing user of audio_packet_bytes silently loses packetization (Optional default None means no error, just wrong behavior). Either keep a deprecated alias for one release or call this out as breaking in the changelog.added/changed entries clearly.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF digit parsing accepts two undocumented shapes",
+        "detail": "The code tries message[\"digit\"] then message[\"dtmf\"][\"digit\"]. Pick one based on the actual Vonage spec and reject the other, or cite which versions emit which. \"Try both formats\" is the kind of defensive code that hides protocol drift and ends up surviving forever.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "159-171",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The Vonage serializer is small and roughly the right shape, and the FastAPI transport change is a sensible knob, but the packetization path is too eager: it treats every bytes payload as PCM and chops it. That's a correctness bug waiting on the first non-audio binary serializer. The rename from audio_packet_bytes to fixed_audio_packet_size is a quiet breaking change with no shim. Comments claim PCM16 in several places but nothing enforces it. Fix the gating, decide on the DTMF schema, and either keep the old param name as a deprecated alias or flag the break loudly."
+  }
+}

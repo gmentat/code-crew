@@ -1,0 +1,77 @@
+{
+  "task_id": "protocompile__645",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Repeated nil/IsZero guard boilerplate across ~20 accessors should be a single helper",
+        "detail": "Every getter now opens with the same four-line `var s []T; if x != nil { s = ... }; return seq.NewFixedSlice(...)` pattern. The contract 'nil/zero receiver yields an empty Indexer' belongs in one helper (e.g. nil-tolerant seq.NewFixedSlice or a guarded-accessor method) so it is enforced once rather than copy-pasted into every future getter.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "182-365",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-value contract is implicit; only the reflection test states it",
+        "detail": "The PR establishes a real ADT promise: every accessor on a zero/nil receiver returns the zero value of its result type, with ValueNodeIndex(-1) as the documented exception. That contract should be stated in package-level doc or on IsZero so future methods know the precondition, rather than being discoverable only by running testZeroAny.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": null,
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel zero-checks (f == nil vs x.IsZero()) for the same abstract notion",
+        "detail": "File uses `if f != nil`; Type/Member/Oneof/ReservedName/Element use `if !x.IsZero()`. These are two idioms for 'value is absent' in the same package. Pick one canonical predicate (e.g. add IsZero on *File or route through a shared helper) so the guard does not drift as new IR node types are added.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "ValueNodeIndex -1 sentinel is an abstraction leak inconsistent with the rest of the API",
+        "detail": "Every other zero accessor returns the zero value of its return type; ValueNodeIndex returns -1, forcing callers to know two sentinels. Either return (int, bool) / add a HasValueNode() predicate, or document the precondition on Element itself so the convention is uniform across the IR.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection test under-specifies the contract and silently skips parameterized accessors",
+        "detail": "testZeroAny filters to NumIn()==1 and treats any Len()==0 as success, so accessors taking arguments (e.g. ImportFor) are never exercised on zero values and any future type whose Len means something else passes by accident. Add an explicit allowlist of skipped methods and document the heuristic so escapes are visible at review.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "95-135",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Imports.Transitive/DescriptorProto rely on the unstated 'last element is descriptor.proto' invariant",
+        "detail": "Transitive() uses files[:max(0, len(files)-1)] and DescriptorProto() uses slicesx.Last; both quietly degrade on zero/empty imports. The invariant 'a fully-constructed Imports always ends with implicit descriptor.proto; zero/empty returns nil' should be stated in a comment so callers can distinguish 'no descriptor' from 'zero file'.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-242",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the PR's intent is sound \u2014 making zero values first-class members of each IR type's ADT and enforcing the contract with a reflective sweep test is exactly the right discipline. Execution is the problem: the nil/zero guard is copy-pasted across ~20 accessors instead of captured in a single helper, two idioms (f == nil vs IsZero()) are used in parallel for the same notion, and the contract itself is implicit \u2014 stated only by the test, not by package documentation. Smaller issues include the ValueNodeIndex(-1) sentinel breaking the otherwise uniform 'zero in, zero out' convention, the reflection test silently skipping parameterized accessors, and the Imports slicing relying on an unstated 'last element is descriptor.proto' invariant. Verdict: needs-work \u2014 sound in intent, under-abstracted and under-specified in execution."
+  }
+}

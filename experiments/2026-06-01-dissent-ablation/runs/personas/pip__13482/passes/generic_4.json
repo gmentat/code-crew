@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "pip__13482",
+  "review": {
+    "summary": "This PR moves `prepare_linked_requirements_more` out of the resolver into individual commands (install, download, wheel) and caches the metadata-only distribution on InstallRequirement so dry-run/lock can skip downloading. The general direction is sound, but the dry-run code path in install.py still calls `prepare_linked_requirements_more`, which appears to defeat the stated purpose \u2014 full downloads will still occur before the dry-run early-return check. Additionally, `req.prepared`/`needs_more_preparation` flag-setting was deleted from the resolver but not clearly relocated, raising regression risk for downstream code that depends on those flags. The `set_dist`/`get_dist` cache also changes semantics in ways that may shadow a real built distribution post-install.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "install.py unconditionally calls prepare_linked_requirements_more before the dry-run check, defeating the PR's stated purpose",
+        "detail": "The added `preparer.prepare_linked_requirements_more(...)` in install.py runs before the `--dry-run` early-return logic later in `run()`. The news entry and PR description claim dry-run no longer downloads, but this call still triggers full wheel downloads for non-PEP-658 cases and may still download for dry-run. The call must be gated on `not options.dry_run` or moved below the dry-run return.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-420",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Removed `req.prepared = True` / `needs_more_preparation = False` flag updates from resolver are not replaced",
+        "detail": "The resolver previously set `req.prepared = True` and `req.needs_more_preparation = False` after calling `prepare_linked_requirements_more`. The new code in commands calls the prepare method but does not reset these flags. Downstream code that branches on `req.prepared` or `needs_more_preparation` (e.g. installer logic) may now see stale flags, causing re-preparation or assertion failures.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`get_dist()` prefers cached `_distribution` over `metadata_directory`, potentially returning stale metadata-only dist after full prep",
+        "detail": "After PEP-658 metadata fetch caches `_distribution`, a later `prepare_linked_requirements_more` populates `metadata_directory` with the actual built/extracted dist. `get_dist()` now returns the cached metadata-only dist first, ignoring the more authoritative directory distribution. This can cause install to use header metadata instead of the wheel's real METADATA, producing subtle divergence (e.g., dynamic fields, RECORD).",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-620",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Setting `download_info` from `direct_url_from_link(req.link, req.source_dir)` lacks hash/archive info available only after download",
+        "detail": "`direct_url_from_link` with no downloaded archive produces a DirectUrl without `ArchiveInfo.hash`/`hashes`. `pip install --report` and `pip lock` rely on download_info hashes for reproducibility. Populating download_info here with empty hashes silently degrades the JSON report's integrity guarantees compared to the prior behavior where download_info was set after real download.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "534-540",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`pip lock` code path is not updated in this diff despite news entry claiming it benefits",
+        "detail": "The news file states `pip lock` no longer downloads full distributions, but no change to a lock command is visible in the diff. If `pip lock` calls `prepare_linked_requirements_more` similarly to install, it will still download; if it doesn't, the resolver-removal change may break a flow that depended on the old in-resolver preparation. Either way the claim needs verification or an explicit code change.",
+        "file": "news/12603.feature.rst",
+        "lines": "1",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`set_dist` has no docstring and bypasses internal invariants used by `metadata` property",
+        "detail": "`set_dist` is a public-looking setter that mutates `_distribution` with no validation, no docstring, and no interaction with `_metadata` caching used by the `metadata` property. Future callers may set inconsistent state. A brief docstring describing the PEP-658 caching intent and contract (one-shot, metadata-only) would prevent misuse.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

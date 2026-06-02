@@ -1,0 +1,75 @@
+{
+  "task_id": "ratelimit__996",
+  "triple_key": "knuth+hickey+dijkstra",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "GetLimit mutates the shared *RateLimit and creates a throwaway stats counter on every request",
+        "detail": "The override branch reassigns Stats and FullKey on the *RateLimit returned from the descriptor tree, corrupting state across concurrent requests, and calls NewRateLimit/NewStats with the pre-enhancement key only to discard it. Sequential tests hide the race. Fix by returning a fresh RateLimit (or precomputing keys at load) and dropping the dead allocation.",
+        "file": "src/config/config_impl.go",
+        "lines": "412-432",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three key-building branches collapse to a single predicate",
+        "detail": "matchedViaWildcard, matchedUsingValue, and the default arm each independently append entry.Key and conditionally append _value when valueToMetric is set. The cases reduce to: always write key; append _value iff (matchedUsingValue or (valueToMetric and value != \"\")). The duplication signals no stated invariant and makes the equivalence non-obvious.",
+        "file": "src/config/config_impl.go",
+        "lines": "353-387",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Hot-path string builder and stats lookup run unconditionally on every GetLimit call",
+        "detail": "valueToMetricFullKey is constructed for every request even when no descriptor in the matched chain enables value_to_metric, and the override-guard comparison uses a FullKey that is unset on the common path. Compute a chain-level boolean at load time and skip both the builder and the NewStats override entirely when it is false.",
+        "file": "src/config/config_impl.go",
+        "lines": "319-432",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "detailed_metric and value_to_metric are one decision split into two booleans with implicit precedence",
+        "detail": "Both flags answer the same question: how should this descriptor render its metric segment (KeyOnly, KeyValue, Detailed)? Modeling them as two orthogonal booleans with a precedence rule documented in prose invites accretion and confusion. Collapse to a single per-descriptor MetricMode computed once at config load, then render from data.",
+        "file": "src/config/config_impl.go",
+        "lines": "32-46, 412-429",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Positional struct literal for rateLimitDescriptor is fragile to field additions",
+        "detail": "Constructions like &rateLimitDescriptor{map[string]*rateLimitDescriptor{}, rateLimit, nil, descriptorConfig.ValueToMetric} rely on field order. Future flags (which this PR's pattern predicts) will silently shift meaning or force every call site to change. Use named-field initialization.",
+        "file": "src/config/config_impl.go",
+        "lines": "191, 268",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Unbounded-cardinality stats creation has no operator guardrail",
+        "detail": "The feature is designed to inject runtime values into metric names, but there is no length cap, character sanitization, or creation-rate guard. An operator enabling value_to_metric on a high-cardinality key (subject_id, request_id) will allocate stats objects indefinitely. The README warning is informal; add a defensive bound or explicit configuration check.",
+        "file": "src/config/config_impl.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a single verdict: the feature works in tests but the GetLimit hot path is unsound. The dominant defect is that the override branch mutates a shared *RateLimit from the descriptor tree and wastes a NewStats allocation on every request \u2014 a race the sequential tests cannot witness. Secondary issues are duplicated key-building branches that reduce to one predicate, unconditional per-request string and stats work that should be gated by a load-time flag, and a design choice that splits one metric-render decision across two booleans. Fix the aliasing first, collapse the formatting to one rule, and lift the override work to config load."
+  }
+}

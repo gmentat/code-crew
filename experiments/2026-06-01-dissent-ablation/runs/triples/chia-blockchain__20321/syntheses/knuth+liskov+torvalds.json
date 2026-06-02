@@ -1,0 +1,76 @@
+{
+  "task_id": "chia-blockchain__20321",
+  "triple_key": "knuth+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Tests fabricate a zero-amount/zero-puzhash Addition to satisfy CreateSignedTransaction's non-empty additions invariant",
+        "detail": "Tests pass Addition(amount=0, puzzle_hash=bytes32.zeros) to bypass __post_init__'s len(additions) < 1 check while real outputs come from extra_delta/cat_discrepancy. The caller in cat_spend cannot produce this when request.additions is None. The data model doesn't fit the wrapped call. Either relax the precondition when cat_discrepancy is present or honestly name the contract.",
+        "file": "chia/_tests/wallet/rpc/test_wallet_rpc.py",
+        "lines": "1225-1250",
+        "flagged_by": [
+          "knuth",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "LSP violation: CATSpend's weaker precondition is not substitutable into CreateSignedTransaction's stronger one",
+        "detail": "send_transaction/cat_spend forward to create_signed_transaction, but CreateSignedTransaction requires len(additions) >= 1 while CATSpend allows additions=None with amount/inner_address. Forwarding code synthesizes a sentinel Addition to satisfy the stronger precondition. Relax CreateSignedTransaction's precondition or refuse the substitution rather than papering over it.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "2009-2044",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "CAT-specific fields added to CreateSignedTransaction with no mutual-exclusivity validation",
+        "detail": "extra_delta/tail_reveal/tail_solution and puzzle_decorator are now first-class fields on a general-purpose endpoint. There's no __post_init__ check that CAT discrepancy fields are valid only for CAT wallets, and the cat_discrepancy invariant is duplicated across two dataclasses via a free function. Introduce a small ADT that owns the invariant rather than loose Optional fields.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1483, 1916-1962",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent behavior changes in puzzle_decorator forwarding and address-prefix validation",
+        "detail": "Old send_transaction forwarded only puzzle_decorator[0]; new code passes the whole list. cat_spend drops puzzle_decorator entirely despite CATSpend accepting it. Address validation switched from network-config prefix string compare to AddressType.XCH enum membership, which is a behavior change on testnet/simulator builds where the configured prefix differs.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1508-1534, 2009-2044",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_wallet() called purely for side-effect of raising, with discarded return value",
+        "detail": "The '# opportunity to raise' comment acknowledges the call exists only for precondition validation, and create_signed_transaction will redo the same lookup. This couples modules via an unwritten side-effect contract. Extract a named _validate_wallet_type(wallet_id, required_type) helper or trust the inner call's check.",
+        "file": "chia/wallet/wallet_rpc_api.py",
+        "lines": "1511-1513, 2012-2014",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cat_discrepancy_validation preserves type-ignores and 'None in {set}' trick instead of clean narrowing",
+        "detail": "The extracted helper carries its three # type: ignore[arg-type] comments and the set-membership None check verbatim. An explicit 'if extra_delta is None or tail_reveal is None or tail_solution is None' narrows properly and removes the ignores. Moving bad taste into a function makes it reusable bad taste; fix it during extraction.",
+        "file": "chia/wallet/wallet_request_types.py",
+        "lines": "1471-1484",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "NEEDS-WORK. The deduplication idea is sound \u2014 collapsing send_transaction and cat_spend into thin wrappers over create_signed_transaction is the right shape \u2014 but the execution leaks contracts. Tests had to invent a sentinel Addition to satisfy a non-empty-list invariant the wrapped callers cannot produce, exposing an LSP violation at the module boundary. CAT-specific fields were bolted onto a general request type without mutual-exclusivity checks, and silent behavior changes slipped in around puzzle_decorator forwarding and address-prefix validation. The extracted cat_discrepancy_validation helper carries its type-ignores forward instead of being cleaned up. Relax or honestly rename the additions precondition, define a proper cat-discrepancy ADT, and pin down the semantic changes."
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "task_id": "agents__3909",
+  "arm": "named-6",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Server error messages raise APIConnectionError inside recv_task's broad except, which swallows it and keeps the loop spinning on a dead session.",
+        "detail": "auth_error/quota_exceeded events in _process_stream_event raise APIConnectionError, but recv_task wraps the call in `except Exception: logger.exception(...)` and continues. The fatal error is both raised and swallowed, so the stream never terminates or surfaces the failure. Separate the control path from the data path and propagate fatal errors out of the recv loop.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "207-232, 396-411",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "sample_rate is silently coerced to an STTAudioFormat via f-string + typing.cast with no validation against the Literal set.",
+        "detail": "STTAudioFormat enumerates exactly six pcm_* literals, but the constructor does typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\"), bypassing the type contract. Passing sample_rate=11025 produces \"pcm_11025\" which the server will reject opaquely. Validate sample_rate against the documented set at construction or accept audio_format directly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "108-128",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect scaffolding is dead/unsound: _reconnect_event is never set, exceptions are swallowed via tasks_group.exception(), and there is no stated termination condition.",
+        "detail": "The outer while True only re-enters on _reconnect_event, which nothing sets. On send/recv failure, tasks_group.exception() retrieves and discards the real error with no backoff or invariant. Either wire reconnect on failure with a documented termination function or delete the scaffolding entirely.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "208-273",
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speaking-state machine is implicit and ambiguous: _speaking is a mutable flag with no invariant and survives reconnects unchanged.",
+        "detail": "_speaking is flipped from _process_stream_event with no documented invariant. An empty committed_transcript is the only end-of-segment signal; if it never arrives (drop, error, reconnect mid-segment), END_OF_SPEECH is never emitted. Make the segment state explicit, document the invariant, and reset across reconnects or add a timeout fallback.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "338-394",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Documented numeric ranges for VAD and duration parameters are not enforced at construction.",
+        "detail": "The docstring asserts vad_silence_threshold_secs in [0.3, 3.0], vad_threshold in [0.1, 0.9], and min_*_duration_ms in [50, 2000], but __init__ performs no validation. Out-of-range values are forwarded and fail opaquely on the server. Validate at the boundary with a clear ValueError or drop the range claim.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "76-107",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTOptions stores audio_format alongside sample_rate, creating two fields for one fact and duplicating __init__ defaults.",
+        "detail": "audio_format is derived from sample_rate then stored independently on STTOptions, while the dataclass defaults also restate __init__ defaults. A future mutation desynchronizes the two, and changing a default means editing two places. Make audio_format a computed property (or compute at use site) and let STTOptions be the single source of values.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "40-117",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK: the patch is the right shape and follows the established Deepgram pattern, but it has two ship-blocking correctness bugs and several contract gaps. Fatal server errors raised inside _process_stream_event are swallowed by recv_task's broad except, leaving the loop spinning on a dead session; sample_rate is cast to STTAudioFormat via f-string with no validation, defeating the Literal ADT. The reconnect scaffolding is dead code (no one sets _reconnect_event) and the speaking-state machine has no stated invariant and survives reconnects. Documented VAD parameter ranges are unenforced, and STTOptions duplicates derivable fields. Fix the error propagation, validate inputs, and either wire or remove reconnect before landing."
+  }
+}

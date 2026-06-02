@@ -1,0 +1,72 @@
+{
+  "task_id": "pipecat__3410",
+  "arm": "pair-TL",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Packetization buffer treats every bytes payload as PCM and drops trailing audio at shutdown",
+        "detail": "_write_frame buffers any bytes payload into _audio_send_buffer when fixed_audio_packet_size is set, with no frame-type gate and no flush on EndFrame/Cancel. Non-PCM binary payloads get sliced and corrupted; trailing PCM shorter than packet_size is silently dropped. Gate on AudioRawFrame and flush (pad with silence) at EOS.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-510",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetization concern leaks Vonage-specific framing into the generic FastAPI transport",
+        "detail": "20ms @ 16kHz = 640B is a property of the Vonage protocol and belongs in VonageFrameSerializer, not the generic transport. Pushing fixed_audio_packet_size into FastAPIWebsocketTransport leaks a serializer-specific invariant upward and forces every future protocol to re-negotiate this knob. A composing packetizing serializer would respect the boundary.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "56-66, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Missing precondition: fixed_audio_packet_size must align with sample format",
+        "detail": "fixed_audio_packet_size must be a multiple of bytes_per_sample * channels or the receiver gets misaligned PCM and noise. There is no validation in setup() or __init__; a caller passing 641 silently corrupts every packet. State and enforce the precondition (assert or raise on StartFrame).",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InterruptionFrame buffer clear races with in-flight websocket sends",
+        "detail": "process_frame clears _audio_send_buffer before delegating, but if _write_frame is concurrently sending a chunk, stale pre-interruption audio still reaches the wire. The 'no pre-interruption PCM after InterruptionFrame' invariant is not preserved. Needs a send lock or sequence guard.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "428-435, 495-510",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Renaming audio_packet_bytes to fixed_audio_packet_size is a silent breaking change",
+        "detail": "The param sits on a public dataclass and the rename has no deprecated alias. Because the default is None, existing callers using audio_packet_bytes silently lose packetization rather than erroring. Keep a deprecated alias for one release or flag the break loudly in the changelog.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF digit shape is under-specified \u2014 code accepts two undocumented variants",
+        "detail": "deserialize tries message['digit'] then message['dtmf']['digit'] with no spec reference. Pick the documented Vonage shape and treat the other as a compatibility shim with a TODO, or this defensive code hides protocol drift indefinitely.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "159-178",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The Vonage serializer itself is a cleanly shaped ADT, but the FastAPI transport's new packetization path is the main correctness risk: it buffers any bytes payload as PCM, drops trailing audio at shutdown, leaks a Vonage-specific framing concern into a generic transport, and lacks alignment validation. A race between InterruptionFrame buffer clearing and in-flight sends compounds the correctness problem. Secondary concerns are a silent rename of a public dataclass field and an under-specified DTMF digit shape that accepts two undocumented variants."
+  }
+}

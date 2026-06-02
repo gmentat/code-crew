@@ -1,0 +1,94 @@
+{
+  "persona": "liskov",
+  "task_id": "kale__593",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "DEFAULT_BASE_IMAGE constant duplicated across three modules \u2014 single source of truth violated",
+        "detail": "The string 'python:3.12' is now defined in backend/kale/pipeline.py (DEFAULT_BASE_IMAGE), hardcoded as a fallback in labextension/src/lib/Commands.ts (return 'python:3.12'), and re-declared in labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx (export const DEFAULT_BASE_IMAGE). The whole point of introducing the constant is to have one authoritative definition; instead the abstraction leaks the literal into three places that will silently drift. The ADT here is 'the system's default base image' \u2014 its contract must be: exactly one declaration, all callers consult it. Either the backend RPC is the source of truth (and the frontend must not embed a literal), or there is a build-time constant exchange \u2014 pick one and enforce it.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx, labextension/src/lib/Commands.ts, backend/kale/pipeline.py",
+        "lines": "CellMetadataEditor.tsx:73; Commands.ts:111; pipeline.py:37",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Semantic contract change in Pipeline._set_base_image silently strengthens postcondition",
+        "detail": "Previously, when pod introspection failed, self.base_image was set to '' which the downstream template treated as 'fall back to kfp default image'. Now it is set to DEFAULT_BASE_IMAGE ('python:3.12'), which is a different postcondition: callers downstream of Pipeline can no longer distinguish 'no image was determined' from 'an explicit image was chosen'. Any subtype, serialization, or consumer that previously branched on empty-string semantics now sees a non-empty string with concrete meaning. This is an LSP-adjacent issue: the Pipeline type's postcondition for base_image has been weakened in observability (cannot tell unset from default) without being declared. State the contract: is base_image now 'always non-empty after _set_base_image()'? If yes, document and enforce that invariant; if no, preserve the empty-string sentinel and resolve the default at render time only.",
+        "file": "backend/kale/pipeline.py",
+        "lines": "142-145",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Template fallback chain has redundant rungs after the change \u2014 contract is now ambiguous",
+        "detail": "nb_function_template.jinja2 still evaluates `step.config.base_image or base_image or default_base_image`. But after the pipeline.py change, `base_image` will already be DEFAULT_BASE_IMAGE whenever no image was determined, so the third rung is unreachable in practice. Either (a) remove the third rung because `base_image` is now invariantly non-empty, or (b) revert the pipeline.py change and let the template be the single resolution point. The current code has two layers of defaulting with overlapping responsibility \u2014 a classic 'where does the contract live' problem.",
+        "file": "backend/kale/templates/nb_function_template.jinja2",
+        "lines": "2",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "InlineMetadata.createBaseImageText return type changed from string|JSX to always-JSX \u2014 interface widened silently",
+        "detail": "Previously the method returned either a <p> element or an empty string ('') when no baseImage was set. Now it unconditionally returns the <p> element with '(default)' suffix. This is a behavioral change in the rendered DOM for every cell that previously had no base image \u2014 those cells now show a 'Base Image: python:3.12 (default)' line they never had before. The component's visual contract has changed for every existing notebook. If that is intentional, fine \u2014 but the PR description only promises 'Display default base image in cell metadata UI', not 'add a line to every step cell that previously had none'. Verify this is the intended visual contract.",
+        "file": "labextension/src/widgets/cell-metadata/InlineMetadata.tsx",
+        "lines": "234-247",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Base Image edit button disabled when stepName is empty \u2014 precondition strengthened versus old Input control",
+        "detail": "The previous Input field for Base Image had no precondition on stepName; users could set the base image regardless. The new IMAGE button has `disabled={!(this.props.stepName && this.props.stepName.length > 0)}`. This strengthens the precondition for editing base_image (now requires a step name) \u2014 an LSP-style regression for any workflow where users set image-then-name. Either the precondition was wrong before, or it is wrong now; document the intended contract and pick one.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "486-492",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inline `from kale.pipeline import DEFAULT_BASE_IMAGE` inside RPC function \u2014 module boundary leakage",
+        "detail": "get_default_base_image performs the import inside the function body. The top of nb.py is the natural place to declare what this module depends on; an inline import hides the dependency from anyone reading the module's interface. Move the import to the top of the file unless there is a documented circular-import reason. The RPC module's boundary should declare its dependencies plainly.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "95-99",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Button width style 'width: 5%' is suspect on a contained Button with text 'IMAGE'",
+        "detail": "The new IMAGE button has `style={{ width: '5%' }}`. 5% of the parent will not accommodate the word 'IMAGE' in most layouts; this is likely either a leftover or a styling bug. The wrapping div uses 'padding: 0, marginRight: 4px' which also suggests the styling intent was not fully worked out. Audit the rendered result and replace with a documented width or remove the inline style.",
+        "file": "labextension/src/widgets/cell-metadata/CellMetadataEditor.tsx",
+        "lines": "495",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test coverage added for the new RPC endpoint, the resolution chain, or the LSP-affected pipeline change",
+        "detail": "A new RPC (get_default_base_image), a changed Pipeline postcondition, and a four-level frontend resolution chain (step.baseImage -> pipelineBaseImage -> defaultBaseImage -> hardcoded literal) ship without tests. The contract is exactly the kind of thing tests pin down: 'when no image is set anywhere, the rendered DSL component receives python:3.12'; 'when pipeline metadata has base_image X, step cells without their own image inherit X'. Without these, the resolution order is folklore.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR's core abstraction \u2014 'the system's default base image' \u2014 is the right thing to name, but the implementation fails the single-source-of-truth contract: the literal 'python:3.12' is declared in three places (Python constant, TS frontend constant, TS Commands fallback) and will drift. More serious is a quiet postcondition change in Pipeline._set_base_image: '' (sentinel for 'unset, let downstream decide') has been replaced with the concrete default, collapsing the distinction between 'no image determined' and 'default image chosen' for every consumer of Pipeline.base_image. The frontend resolution chain (step -> pipeline -> default -> hardcoded) now has overlapping defaulting layers with the template, creating ambiguity about where the contract lives. Smaller issues: the edit-base-image precondition was tightened (requires stepName) without justification; createBaseImageText's visual contract widened to always render; an inline import hides a module dependency; no tests pin down the new resolution order. Recommend: centralize DEFAULT_BASE_IMAGE in one place (backend, fetched via RPC), revert the pipeline.py sentinel change OR document and enforce the new invariant, and remove redundant defaulting rungs in the template."
+  },
+  "raw": ""
+}

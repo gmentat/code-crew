@@ -1,0 +1,74 @@
+{
+  "persona": "dijkstra",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s || '') \u2014 the precondition on `from` is unstated and the change is unproven",
+        "detail": "The diff silently changes the meaning of `resolveSources`. Previously `resolve(s, from)` was called; now it is `resolve(from, '..', s || '')`. The author appears to have assumed that `from` is always a file path, so that `../s` resolves relative to the directory of `from`. State the precondition: is `from` guaranteed to be a file (not a directory, not a URL, not a bare specifier)? If `from` is a directory, `..` walks one level too high; if `from` is a URL, `pathe.resolve` behavior is silently wrong. No invariant, no test pinning this behavior at this layer. The change may be correct for the observed cases, but it has not been reasoned about \u2014 it has been tested against a snapshot.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-367",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "getSourceMap callback silently swallows the absent-map case by falling off the end",
+        "detail": "The new `getSourceMap(file)` returns `extractSourcemapFromFile(...)` when the module has no transform result and the file exists, and otherwise returns `undefined` implicitly. There are three distinct cases \u2014 (a) inlined module, do nothing; (b) external module, file missing; (c) external module, file present but no map. All three collapse into `undefined`. State the postcondition: caller receives `SourceMap | undefined`, and `undefined` means 'apply no remapping'. Fine \u2014 but the comment claims this 'only handles external modules', which is a property of the call site, not a property enforced here. A reader cannot follow the control flow without simulating it. Make the cases explicit, or document the disjunction precisely.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-187",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Synchronous readFileSync on every external-frame stack parse \u2014 termination/cost not reasoned about",
+        "detail": "`getSourceMap` is invoked per frame during error stack parsing. Each call may `existsSync` + `readFileSync` the file, then `convert-source-map` may invoke the readMap callback which again `existsSync` + `readFileSync`s a referenced map file. There is no memoization, no cache, no bound on how often the same external file is read for a single error. For an error with N frames touching the same external module, the work is O(N) disk reads of the same bytes. State the termination/cost function. If errors with deep stacks are rare this is acceptable; if they are not, this is a performance bug waiting to be tested-not-proved.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-187, 319-343",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "extractSourcemapFromFile uses the '{}' string as a fallback map \u2014 a smuggled defensive guard",
+        "detail": "`createConvertSourceMapReadMap` returns the literal string `'{}'` when the referenced map file does not exist. This is defensive-as-substitute: the function pretends to return a valid source map JSON when it cannot. `convert-source-map` will parse this as an empty object with no `mappings`, no `sources`, no `version` \u2014 which is not a valid source map. Whether `convert-source-map` then throws, returns a degenerate object, or silently misbehaves depends on its internals. The precondition the caller expects ('returns source content as string, possibly empty') is conflated with 'returns a JSON-shaped placeholder'. A cleaner discipline: return `''` and let the upstream `fromMapFileSource` produce `null`, which the `||` chain already handles.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-342",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Snapshot is the only correctness witness \u2014 TESTED-NOT-PROVED",
+        "detail": "The behavioral change is asserted by a single updated snapshot that now points at `.ts` line numbers instead of `.js` line numbers. Snapshot equality demonstrates the new output equals the new expected output; it does not demonstrate that the source-map application is correct. No unit test pins `extractSourcemapFromFile` against a known map, no test pins the `resolve(from, '..', s)` change against a fixture with non-trivial `sources` entries (absolute, relative, URL, missing). Testing shows the presence of bugs, not their absence \u2014 and here it does not even show that.",
+        "file": "test/cli/test/__snapshots__/stacktraces.test.ts.snap",
+        "lines": "56-78",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Module-graph lookup `getModuleById(file)` assumes `file` is a normalized module id",
+        "detail": "`parseErrorStacktrace` hands the source-map callback whatever string appears in the frame's file position. `project.vite.moduleGraph.getModuleById(file)` expects a Vite module id, which is not necessarily the same string as a stack-trace file path (querystrings, leading slashes on Windows, virtual ids, file URLs). When the lookup misses for reasons unrelated to whether the module is external, the code falls through to `existsSync(file)` and may read and apply a source map for an inlined module whose transform result was simply not found by id. The precondition 'getModuleById returns the module iff it is inlined' is not established.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "178-184",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The patch corrects a real bug \u2014 external module stack traces were not being source-mapped \u2014 and the direction is right. But the work is TESTED-NOT-PROVED. The `resolve(from, '..', s || '')` change has an unstated precondition on `from`; the new `getSourceMap` callback conflates three distinct cases under a single implicit `undefined` return; the readMap fallback returns the string `'{}'` as a defensive placeholder where `''` would be more honest; and the only correctness witness is an updated snapshot. None of this is fatal, but none of it has been reasoned about \u2014 the author should state the precondition on `from`, write a unit test that pins `extractSourcemapFromFile` against fixed inputs, and either memoize or document the per-frame I/O cost. Verdict: REASONED-INSUFFICIENTLY. Acceptable to land if a maintainer signs off on the spec the author has not written down; refused on Dijkstra's discipline."
+  },
+  "raw": ""
+}

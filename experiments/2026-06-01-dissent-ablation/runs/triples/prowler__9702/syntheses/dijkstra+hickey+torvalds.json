@@ -1,0 +1,78 @@
+{
+  "task_id": "prowler__9702",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "PR title, metadata, and code disagree about check identity and tri-state semantics.",
+        "detail": "PR title and CHANGELOG describe detecting 'multiple network interfaces', but directory, CheckID, and class are 'compute_instance_single_network_interface'. Worse, code emits a third state (MANUAL for gke-* names) that metadata.json and PR description never mention. Either document MANUAL in metadata or drop the GKE branch. Pick one canonical story.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.metadata.json",
+        "lines": "1-40",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "GKE detection via instance.name.startswith('gke-') is a string-match special case standing in for a real signal.",
+        "detail": "The decision to emit MANUAL vs FAIL relies on a name prefix. Any user-named VM 'gke-bastion' becomes MANUAL; a real GKE node renamed gets FAIL. The actual fact (managed by GKE) lives in instance labels (goog-gke-node) or managed-instance-group ancestry. Query that, or drop the carve-out and document in Notes.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "29-33",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-interface branch silently returns PASS with no test coverage.",
+        "detail": "When interface_count == 0, report.status remains PASS while status_extended says the VM has no network interfaces. A zero-NIC VM is not a single-NIC VM; the postcondition is violated. The branch is also untested. Either raise an explicit error state, emit MANUAL/INFO, or remove the branch \u2014 and add a test.",
+        "file": "prowler/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface.py",
+        "lines": "19-40",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NetworkInterface model drops the fields needed to make the finding actionable.",
+        "detail": "The interface value carries only {name, network, subnetwork}, discarding accessConfigs/natIP, alias IP ranges, and stack type at parse time. Those are exactly the fields that distinguish a real cross-trust-boundary bridge from a benign dual-NIC. Keep the value richer so the classifier can be a pure function over real facts.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "108-130, 606-638",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mutable default [] on Pydantic field instead of Field(default_factory=list).",
+        "detail": "`network_interfaces: list[NetworkInterface] = []` uses a shared mutable default. Pydantic v1 happens to copy it, but the pattern is a known footgun. Match codebase style and prefer Field(default_factory=list) where possible.",
+        "file": "prowler/providers/gcp/services/compute/compute_service.py",
+        "lines": "638",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests assert exact status_extended prose, coupling outcomes to message wording.",
+        "detail": "Tests pin full sentence strings rather than asserting the underlying facts (status, count, instance id, names list). A wording tweak breaks unrelated tests. Assert structured values and let formatting live in a separate concern. Also: empty NIC names produce ugly joined output like 'has 2 network interfaces: , .'",
+        "file": "tests/providers/gcp/services/compute/compute_instance_single_network_interface/compute_instance_single_network_interface_test.py",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel converges on one verdict: the check works on happy paths but ships with an identity crisis and one piece of bad taste. The PR title, CHANGELOG, metadata, directory name, and code disagree on whether the check detects 'multiple NICs' (PASS/FAIL) or has a third MANUAL state for GKE nodes \u2014 this must be reconciled. The GKE carve-out uses a name-prefix string match where a real signal (goog-gke-node label, MIG membership) exists, making it both bypassable and a special-case-for-general-property anti-pattern. The zero-NIC branch silently passes and is untested. Secondary concerns: the NetworkInterface model strips the fields that would make findings actionable, and tests over-couple to prose wording. NEEDS-WORK before merge."
+  }
+}

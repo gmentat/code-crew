@@ -1,0 +1,124 @@
+{
+  "persona": "liskov",
+  "task_id": "espnet__6278",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args contract is inconsistent: docstring says max_steps/val_interval, code reads max_step and never uses val_interval",
+        "detail": "The DeepSpeedTrainer.__init__ docstring states trainer_args must contain max_steps and val_interval, but the implementation reads trainer_args['max_step'] (singular) and never references val_interval at all. valid() is instead called once per save_interval inside run(). This is a precondition/postcondition mismatch: callers following the documented contract will get KeyError on max_step, and the documented val_interval semantics are silently absent. Either the contract or the implementation must change so a caller can substitute any conforming config dict.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "37-58, 75-79, 169-180",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint discovery silently re-resumes from disk even when the user passed an explicit (non-existent) resume_path",
+        "detail": "_load_checkpoint treats resume_path as advisory: if resume_path is given but does not exist, it falls through to the 'latest in output_dir' branch with no warning. That violates the implicit contract of an explicit --resume_path argument (caller expects either that checkpoint or a clear failure). For long-running multi-team training, silently resuming a different run is a serious correctness hazard. Either raise on missing resume_path, or document and log loudly that fallback is occurring.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "108-138",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DataIteratorFactory contract is leaky: train factory takes positional unregistered+registered, valid factories take them by keyword and only one at a time",
+        "detail": "train_iterator_factory is constructed with two positional specifier strings, while valid factories are built by looping over .split() and passing either unregistered_specifier= or registered_specifier= as a kwarg. This implies an underlying constructor that accepts both as optional kwargs but is invoked positionally on the train path, so the abstract data type 'DataIteratorFactory' has an unclear, position-sensitive interface. Tighten the constructor signature (named kwargs only, or a single specifiers list) so all callers go through one documented contract.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "175-210",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Trainer's hidden invariant on wandb.run is asserted in the docstring but never enforced",
+        "detail": "The class docstring states 'IMPORTANT: wandb is MANDATORY... The trainer will raise an error if wandb.run is None.' No such check exists in __init__; instead wandb.config.update and wandb.log are called unconditionally and will raise opaque attribute errors if the precondition is violated. State the precondition in code (assert wandb.run is not None, with a clear message) so the contract the docstring promises is actually maintained. This is exactly the kind of unstated-then-violated invariant that breaks substitutability when a caller wires up a different logging backend.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "19-30, 79",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "freeze_param matching uses string prefix on '.' which is a leaky abstraction over the module tree",
+        "detail": "Freezing logic does k.startswith(t + '.') or k == t. This silently depends on PyTorch's dotted-name convention and on the caller knowing the exact internal module path of the model. The 'freeze this submodule' operation should be expressed against the model's named_modules() / get_submodule() contract rather than string prefix matching on parameter keys, and should warn or error when a freeze pattern matches zero parameters (currently a typo silently freezes nothing).",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "60-65",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats mutates caller's dict and assumes all values are tensors on the correct device",
+        "detail": "The method takes a Dict[str, torch.Tensor] and divides in-place. Its preconditions (every value is a CUDA tensor of identical dtype across ranks, distributed already initialized for multi-rank runs) are partially asserted and partially not. Worse, the postcondition differs by world: in single-process runs values are not divided, in distributed runs they are averaged. A caller cannot reason about 'what is in stats after this returns' without reading the implementation. Either always normalize (divide by 1 in single-process) or make the contract explicit and tested.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "140-167",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "train() ignores max_step inside the inner loop, breaking the run() invariant 'training stops at max_step'",
+        "detail": "run() loops while global_step < max_step and calls train(), which iterates a slice of length save_interval. If save_interval does not divide max_step, training overshoots by up to save_interval-1 steps and a final checkpoint is saved at a step beyond max_step. The supertype contract 'train for exactly max_step optimizer steps' is weakened by the subtype implementation. Add a per-batch check inside the train loop or bound the iterator length by min(save_interval, max_step - global_step).",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "169-201",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint sort by int(name.split('step_')[-1]) is fragile and undocumented",
+        "detail": "The 'latest checkpoint' selection assumes every directory under checkpoints/ matches step_<int>. Any debug directory, partial save, or future naming change will raise ValueError mid-startup. The invariant 'checkpoint dir contains only step_<int> subdirs' is not stated anywhere and not enforced by the writer side beyond convention. Filter by a regex and skip non-matching names, or write a manifest file that names the latest checkpoint explicitly.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "116-128",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixed kebab-case and snake_case CLI flags violate a small but real interface convention",
+        "detail": "--train-config, --output-dir, etc. use kebab-case, but --local_rank and --resume_path use snake_case. Argparse maps both to underscore attrs so it works, but the user-facing interface (the CLI contract) is inconsistent. Pick one convention and document it; users will otherwise guess wrong.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "25-65",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "train_dtype belongs on a config object, not as a trainer method",
+        "detail": "train_dtype() is a pure function of ds_config with no use of self. It is method-on-class for organizational convenience, which is mild inheritance-for-reuse. Promote to a module-level helper (or a small DeepSpeedConfig ADT with a .dtype property) so the dtype-derivation contract is reusable and testable independently of the trainer.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "232-247",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "valid() loses per-dataset distinction in averaging and silently divides by zero on empty datasets",
+        "detail": "all_stats[key] is appended per batch then averaged with sum/len. If a validation factory yields zero batches (a real risk under sharded distributed loaders), len(value) raises ZeroDivisionError. Also, averaging an already all_reduced mean across batches without batch-size weighting is only correct when batches are equal size. State the contract: 'val factories must yield >=1 batch and equally sized batches,' or weight by sample count.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "203-230",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The two files define a DeepSpeedTrainer ADT and a launcher, but the contract is under-specified at exactly the points that matter for substitutability. The trainer_args dictionary is documented one way and consumed another (max_steps vs max_step, val_interval ignored), the wandb precondition is asserted in prose but not in code, and resume_path's stated behavior silently falls back to disk discovery on miss. Several invariants leak through string-prefix matching, fragile checkpoint-name parsing, and conditional all_reduce semantics that change postconditions between single- and multi-process runs. The DataIteratorFactory boundary is also drawn inconsistently (positional on train, kwargs on valid). Recommended: write down the trainer_args schema, enforce wandb and resume_path preconditions in __init__, make _all_reduce_stats postconditions uniform, and tighten max_step termination so training stops where the docstring says it stops."
+  },
+  "raw": ""
+}

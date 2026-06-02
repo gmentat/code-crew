@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "pipecat__3410",
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size buffers non-audio payloads as audio, corrupting JSON/control frames.",
+        "detail": "In _write_frame, the packetization branch triggers whenever payload is bytes/bytearray, regardless of whether the source frame was audio. If a serializer ever emits a non-audio binary payload (e.g., a binary control message), it gets appended to the audio buffer and chunked, mangling it. Gate on isinstance(frame, AudioRawFrame) too.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-510",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Renaming audio_packet_bytes to fixed_audio_packet_size is a breaking change with no deprecation alias.",
+        "detail": "The changelog says the param was renamed, but FastAPIWebsocketParams only exposes the new name. Existing users passing audio_packet_bytes via the Pydantic model will silently get None (or hit a validation error depending on model config). Add a deprecated alias or migration shim before merge.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Packetized sends bypass real-time pacing despite changelog claiming pacing support.",
+        "detail": "The changelog advertises 'real-time pacing' but the new branch calls self._client.send(chunk) in a tight while loop with no sleep against _send_interval/_next_send_time. For endpoints like Vonage Audio Connector that expect 20ms-paced delivery, bursts of buffered chunks will be sent back-to-back, defeating the stated purpose.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "498-509",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Buffer not flushed/reset on stream end, leaking partial PCM across sessions.",
+        "detail": "_audio_send_buffer is only cleared on InterruptionFrame. On EndFrame/CancelFrame/disconnect, a partial remainder stays in the buffer and will be prepended to the next session if the transport instance is reused. Clear the buffer on stop/cleanup and consider zero-padding or dropping the tail on end-of-stream.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "366-372, 428-435",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "VonageFrameSerializer.serialize ignores bot-initiated interruptions vs. user interruptions.",
+        "detail": "Every InterruptionFrame produces a {'action':'clear'} message to Vonage. Pipecat distinguishes BotInterruptionFrame/StartInterruptionFrame; sending 'clear' on every InterruptionFrame may double-clear or clear when the user hasn't actually interrupted. Verify which interruption variant should trigger Vonage's clear action.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "82-86",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fixed_audio_packet_size has no validation; zero or negative values would infinite-loop or no-op silently.",
+        "detail": "If a user sets fixed_audio_packet_size=0, the truthiness check skips packetization (silent no-op). Negative values would cause the while loop and slicing to behave oddly. Add a Pydantic validator requiring a positive multiple of the sample width (e.g., 2 bytes for PCM16).",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR adds a clean VonageFrameSerializer and a fixed-size PCM packetization path to FastAPIWebsocketTransport. Main concerns: the packetization branch keys off payload type rather than frame type, so non-audio binary payloads could be silently corrupted; the rename from audio_packet_bytes is a breaking change without a deprecation alias; and the new send loop bypasses the existing pacing logic despite the changelog advertising real-time pacing. Also, the send buffer is only cleared on InterruptionFrame and may leak partial PCM across sessions. The Vonage serializer itself is straightforward, though the InterruptionFrame -> 'clear' mapping needs a sanity check against Pipecat's interruption taxonomy."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "prowler__9561",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "getCategoryLabel contract weakened: explicit map removed, heuristic now silently mislabels known IDs",
+        "detail": "The old implementation had an explicit CATEGORY_LABELS table guaranteeing 'forensics-ready' -> 'Forensics Ready', 'trustboundaries' -> 'Trust Boundaries', 'publicly-accessible' -> 'Publicly Accessible', 'internet-exposed' -> 'Internet Exposed'. The new heuristic-only implementation breaks the contract for 'trustboundaries' (returns 'Trustboundaries' instead of 'Trust Boundaries') because the single token has no hyphen and isn't in SPECIAL_CASES. This is a Liskov Substitution violation at the function level: the new implementation strengthens the precondition (inputs must contain hyphens at correct word boundaries) and weakens the postcondition (no longer guarantees the canonical label for every known category ID). The SPECIAL_CASES dictionary is shipped empty, so any ID the heuristic gets wrong silently produces a degraded label across the Overview radar, the findings filter, badges, and tooltips.",
+        "file": "ui/lib/categories.ts",
+        "lines": "1-54",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Module boundary for category vocabulary is now implicit and untestable",
+        "detail": "Previously the set of known category IDs lived as a typed const CATEGORY_IDS with an exported CategoryId union type, giving callers a checkable contract: 'these are the categories the system knows about.' The new lib/categories.ts removes both the enumeration and the type, leaving only a string-in / string-out function. The abstract data type 'Category' has dissolved into 'any string the API happens to send.' Callers (CategorySelector, FindingsFilters, adapter) can no longer rely on a typed vocabulary, and there is no single place that states 'these are the supported categories and their canonical labels.' Recommend reintroducing a typed registry (or a tested mapping table) as the contract, and treating the heuristic strictly as a fallback for unknown IDs.",
+        "file": "ui/lib/categories.ts",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "HorizontalBarChart bar-width contract changed without spec update; two different formulas for width vs label",
+        "detail": "The component now computes calculatedWidth (bar geometry) and displayPercentage (label text) from different formulas. calculatedWidth falls back to value/maxValue*100 (relative to the largest bar), while displayPercentage falls back to value/total*100 (share of total). When item.percentage is undefined, the bar will be drawn at, say, 100% width while the label reads a much smaller percent, or vice versa. The visual encoding and the printed number are no longer the same quantity. The component's implicit invariant 'the rendered bar length matches the percentage shown next to it' is broken. Either pick one definition of percentage and use it for both, or document the divergence in the component's contract.",
+        "file": "ui/components/graphs/horizontal-bar-chart.tsx",
+        "lines": "60-190",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "SEVERITY_ORDER now has two keys mapping to value 4 (Informational and Info)",
+        "detail": "Adding Info: 4 alongside Informational: 4 introduces a non-injective mapping where the type used to be a clean ordinal. Any caller that does reverse lookup or assumes uniqueness of ordinal values now sees ambiguity. This is a small ADT leak: the abstraction is 'ordered severities,' and the canonical name for the lowest severity is no longer unique. Prefer normalizing inputs to the canonical key ('Informational') at the boundary rather than expanding the enum in place.",
+        "file": "ui/components/graphs/shared/constants.ts",
+        "lines": "13-22",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CategorySelector reserves the magic string 'all' inside the value space of category IDs",
+        "detail": "handleValueChange treats value === 'all' (and '') as the null/clear sentinel, but category IDs come from the API as arbitrary strings. If the API ever introduces a category with id 'all' (or an empty string), the selector will silently coerce it to 'no selection.' This is a classic abstraction leak: the sentinel is mixed into the same type as legitimate values. Use a separate UI state for 'no selection' or a non-collidable sentinel, and document the precondition that category IDs cannot equal 'all'.",
+        "file": "ui/app/(prowler)/_overview/graphs-tabs/risk-radar-view/category-selector.tsx",
+        "lines": "22-46",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DataTableFilterCustom passes formatted label into getBadgeLabel where raw value was expected",
+        "detail": "The previous contract for getBadgeLabel(entity, value) appears to be 'identify the badge by its underlying value.' The new code passes displayLabel (the formatted human string) as the second argument. If getBadgeLabel uses that argument as an identifier (e.g., for keying, lookup, or comparison against entity fields), behaviour changes silently for any filter that supplies a labelFormatter. Either rename the parameter and document that it is presentational only, or pass the raw value here and the formatted label separately to the renderer.",
+        "file": "ui/components/ui/table/data-table-filter-custom.tsx",
+        "lines": "150-165",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Category filter badge removed from DEFAULT_FILTER_BADGES with no replacement",
+        "detail": "DEFAULT_FILTER_BADGES previously declared a Category entry so active category__in filters got a labelled badge. The PR removes it but the findings page now exposes a Category filter. Unless another code path (not in this diff) registers a Category badge, applying the filter will either render no badge or a generic fallback that no longer says 'Category'. Worth confirming the active-filter UX still matches the contract that every supported filter has a badge representation.",
+        "file": "ui/components/filters/active-filter-badge.tsx",
+        "lines": "40-55",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The core abstraction at risk in this PR is the 'Category' type and the getCategoryLabel function that names it. The refactor moves the mapping into a shared lib/categories.ts, which is a good module-boundary move, but in doing so it deletes the explicit mapping table and the typed CategoryId union and replaces them with a heuristic plus an empty SPECIAL_CASES dictionary. This is a Liskov Substitution violation at the function level: known inputs like 'trustboundaries' no longer produce their previously guaranteed labels, and the contract 'every known category ID maps to its canonical label' is silently weakened. Two smaller abstraction leaks compound the concern: HorizontalBarChart now uses two different formulas for bar width and the displayed percent (so the visual and the label can disagree), and CategorySelector reserves the literal 'all' inside the value space of category IDs. Recommend reintroducing an explicit, tested mapping table as the contract with the heuristic as fallback, unifying the bar-chart percentage formula, and separating UI sentinels from the ID space before merge."
+  },
+  "raw": ""
+}

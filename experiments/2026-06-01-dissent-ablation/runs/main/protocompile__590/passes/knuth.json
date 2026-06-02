@@ -1,0 +1,84 @@
+{
+  "persona": "knuth",
+  "task_id": "protocompile__590",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil from run() likely violates the function's invariant that callers receive a non-nil *result",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the new code returns nil. The rest of the system (callers of run) almost certainly dereferences output.done, output.Fatal, or similar fields downstream. The loop invariant for run() \u2014 'returns a *result describing the completed (or pending-then-completed) task' \u2014 is now broken on the panic-recovery path. The comment 'Leader panicked but we did see a result' even contradicts itself (probably intended 'did not see'). Either retry the load in a small loop, recompute as a new leader, or return a synthetic *result carrying a Fatal error explaining the leader panic.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Race between CAS-failure and Load is still present; nil window has been narrowed but not closed",
+        "detail": "The fix observes t.result.Load() once after a failed CAS. If the leader panics and clears t.result to nil between the CAS and the subsequent Load, we return nil; if the leader panics and clears t.result to nil after the Load but before the select reads output.done, we are fine \u2014 but only because output is now a local. However, there is no stated invariant about when t.result may transition non-nil -> nil, nor any proof that, once a follower observes a non-nil output, that output's done channel will eventually be closed. Without that invariant proven, the select can block forever on a result whose leader panicked after publishing but before closing done. Please state the invariant and prove termination on the follower path.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460, 547-552",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop invariant and termination argument for the cycle-detection path are not documented",
+        "detail": "checkCycle walks caller.path twice: once to locate a matching node, once to materialize the cycle. The invariant ('the prefix of path up to and including node forms the cycle, in caller->callee order') is implicit. A two-line literate comment naming the invariant and the termination condition (node2 == node must occur because the first walk found node in the same list, assumed immutable during the walk) would let a careful reader follow this without simulating it. Also: the assumption that caller.path is not mutated concurrently during these two walks should be stated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Asymptotic cost of cycle detection is O(d^2) in path depth and may dominate hot queries",
+        "detail": "checkCycle does a linear scan to find the match, then a second linear scan from the head to rematerialize the cycle. For depth d, that is 2d comparisons in the no-match case and up to 2d in the match case \u2014 fine. But this runs on every follower entry into a pending task. If query graphs are deep and fan-in is high, the constant matters. A single walk that records prefix queries into a scratch slice and truncates at the match point would be one pass, no Reverse, and zero allocation on the no-match path. Not necessarily worth changing without a measurement, but worth noting since the prior code had the same shape \u2014 the move to a helper is a good moment to ask whether the algorithm should improve too.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment 'Leader panicked but we did see a result' appears to be a typo for 'did not see'",
+        "detail": "As written, the comment says the opposite of what the code does: the branch is taken precisely when output (the Load result) is nil, i.e., we did not see a result. Literate-programming standard: the comment is the contract. A reader trying to verify correctness from the comment alone will be misled. Fix the wording, and while you are there, state what the caller of run() is expected to do with a nil return (see P0 above).",
+        "file": "experimental/incremental/task.go",
+        "lines": "457",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowing output in the CAS-failed branch is correct but invites misreading",
+        "detail": "Inside the 'CAS failed' branch, a new local 'output' shadows the outer named return 'output'. The shadowing is intentional (we want the loaded result, not the freshly allocated one), but a reader following the function top-to-bottom will see two distinct *result values both called output and have to pause. A different name (loaded, leaderResult) would make the data flow obvious without changing behavior.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle's doc comment is a near-verbatim copy of the old inline comment; refine it for the new location",
+        "detail": "The extracted helper inherits the comment 'This is only possible if output is pending; if it isn't, it can't be in our history path.' That clause referred to an output variable that no longer exists in checkCycle's scope. The doc should be rewritten to describe the helper on its own terms: inputs (caller, q), guarantee (returns *ErrCycle if q.Key() appears in caller.path, otherwise nil), and the cycle ordering convention (Cycle[n] depends on Cycle[n+1]).",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-409",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies the race \u2014 t.result can become nil between CAS-failure and the subsequent Load on done \u2014 and the refactor of cycle detection into checkCycle is a readability win. But the proposed mitigation has UNDER-AUDITED gaps. Returning a bare nil from run() likely violates the function's postcondition for callers, and the comment \"did see a result\" contradicts the code (almost certainly a \"did not see\" typo). More importantly, no invariant is stated for the lifecycle of t.result and output.done across leader-panic, so a follower that loads a non-nil result whose done is never closed can still block forever. The extracted checkCycle deserves a literate-programming-grade doc comment naming its invariant and the assumption that caller.path is stable during the walk; the O(d) two-pass walk is acceptable but could collapse to one pass if measurement says it matters. Decision: UNDER-AUDITED, NEEDS-LITERATE-COMMENT \u2014 do not merge until the nil return and the done-channel termination invariant are nailed down."
+  },
+  "raw": ""
+}

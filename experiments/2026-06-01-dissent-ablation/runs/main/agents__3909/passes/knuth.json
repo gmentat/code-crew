@@ -1,0 +1,124 @@
+{
+  "persona": "knuth",
+  "task_id": "agents__3909",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Audio chunking invariant is broken \u2014 frames not flushed at end-of-stream",
+        "detail": "The send_task uses an AudioByteStream to accumulate 50ms frames, but the loop never sends the FlushSentinel branch's flushed frames until the for-loop iterates them. That part is fine. However, after `async for data in self._input_ch` exits, `closing_ws=True` is set but any residual samples buffered in audio_bstream that were not yet a full 50ms frame are silently dropped. The loop invariant 'all input audio bytes are forwarded to the server before WS close' does not hold. The terminal silence at the boundary may be tens of milliseconds that the VAD never sees, causing the last committed_transcript to be delayed or truncated. State the invariant explicitly and call audio_bstream.flush() once after the loop ends.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "190-215",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Range constraints documented but not validated \u2014 preconditions silently violated",
+        "detail": "The docstring states that vad_silence_threshold_secs must be in [0.3, 3.0], vad_threshold in [0.1, 0.9], min_speech_duration_ms and min_silence_duration_ms in [50, 2000]. None of these are checked at construction time. A serious reader will ask: where is the precondition? The current behavior is to forward the bad value as a query string and let the server reject the connection late, after audio has started flowing. Either validate at __init__ with a clear ValueError, or remove the bounds from the docstring. Right now the comment and the code disagree, which is the literate-programming sin.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "78-118",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "sample_rate -> audio_format mapping is unchecked; silent acceptance of invalid rates",
+        "detail": "Line ~123 does `audio_format = typing.cast(STTAudioFormat, f\"pcm_{sample_rate}\")`. The Literal type STTAudioFormat enumerates only {8000, 16000, 22050, 24000, 44100, 48000}, but typing.cast is a no-op at runtime. If a caller passes sample_rate=12345, the code constructs 'pcm_12345', passes type-check by fiat, and only fails on the server. State the invariant \u2014 sample_rate must be one of the supported values \u2014 and enforce it explicitly with a small set membership check at __init__. The cast here is a fig leaf over an unchecked precondition.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "120-124",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Speaking-state machine has no stated invariant and edge cases leak",
+        "detail": "_process_stream_event maintains a boolean self._speaking that gates START_OF_SPEECH / END_OF_SPEECH events. The invariant \u2014 'self._speaking is True iff we have emitted START_OF_SPEECH without a matching END_OF_SPEECH' \u2014 is never stated, and it is violated on several paths: (1) if the server emits committed_transcript with empty text while self._speaking is False (e.g., the very first message), END_OF_SPEECH is correctly suppressed, good; (2) if connection drops or reconnects mid-utterance, self._speaking is not reset, and on the next session the next partial may not re-issue START_OF_SPEECH because the flag is still True; (3) if a partial_transcript with empty text arrives after a final, no transition occurs but the documentation does not say that is intended. Reconnects in _run() should reset self._speaking to False, and the invariant should be written down in a literate comment above the method.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "310-380",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reconnect loop never fires \u2014 _reconnect_event is never set",
+        "detail": "_run() carefully arranges a reconnect protocol: it awaits the gather task and a separate wait_reconnect_task, and on reconnect clears the event. But grep reveals no code path that ever calls self._reconnect_event.set(). The reconnect machinery is therefore dead code, and any transient WS failure (caught as APIStatusError inside recv_task) propagates out of tasks_group.result(), exits the outer while True via the implicit exception, and the stream terminates with no retry. The complexity claim of the function (handles reconnect gracefully) does not survive audit. Either wire up reconnect on recoverable errors or delete the scaffolding so the reader is not misled.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "246-289",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "raise inside _process_stream_event will not surface as documented",
+        "detail": "On a recognized error message_type, the code logs and then raises APIConnectionError. But _process_stream_event is called from recv_task inside a `try/except Exception: logger.exception(...)` block at lines ~233-235. The raise is therefore swallowed and merely logged, defeating the intent of raising. The control-flow invariant 'on auth_error/quota_exceeded the stream terminates' does not hold. Either let the error propagate (narrow the except in recv_task to JSONDecodeError) or change the error handler to set a flag and close the WS explicitly.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "224-235, 388-405",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Per-frame base64 + json.dumps + send_str at 20 Hz is the actual hot spot, but unmeasured",
+        "detail": "For each 50ms frame the code does base64 encoding, a json.dumps of a four-field dict, and a ws.send_str. That is 20 such cycles per second per stream. Asymptotically O(n) in bytes, fine. Practically: the JSON allocation churn and a string-per-frame WS send are wasteful when the schema is fixed. A pre-built template (or msg_type=BINARY with a small length-prefixed framing) would cut allocations meaningfully. I will not recommend the change without a profile, per the motto. Flagging as ASYMPTOTICALLY-OK-PRACTICALLY-SLOW: worth measuring at high concurrency before scaling.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "204-215",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Literate comment missing \u2014 non-obvious empty-text 'commit' semantics deserves explanation",
+        "detail": "The empty-text committed_transcript-as-end-of-segment convention is meaningful protocol semantics borrowed from Cartesia. The two-line inline comment is on the right track but does not explain why partial-text final commits do NOT toggle END_OF_SPEECH, and why multiple FINAL_TRANSCRIPTs can occur within a single segment. A careful reader (or future maintainer) will not be able to recover this from the code alone. Add a short literate paragraph above _process_stream_event documenting the state machine the server is implementing on the wire, with the three message types and what each does to (text, speaking) state.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "310-380",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tests admitted broken; no automated correctness check for non-trivial state machine",
+        "detail": "The author acknowledges that test_stt.py has been broken since May 2025 and the precedent (Deepgram STTv2) also shipped without tests. Knuth's discipline: proofs catch what tests miss; tests catch what proofs miss. This module has a state machine with at least four message types, a reconnect protocol, a chunking invariant, and a docstring full of numeric preconditions. Shipping it without any automated check (even a fake-WS unit test that feeds known message sequences and asserts the emitted SpeechEvents) is below the bar for code that will outlive its author. At minimum, add a fake-WS test that exercises: partial -> partial -> committed(text) -> committed('') -> assert START, INTERIM x2, FINAL, END.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch and unused message handler",
+        "detail": "The handler for 'committed_transcript_with_timestamps' does nothing but log at debug, while the server presumably emits these for a reason (timestamps that could populate SpeechData). Either populate SpeechData with start/end_time from the payload, or remove the elif so the 'unknown message type' warning fires loudly. Right now this is a stub that quietly drops information.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/stt_v2.py",
+        "lines": "385-387",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Trailing-comma Literal looks like a tuple, mild readability hazard",
+        "detail": "`STTModels = Literal[\"scribe_v2_realtime\",]` \u2014 the trailing comma inside a single-element Literal is legal but reads as a one-element tuple to humans skimming. Drop the comma. Tiny literate-programming nit but I will mention it because the file is meant to be read.",
+        "file": "livekit-plugins/livekit-plugins-elevenlabs/livekit/plugins/elevenlabs/models.py",
+        "lines": "24",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED and NEEDS-LITERATE-COMMENT. The algorithmic core \u2014 a small state machine that translates {partial, committed-with-text, committed-empty, session_started, error} messages into START/INTERIM/FINAL/END SpeechEvents \u2014 is plausible but its invariant is nowhere stated, and several boundary cases (reconnect, residual audio buffer at stream end, raise-inside-suppressed-except, unvalidated numeric preconditions, unchecked sample_rate cast) reveal that the author has not fully proved the loop correct. The reconnect machinery is scaffolding without a trigger and should either be wired up or removed so the reader is not misled. Performance-wise the per-50ms JSON+base64+send_str cycle is plausibly the hot spot but I will not recommend changing it without a profile under realistic concurrency \u2014 flag as ASYMPTOTICALLY-OK-PRACTICALLY-SLOW for follow-up. Adding ten lines of literate comment stating the state-machine invariant, plus a small fake-WS unit test exercising the four message types, would move this from UNDER-AUDITED to RIGOROUS at low cost."
+  },
+  "raw": ""
+}

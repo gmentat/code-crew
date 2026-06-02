@@ -1,0 +1,70 @@
+{
+  "name": "generic_6",
+  "task_id": "pip__13482",
+  "review": {
+    "summary": "This PR moves `prepare_linked_requirements_more()` out of the resolver and into individual commands so that `pip install --dry-run` and `pip lock` can skip full wheel downloads. The change is well-scoped, but it removes the `req.prepared = True / needs_more_preparation = False` bookkeeping that the resolver previously did, and never reintroduces it in the call sites \u2014 which risks state drift in downstream code that reads those flags. Additionally, the dry-run code path in `install.py` still calls `prepare_linked_requirements_more`, which appears to defeat the stated optimization. The new `set_dist`/`get_dist` cache also bypasses the `metadata_directory` branch unconditionally, which could mask freshly-built metadata.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Dry-run still calls prepare_linked_requirements_more, defeating the stated fix",
+        "detail": "In install.py the new `preparer.prepare_linked_requirements_more(...)` call is placed before the pip self-version check and runs unconditionally \u2014 including when `--dry-run` is set. The PR description says dry-run should avoid downloading full wheels, but this call performs exactly that 'more preparation' (full download). The call needs to be gated on `not options.dry_run`, or moved below the dry-run early-return.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "414-423",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Resolver no longer marks requirements as prepared, leaving stale state flags",
+        "detail": "The deleted block set `req.prepared = True` and `req.needs_more_preparation = False` after preparation. The new code in commands calls `prepare_linked_requirements_more` but never updates these flags. Any downstream consumer that checks `req.prepared` or `needs_more_preparation` (e.g., to avoid duplicate work or assert invariants) will now see incorrect values, risking double-preparation or skipped installs.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_dist cache shadows metadata_directory after build",
+        "detail": "`get_dist` now returns `self._distribution` whenever it is set, short-circuiting the `metadata_directory` branch. If a requirement was first seen via PEP-658 metadata (cached dist) and later fully prepared so that `metadata_directory` is populated from a built sdist/wheel, callers will keep getting the older metadata-only distribution instead of the freshly-built one. Consider clearing `_distribution` in `prepare_linked_requirement` when full prep occurs.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "608-617",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "direct_url_from_link called with source_dir that may be None during metadata-only fetch",
+        "detail": "In `prepare.py`, `req.download_info = direct_url_from_link(req.link, req.source_dir)` runs during metadata-only fetching, before the requirement is unpacked. `req.source_dir` is typically unset at this point, and `direct_url_from_link` for VCS/local links uses it to compute commit info / paths. This could produce incorrect or incomplete `download_info` for `pip lock` / `--report` output for non-PyPI links.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "download command reorders save_linked_requirement after more preparation but loses the prior assumption",
+        "detail": "Previously `save_linked_requirement` ran before `prepare_linked_requirements_more`; now the order is reversed in download.py and wheel.py. `save_linked_requirement` relies on `req.local_file_path` being the downloaded file. After the move, `prepare_linked_requirements_more` may overwrite or finalize the file location. Verify no requirement ends up saved twice or saved from a stale path, especially when PEP-658 metadata was used.",
+        "file": "src/pip/_internal/commands/download.py",
+        "lines": "130-142",
+        "flagged_by": [
+          "generic_6"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist has no docstring and no type-narrowing for the cache invariant",
+        "detail": "`set_dist` is a one-liner with no docstring explaining when callers should invoke it versus relying on `metadata_directory`. Given that this method now takes precedence in `get_dist`, a short comment documenting that it is intended for PEP-658 metadata-only flows (and should not be called once the wheel is fully prepared) would prevent future misuse.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "generic_6"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_1",
+  "task_id": "pipecat__3410",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Renaming audio_packet_bytes to fixed_audio_packet_size is a breaking API change without deprecation",
+        "detail": "The changelog notes a rename of `audio_packet_bytes` to `fixed_audio_packet_size`, but FastAPIWebsocketParams only adds the new field. Any user passing the old kwarg will now fail (or be silently ignored via Pydantic extras). A deprecation alias with a warning is the safer migration path for a public transport param.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Non-audio payloads are dropped when fixed_audio_packet_size is set and the serializer returns non-bytes",
+        "detail": "In `_write_frame`, when `packet_bytes` is set but `payload` is a str (e.g. JSON commands like Vonage's `{\"action\":\"clear\"}`), the code falls through to the normal `await self._client.send(payload)` \u2014 that's fine. But if a bytes payload is shorter than packet_bytes, it's buffered and the function returns without sending anything, which is correct, yet there is no flush on EndFrame/disconnect, so trailing audio (<packet size) is silently lost at stream end.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Buffer is not reset on StartFrame or reconnects, risking stale PCM across sessions",
+        "detail": "`_audio_send_buffer` is cleared only on InterruptionFrame. If the transport is reused across StartFrame cycles (or the serializer changes sample rate), leftover bytes from the prior session can be prepended to the next stream and misalign framing. Clear in setup/StartFrame handling too.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "363-372, 428-435",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "VonageFrameSerializer ignores output_audio_sample_rate from StartFrame",
+        "detail": "`setup` only reads `frame.audio_in_sample_rate` and stores it as `_sample_rate`, used for both input and output. If the pipeline's output rate differs from input, resampling math for outbound audio is still driven by `frame.sample_rate` on each AudioRawFrame, which works, but the input-rate-only override is misleading and the InputParams docstring claims `sample_rate` overrides \"pipeline input sample rate\" \u2014 it should be clear it's only used for inbound conversion.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "60-66, 95-99",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DTMF parsing assumes single-character digits compatible with KeypadEntry without normalization",
+        "detail": "`KeypadEntry(digit)` is called with `str(digit)`, but Vonage may send values like `\"*\"`, `\"#\"`, or numeric ints. If Vonage ever sends a multi-character string or a key like `\"star\"`, ValueError is logged and dropped silently. Consider mapping common aliases and verifying the documented Vonage payload shape (the code already hedges with two fallback fields, suggesting uncertainty about the actual schema).",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "157-172",
+        "flagged_by": [
+          "generic_1"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Copyright header uses en-dash range that may trip license scanners",
+        "detail": "`Copyright (c) 2024\u20132025, Daily` uses a Unicode en-dash. Other files in the repo likely use an ASCII hyphen; some SPDX/REUSE tooling and grep-based audits expect ASCII. Minor but worth aligning with project convention.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "1-4",
+        "flagged_by": [
+          "generic_1"
+        ]
+      }
+    ],
+    "summary": "The PR cleanly adds a Vonage serializer and an opt-in fixed-size packetization buffer to FastAPIWebsocketTransport. Main concerns: the changelog mentions a parameter rename that isn't backward-compatible, the audio buffer isn't flushed on stream end or cleared on session start (only on interruption), and the Vonage DTMF/event handling makes some assumptions about payload shape that should be verified against the documented protocol. The serialization path correctly handles JSON vs binary, but documentation around sample-rate semantics could be tightened."
+  }
+}

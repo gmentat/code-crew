@@ -1,0 +1,115 @@
+{
+  "task_id": "agents__3608",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Close control message string disagrees with Deepgram spec: code sends {\"type\":\"Close\"} but PR description and Deepgram docs specify {\"type\":\"CloseStream\"}",
+        "detail": "The PR title, description, and the linked Deepgram SDK reference all state the required control message is {\"type\":\"CloseStream\"}, but the constant _CLOSE_MSG is json.dumps({\"type\":\"Close\"}). This is the load-bearing fact of the entire patch: if Speak v1 requires CloseStream, the server will either ignore the unknown control type or fail to acknowledge, which defeats the fix and reintroduces the 429/lingering-session symptom. Reconcile the constant against the live Deepgram Speak v1 protocol and make the code and description agree. Add a unit test asserting the exact JSON payload so this cannot drift again.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "238-239",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Single ws.receive() with 1s timeout does not establish the 'wait for server acknowledgment' postcondition the comment claims",
+        "detail": "_close_ws issues exactly one ws.receive() and treats any returned frame as proof that the server has caught up. In practice that frame is likely a binary audio chunk still in flight from before the Flush, not a CloseStream acknowledgment. The actual ack may arrive after the 1.0s timeout, which is then silently swallowed. Replace the one-shot receive with a bounded drain loop that reads until a terminal close frame (or the deadline expires) and either state the real invariant honestly or remove the comment's overclaim.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "133-138",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare `except Exception` in _close_ws swallows distinguishable failure modes including CancelledError",
+        "detail": "The blanket exception handler collapses already-closed-socket conditions, ConnectionResetError, aiohttp ClientError, programmer bugs, and asyncio.CancelledError into a single warning. During shutdown this silently absorbs cooperative cancellation and trains operators to ignore the log channel. Narrow the catch to the specific aiohttp/connection errors expected during close (ConnectionResetError, aiohttp.ClientError, asyncio.TimeoutError), re-raise CancelledError, and distinguish benign 'peer already closed' (debug) from genuine protocol failures (warning).",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-142",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Protocol-vocabulary constants reach across class boundaries; _close_ws on outer class references SynthesizeStream._FLUSH_MSG/_CLOSE_MSG",
+        "detail": "_FLUSH_MSG and _CLOSE_MSG are defined on SynthesizeStream but referenced from _close_ws on a different class. These are pure protocol data (two JSON strings), not instance state, and they are already duplicated between the STT and TTS sides where they have begun to drift (this PR is the evidence). Lift them to module scope or to a small shared Deepgram control-message module so the protocol vocabulary has a single identity and cannot drift again.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-132, 235-239",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Hardcoded 1.0s timeout is an unnamed magic constant with no stated derivation",
+        "detail": "The 1-second drain budget is essential behavior \u2014 it determines how long the client waits for Deepgram to acknowledge close \u2014 but it is inlined as a literal with no name and no justification. On a slow link the ack may arrive at 1.01s. Pull it out as a named constant (or conn_option), state the bound, and at minimum log at debug when the timeout fires so the diagnostic survives for when 429s reappear.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "135-138",
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment overstates the guarantee the close sequence actually provides",
+        "detail": "The comment claims the wait prevents race conditions and 429 errors from lingering sessions. With a one-shot receive and a silently-swallowed TimeoutError, the code provides at-best-effort drain, not a guarantee. State the invariant honestly: 'best-effort drain up to 1s; on timeout we proceed with close and accept residual 429 risk.' Otherwise the next reader assumes the race is closed when it has only been narrowed.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "128-138",
+        "flagged_by": [
+          "knuth",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Sending Flush before Close is an unjustified second behavior change",
+        "detail": "The commit message only argues for sending CloseStream, but the diff also sends a Flush control frame first. Deepgram distinguishes Flush (force-render current buffer) from Close (end session); on a teardown path Flush is either redundant or it changes audio output semantics for in-flight synthesis. Either justify Flush in the commit message or drop it. Additionally, the ordering is not analyzed: if Flush raises because the peer is already closed, Close is skipped and the broad except hides it \u2014 so the postcondition 'Close was transmitted' is not established on the very failure mode the catch exists for.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "129-132",
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "f-string used in logger.warning instead of lazy %-formatting",
+        "detail": "logger.warning(f\"...{e}\") formats the message even when the level would filter it. Use logger.warning(\"Error during WebSocket close sequence: %s\", e). Minor, but it matches the codebase convention and costs nothing.",
+        "file": "livekit-plugins/livekit-plugins-deepgram/livekit/plugins/deepgram/tts.py",
+        "lines": "140",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The single most damning issue, flagged unanimously, is that the PR description and Deepgram documentation specify the control message {\"type\":\"CloseStream\"} but the code sends {\"type\":\"Close\"} \u2014 if Speak v1 requires CloseStream, this patch does not fix the bug it claims to fix and the absence of a test that would have caught the disagreement is itself a defect. Beyond the wrong string, _close_ws complects protocol shutdown, race-waiting, and transport close: the single ws.receive() with a swallowed 1s timeout is not an acknowledgment wait, and the bare `except Exception` swallows distinguishable failures including CancelledError. Secondary cleanups: lift the protocol constants out of the cross-class reach (ideally shared with the STT side), name the 1.0s timeout, justify or drop the added Flush frame, and fix the comment that overstates the guarantee. Land after correcting the message string against the live spec, narrowing the exception handling, replacing the one-shot receive with a bounded drain, and adding a test that pins the exact JSON payload."
+  },
+  "raw": ""
+}

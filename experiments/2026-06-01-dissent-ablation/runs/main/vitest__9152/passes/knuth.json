@@ -1,0 +1,64 @@
+{
+  "persona": "knuth",
+  "task_id": "vitest__9152",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "resolve(from, '..', s) changes source-resolution semantics without a stated invariant",
+        "detail": "The fix swaps resolve(s, from) for resolve(from, '..', s). The intent is clearly to treat `from` as a file path and resolve `sources` entries relative to its containing directory, matching the source-map spec's behavior. But the one-line change carries no comment stating the invariant: 'sources are relative to the directory containing the map file (= from), not to from itself.' Future readers will look at this and wonder whether `from` is a file or a directory, and whether '..' is a hack. A literate one-line comment (\"sources[] are relative to dirname(from) per source-map spec\") would make this RIGOROUS instead of UNDER-AUDITED. Also worth verifying: if `from` is ever already a directory (no trailing filename), `..` will walk one level too high.",
+        "file": "packages/utils/src/source-map.ts",
+        "lines": "364-368",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Synchronous readFileSync on every external stack frame is unbounded and unmeasured",
+        "detail": "getSourceMap is invoked per frame during parseErrorStacktrace, and for each external file it does existsSync + readFileSync of the entire file, then a regex scan via convert-source-map. A deep stack across many external modules (common in monorepos / node_modules-heavy stacks) will re-read the same files repeatedly with no memoization, on the reporter hot path. The complexity is O(frames * filesize) with no cache. Before shipping I would (a) memoize by absolute path for the lifetime of the test run, and (b) bound or stream the read (the sourceMappingURL comment is at the file's tail; many implementations read only the last ~few KB). This is the textbook case of 'measure, then optimize the 3%' \u2014 but the absence of any cache here is not premature, it's missing.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-186",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "createConvertSourceMapReadMap returns '{}' as a sentinel without documenting why",
+        "detail": "When the referenced .map file is absent, the helper returns the string '{}' so convert-source-map parses an empty object rather than throwing. The comment says 'fallback to empty source map to avoid errors' but doesn't state the invariant the caller relies on (that convertSourceMap.fromMapFileSource will accept '{}' as a no-op map and the outer extractSourcemapFromFile will then return undefined-ish). A reader auditing this for correctness has to go read convert-source-map's source to confirm. One more sentence \u2014 'returns a valid-but-empty JSON map so the parser succeeds and the outer .toObject() yields a harmless empty map' \u2014 would close the loop. NEEDS-LITERATE-COMMENT.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "335-343",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Comment on getSourceMap states a heuristic without stating why it is sufficient",
+        "detail": "The inline comment says 'Module node exists due to Vitest fetch module, but transformResult should be empty for external modules.' That's the invariant the branch depends on \u2014 but 'should be empty' is hedged. If a future change ever populates transformResult for an externalized module (e.g. an SSR transform of an external dep), this code silently stops applying source maps for it. Worth either tightening the invariant ('externalized modules have transformResult === null because they were not transformed') or adding a fallback path. Right now the analysis is missing; the code may be correct today and quietly wrong tomorrow.",
+        "file": "packages/vitest/src/node/test-run.ts",
+        "lines": "176-184",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "convert-source-map is a heavy dep for what is effectively a regex + JSON.parse",
+        "detail": "convert-source-map is being added as a runtime dependency, plus its @types, to do two things: find a sourceMappingURL comment in a file, and resolve an external .map reference. Both are ~20 lines of code. Vite's own implementation (referenced in the comment) was the inspiration; vendoring those ~30 lines would avoid a new prod dependency on the vitest package's surface. Not a blocker \u2014 convert-source-map is stable and small \u2014 but worth noting as a dependency-discipline call. PREMATURE-OPTIMIZATION is the wrong label here; this is the inverse: premature dependency for a trivial mechanism.",
+        "file": "packages/vitest/package.json",
+        "lines": null,
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "The patch is a sound bug fix: source-map `sources[]` entries are spec'd as relative to the map file's directory, and `resolve(from, '..', s)` corrects the prior `resolve(s, from)` which discarded `from` whenever `s` was absolute-looking and otherwise resolved against the wrong base. The new getSourceMap hook correctly fills the gap for external (untransformed) modules. My concerns are rigor and readability, not correctness: the load-bearing one-liner in DecodedMap has no stated invariant; readFileSync is called per frame with no memoization and no measurement; and two helper comments hedge ('should be', 'to avoid errors') where the invariant should be stated outright. UNDER-AUDITED rather than WRONG \u2014 the algorithm is right; the analysis around it needs one more pass. The snapshot deltas (transpiled.js -> transpiled.ts with shifted line numbers) are exactly the observable evidence that the fix lands."
+  },
+  "raw": ""
+}

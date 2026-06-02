@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "openbao__2362",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Root ACL ancestry check uses HasParent, silently demoting root-namespace root tokens",
+        "detail": "In AllowOperation, the gate is `!ns.HasParent(a.root)`. If HasParent is strict-ancestor (excludes self), a root-ns token operating in the root namespace fails the check and falls through to ordinary path matching. The author has not stated the precondition (is self-inclusive? reflexive?) nor proved it. Tested-not-proved: the new test happens to pass but the invariant 'root token authorizes within its own namespace and descendants' is not established.",
+        "file": "vault/acl.go",
+        "lines": "351-361",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "NamespaceSealed is a stub returning false but is wired into live security-sensitive paths",
+        "detail": "Core.NamespaceSealed unconditionally returns false with a TODO. ListAllNamespaces and downstream callers (loadLoginMFAConfigs, countActiveTokens, metrics) now route through this. The postcondition 'sealed namespaces are excluded/handled' is unsatisfiable while the function lies. Shipping a sentinel that always says 'unsealed' is defensive-as-substitute in reverse: a hole disguised as a hook. Refuse until the predicate is honest or the callers tolerate the lie explicitly.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "ErrNamespaceSealed status mapping relies on substring matching of error text",
+        "detail": "AdjustErrorStatusCode dispatches on errwrap.Contains(err, consts.ErrNamespaceSealed.Error()) \u2014 the literal string 'namespace is sealed'. Any wrapped error whose message happens to contain that phrase is silently coerced to 503. The specification of 'sealed' is conflated with 'string match'. This is a smuggled-goto via string identity; sentinel comparison via errors.Is is the structured form.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "162-176",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace guard in NewACL widens trust boundary without stated invariant",
+        "detail": "Previously: root policy only constructible in root namespace. Now: any namespace context can construct an ACL with `root` policy, and `a.root = ns` captures whatever namespace was on the ctx. The precondition on NewACL callers is unstated. If any caller can be induced to construct with an attacker-influenced ns, the ACL self-authorizes that subtree. The proof obligation has moved to every caller and is undocumented.",
+        "file": "vault/acl.go",
+        "lines": "103-109",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllowOperation now returns empty ACLResults on FromContext error before any audit log",
+        "detail": "The namespace lookup was moved above the root fast-path and the early `return ret` on error silently denies with no diagnostic. The frame condition (what the function may do on malformed input) changed: previously a missing-namespace error would have been hit later in a known path; now the first statement determines the outcome. The reordering is not justified by an invariant and the empty-deny path is indistinguishable from a normal deny.",
+        "file": "vault/acl.go",
+        "lines": "342-346",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "NSTokenLength constructed via `\".\"[1]` is obscurantist arithmetic",
+        "detail": "Encoding the separator length as the indexed byte of a string literal is the kind of cleverness that costs reader-seconds and gains nothing. A named constant SeparatorLen = 1, or `len(\".\")`, expresses intent. Elegance is not optional; this is the opposite.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "This PR widens the ACL trust boundary (root policies now bind to whichever namespace is on the ctx at construction) without stating the new precondition, and wires a permanently-false NamespaceSealed stub into security-sensitive list paths. The control flow has been reasoned about locally but not globally: the root fast-path now depends on HasParent semantics that are nowhere stated, and the sealed-error mapping uses substring matching where errors.Is is the structured form. Tests were updated to pass; the invariants they would need to establish (root authorizes self-and-descendants, sealed namespaces are honestly reported, root construction is constrained) are not stated and not proved. REFUSED \u2014 TESTED-NOT-PROVED. What would have to change: state the precondition for NewACL with a root policy, document HasParent's reflexivity and add the case that exercises it, replace the stub with an explicit 'not yet implemented' that fails closed where safety requires it, and switch ErrNamespaceSealed dispatch to errors.Is."
+  }
+}

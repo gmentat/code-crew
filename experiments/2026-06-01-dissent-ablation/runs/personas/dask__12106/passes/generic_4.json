@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "dask__12106",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Unreachable break after raise makes loop exit after first axis only via exception, but logic is also wrong for multi-axis arrays",
+        "detail": "The `break` after `raise PerformanceWarning(msg)` is dead code. More importantly, the loop only raises on the first offending axis, but `safe_chunk_size = np.prod(zarr_write_chunks) * itemsize` computes the total shard volume regardless of which axis triggered, which may be misleading. Also, raising inside the loop before checking other axes is fine, but the dead `break` shows confused intent.",
+        "file": "dask/array/core.py",
+        "lines": "3905-3923",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Raising PerformanceWarning as an exception is a breaking behavior change, not a warning",
+        "detail": "`PerformanceWarning` is a Warning subclass but the code uses `raise`, turning a warning into a hard failure. Users with `array.chunk-size` smaller than the shard who previously got data written (perhaps unsafely) will now get an exception. The PR description even asks whether an exception is appropriate \u2014 this needs explicit decision and a deprecation path, or use `warnings.warn` instead.",
+        "file": "dask/array/core.py",
+        "lines": "3922",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Test uses pytest.raises on PerformanceWarning instead of pytest.warns, masking the API question",
+        "detail": "`test_zarr_risky_shards_warns` is named `_warns` but asserts `pytest.raises(PerformanceWarning, ...)`. This codifies the raise-as-exception behavior in tests without addressing whether warning semantics are correct. If maintainers later switch to `warnings.warn`, the test will need updating; the name/behavior mismatch is confusing.",
+        "file": "dask/array/tests/test_array_core.py",
+        "lines": "5208-5213",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Operator precedence bug risk: `not nominal_dask_chunk_size % zw == 0`",
+        "detail": "Python evaluates this as `not ((nominal_dask_chunk_size % zw) == 0)` which happens to be correct, but it is fragile and hard to read. Prefer `nominal_dask_chunk_size % zw != 0` for clarity. A future edit could easily break this by misreading precedence.",
+        "file": "dask/array/core.py",
+        "lines": "3907",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "safe_chunk_size computation may be wrong when zarr_write_chunks contains multiple axes",
+        "detail": "`np.prod(zarr_write_chunks)` multiplies tuples of tuples \u2014 `zarr_write_chunks` comes from `_get_zarr_write_chunks(z)` which returns the shard/chunk shape as a tuple of ints per axis. The product gives shard element count; multiplied by itemsize gives bytes per shard. For multi-dim arrays this is correct, but only the failing-axis size may be more informative. Also np.prod of an empty tuple returns 1.0; verify dtype handling.",
+        "file": "dask/array/core.py",
+        "lines": "3910-3912",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Only checks dw[0] \u2014 assumes all chunk sizes in axis are equal",
+        "detail": "`nominal_dask_chunk_size = dw[0]` only inspects the first chunk size along each axis. `normalize_chunks` with auto can produce uneven trailing chunks; while the leading chunk being shard-aligned is what matters for writes, the comment/error message implies all chunks are checked. Consider documenting this assumption or checking the max chunk size.",
+        "file": "dask/array/core.py",
+        "lines": "3906-3907",
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR's main correctness issue is that it `raise`s `PerformanceWarning` rather than warning, converting a previously-soft condition into a hard failure with no deprecation path \u2014 and the PR description itself flags this as an open question. There is a dead `break` statement after the raise, and `not x % y == 0` should be rewritten as `x % y != 0` for clarity. The test name says \"warns\" but uses `pytest.raises`, locking in the raise semantics before the design question is resolved. The shard-multiple rechunking logic itself is sensible; the issues are around the warning/exception API decision and a few small code-clarity bugs."
+  }
+}

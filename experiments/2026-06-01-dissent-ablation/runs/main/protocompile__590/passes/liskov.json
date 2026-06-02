@@ -1,0 +1,84 @@
+{
+  "persona": "liskov",
+  "task_id": "protocompile__590",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning nil from run() silently violates the postcondition that run produces a *result",
+        "detail": "The new branch `if output == nil { return nil // Leader panicked but we did see a result. }` introduces a path where run() returns nil. The contract of run, as evidenced by every other return site and by the caller's use of the returned *result (e.g., output.Fatal, output.done), is that a non-nil *result is always produced. Silently returning nil pushes the nil-pointer hazard up to callers of run rather than fixing it. The supertype's postcondition (`run yields a result describing success, fatal, or cycle`) is weakened by this subpath, which is exactly an LSP-style contract violation at the function level. Either synthesize a result describing the leader's panic (the correct fix) or block until a non-nil result is observable.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-459",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The comment contradicts the code and the postcondition it implies is unenforced",
+        "detail": "The comment reads `// Leader panicked but we did see a result.` but the surrounding code is taken precisely because `t.result.Load()` returned nil \u2014 i.e., we did *not* see a result. The comment appears to be a typo for `did not see`, but more importantly it documents a state (`leader panicked, no result available`) for which the module has no contract: what should waiters observe? A Fatal? A cycle? A retry? The abstract data type `task` needs an explicit invariant covering `result == nil after CAS success` (i.e., the leader cleared it on panic) and a defined postcondition for waiters who arrive in that window. Without it, every caller has to reinvent the handling.",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Race window persists: t.result can transition non-nil to nil between CAS and Load",
+        "detail": "The fix narrows the window but does not close it. Between `t.result.CompareAndSwap(nil, output)` returning false (some other goroutine is leader) and the subsequent `output := t.result.Load()`, the leader can panic and clear t.result to nil \u2014 which is exactly the race the PR claims to fix. The PR catches that case and returns nil (see prior issue), but the same race exists earlier in run() at the top branch `if output := t.result.Load(); output != nil` \u2014 between that Load and the call into waitUntilDone, the leader can still clear t.result. The previous code dereferenced t.result.Load().done at the select; the new code captures `output` early which does close that specific deref window. State the invariant explicitly in the type's contract: once a goroutine has observed a non-nil *result for this task, that *result remains valid for the lifetime of the wait (i.e., the leader must not invalidate observed results, only the atomic slot). If that invariant holds, document it; if it does not, the captured `output` does not save you.",
+        "file": "experimental/incremental/task.go",
+        "lines": "440-460",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection is skipped on the non-leader-loser path, an asymmetric contract for waiters",
+        "detail": "In the original code, cycle detection ran whenever the current goroutine was going to wait on an already-pending result (the `output != nil` branch at top). In the new code, cycle detection still runs only on that top branch. The CAS-loser branch (lines 454-460) also ends up waiting on a pending result owned by another goroutine, but it bypasses checkCycle entirely. Two callers in semantically identical waiting states now have different contracts: one may return ErrCycle, the other cannot. This is an LSP-style asymmetry between two waiter paths into the same abstract operation. Either both waiter paths run checkCycle or the asymmetry must be justified in the spec.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle now takes (*Task, *AnyQuery) as parameters but operates only on caller \u2014 receiver t is unused",
+        "detail": "The extracted method `func (t *task) checkCycle(caller *Task, q *AnyQuery) error` does not reference its receiver t at all. From an ADT perspective the method belongs to *Task (the caller's path) or it should be a free function, not a method on *task. As written, the receiver is part of the interface but unused, which is a small abstraction leak: callers reading the signature reasonably expect t's state to participate in the check, and it does not. Move it to a method on *Task or make it a package-level function `checkCycle(caller *Task, q *AnyQuery) error`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "The contract for what happens to pending waiters when a leader panics is not stated anywhere",
+        "detail": "This PR is the second time this corner of the abstract data type has needed a patch (per the linked #576 and the panic this PR fixes). The underlying issue is that the `task` ADT has no written specification for the leader-panic case: what state is t.result left in, what waiters observe, whether the panic propagates, whether the task can be re-leadered. Until that contract is written down, future fixes will keep playing whack-a-mole. Add a comment block on the task type documenting: (a) the invariants on t.result through the leader lifecycle, including the panic path; (b) the postcondition waiters can rely on; (c) the frame \u2014 what state may change between a waiter's Load and its select.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle walks caller.path twice; the contract `returns the cycle if any` permits a single pass",
+        "detail": "The first loop finds whether a cycle exists; the second loop rebuilds it. For deep call paths this is O(2n). A single pass that records nodes into a slice as it walks, then truncates at the match, would meet the same postcondition. Minor \u2014 flag because the extraction into a named method makes the cost more visible and easier to optimize once the contract is stated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The PR identifies a real race \u2014 `t.result.Load().done` can deref nil after a leader panic \u2014 but the fix is incomplete at the contract level. Returning `nil` from run() on the CAS-loser path silently weakens run's postcondition (every other return site yields a non-nil *result describing success, fatal, or cycle) and pushes the nil hazard onto callers. The underlying problem is that the task ADT has never written down its invariants for the leader-panic case: what t.result is allowed to be when, what waiters observe, and whether the second waiter path also needs cycle detection (it does, symmetrically with the first). Recommend: (a) synthesize a Fatal result for the leader-panic case instead of returning nil, (b) document the task invariants and waiter postcondition explicitly, (c) decide whether the CAS-loser branch must also run checkCycle, and (d) move checkCycle off *task since the receiver is unused. LSP-VIOLATION on run's return contract; SPEC-MISSING on the task ADT."
+  },
+  "raw": ""
+}

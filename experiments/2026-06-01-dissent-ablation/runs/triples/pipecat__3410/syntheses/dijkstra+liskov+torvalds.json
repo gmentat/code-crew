@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3410",
+  "triple_key": "dijkstra+liskov+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Packetization buffers any bytes payload, not just audio frames, corrupting non-audio binary messages.",
+        "detail": "_write_frame slices every bytes payload into fixed_audio_packet_size chunks whenever the param is set. A serializer emitting a non-audio bytes payload (control messages, headers) gets chopped into PCM-sized chunks. Gate on AudioRawFrame type rather than `isinstance(payload, bytes)` before treating bytes as PCM.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-510",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fixed_audio_packet_size has no invariant tying it to sample width/channels, silently corrupting audio on misconfiguration.",
+        "detail": "The param is an untyped int with no precondition that it be a multiple of (bytes_per_sample * channels). A value like 641 on 16-bit mono PCM produces half-sample tearing at every packet boundary and noise on the receiver. State the invariant and enforce it (assert or raise on StartFrame/setup).",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "59-66, 498-509",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Trailing audio in send buffer and resampler tail are never flushed on shutdown/EOS.",
+        "detail": "On disconnect, StopFrame, or end-of-stream, the residual _audio_send_buffer (0 to packet_bytes-1 bytes) is discarded, and the streaming resampler's internal tail is also dropped because serialize/deserialize bail when len == 0. The 'all serialized audio reaches the wire' postcondition is silently weakened. Either flush (pad with silence) or document the lossy contract.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "366-372, 495-515",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Real-time pacing claim is unsupported: send loop has no clock gate and may bypass _next_send_time bookkeeping.",
+        "detail": "The changelog promises 'real-time pacing,' but _write_frame drains the buffer in a tight `while` loop with immediate awaits and no wall-clock invariant binding emissions to _next_send_time. The early return after the loop also skips the pacing/bookkeeping the normal path performs. Either the existing pacing handles this and the comment misleads, or this path breaks it.",
+        "file": "src/pipecat/transports/websocket/fastapi.py",
+        "lines": "495-515",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DTMF deserialization accepts two undocumented digit shapes with no spec reference.",
+        "detail": "deserialize tries message.get('digit') then message.get('dtmf', {}).get('digit'). Two accepted shapes with no citation pins the contract to observation rather than the Vonage spec. Pick the documented shape and reject or shim the other with a TODO; otherwise protocol drift hides here forever.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "159-178",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PCM16 format is asserted in comments but never enforced; non-PCM16 input is resampled as garbage.",
+        "detail": "Comments in serialize/deserialize claim 16-bit linear PCM, but no check on frame.format or sample width exists. Upstream code handing 8-bit or float audio results in garbage being resampled and shipped. A one-line assert or precondition check beats a comment and would catch misconfiguration loudly.",
+        "file": "src/pipecat/serializers/vonage.py",
+        "lines": "91, 119",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on NEEDS-WORK. The Vonage serializer itself is a reasonable ADT, but the FastAPI packetization path is too eager: it treats any bytes payload as PCM, lacks an alignment invariant on fixed_audio_packet_size, drops trailing audio at shutdown, and does not actually implement the wall-clock pacing the changelog promises. Secondary issues are an under-specified DTMF digit shape and unenforced PCM16 assumptions in serializer comments. Fix the frame-type gating, state and enforce the packet-size invariant, wire flush-on-EOS, and pin the DTMF schema before merge."
+  }
+}

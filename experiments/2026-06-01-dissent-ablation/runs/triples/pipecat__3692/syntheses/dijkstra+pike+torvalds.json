@@ -1,0 +1,78 @@
+{
+  "task_id": "pipecat__3692",
+  "triple_key": "dijkstra+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Control frame carries a live FrameProcessor reference instead of a stable identifier.",
+        "detail": "The `service` field embeds a mutable FrameProcessor instance on what should be a value-typed control frame. This couples frame identity to object lifetime, makes the frame unserializable, and invites identity-vs-equality bugs. Use a stable identifier (name, id, or str) and resolve at the switcher.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Equality check `frame.service == self.strategy.active_service` is fragile.",
+        "detail": "`==` on FrameProcessor falls back to identity unless overridden; any future `__eq__` override, wrapper, or proxy silently changes routing semantics and the frame leaks downstream. Use `is` for explicit identity comparison, or compare a stable id field instead.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "234-238",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Suppression rule is incomplete for request frames targeting inactive services.",
+        "detail": "`push_frame` only consumes the frame when it targets the active service. If a `ServiceSwitcherRequestMetadataFrame` for an inactive target reaches the switcher's egress, it leaks downstream. Today's dispatcher prevents this, but the invariant is implicit. Either assert it, document it, or drop all such frames defensively.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-240",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference annotation `\"FrameProcessor\"` may not resolve at runtime.",
+        "detail": "The dataclass field is annotated as a string `\"FrameProcessor\"`. If the symbol isn't importable in `frames.py`, this only works because dataclasses don't resolve annotations eagerly \u2014 but `get_type_hints()`, schema introspection, or IDE tooling will fail. Import it properly under TYPE_CHECKING or document why a string was required.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTService now relies on an unstated handle-then-forward ordering invariant.",
+        "detail": "Both STTService and the mock do `_push_stt_metadata(); push_frame(frame)`, relying on downstream seeing metadata before the request marker and the switcher consuming the marker. If a future service reverses the order or runs standalone outside a switcher, the frame leaks. Document the contract or extract a helper.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "dijkstra",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public rename ships without a deprecation alias for `RequestMetadataFrame`.",
+        "detail": "`RequestMetadataFrame` was an exported symbol; renaming it outright breaks downstream importers on the next version bump. A one-line alias plus DeprecationWarning costs nothing and prevents triage churn for maintainers and users six months from now.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel converges on a single core complaint: the new `service` field on the control frame holds a live FrameProcessor reference where a stable identifier belongs, and the switcher then routes on `==`, an identity check that lies about what it means. All three reviewers also flag that the suppression rule now defines behavior only for active-target frames, leaving inactive-target leakage as an unstated invariant. Secondary concerns include an unresolvable forward-reference annotation, an unstated handle-then-forward ordering contract duplicated across services, and a public rename shipped without a deprecation alias. NEEDS-WORK: fix the data shape, make the identity check explicit, and write the missing invariants down."
+  }
+}

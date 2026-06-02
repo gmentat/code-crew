@@ -1,0 +1,64 @@
+{
+  "persona": "hickey",
+  "task_id": "qutebrowser__8845",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Command name in tests does not match the implementation (hyphen vs underscore)",
+        "detail": "The Python methods are defined as `quickmarks_reload` and `bookmarks_reload`, which qutebrowser exposes as commands with underscores preserved (matching the existing `quickmark_save`/`bookmark_add` style elsewhere in the file). The new .feature scenarios invoke `:bookmarks-reload` and `:quickmarks-reload` with hyphens. These names are not the same identity \u2014 one of them is wrong, and the end-to-end scenarios will not exercise the code that was added. Pick one spelling and make the command, the docs, and the test agree.",
+        "file": "tests/end2end/features/urlmarks.feature",
+        "lines": "136-139, 305-307",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Command naming complects two conventions \u2014 singular `quickmark_save` vs plural `quickmarks_reload`",
+        "detail": "The surrounding commands are `quickmark_add`, `quickmark_save`, `quickmark_load`, `bookmark_add`, `bookmark_load` \u2014 singular noun, verb. The new commands are `quickmarks_reload` and `bookmarks_reload` \u2014 plural noun, verb. That is two different naming schemes living in the same namespace for no reason the problem requires; it is incidental complexity at the command surface. Rename to `quickmark_reload` / `bookmark_reload` for a single concept of command naming, or change the others \u2014 but the system should not speak two dialects.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190, 1361",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`reload()` and `__init__()` share parsing logic but it conflates setup with read",
+        "detail": "The decomposition is mostly right: `reload()` is now the single place that turns a file (a value at a point in time) into the in-memory `marks` mapping, and `__init__` calls it. Good \u2014 that is the simple move. The remaining smell is that `_init_lineparser()` is called from inside `reload()` every time, which conflates 'set up the parser once' (identity/setup) with 'read current contents' (value extraction at time T). Consider splitting: construct the lineparser once in `__init__`, and have `reload()` re-read from disk via the existing parser. Small, but it separates two time semantics that are currently glued together.",
+        "file": "qutebrowser/browser/urlmarks.py",
+        "lines": "67-78, 102-112",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test that `reload()` clears entries removed from disk",
+        "detail": "The unit test verifies that an edited entry replaces the old one, but does not verify the case where the on-disk file has fewer entries than memory \u2014 i.e. the user deleted a quickmark in their editor and reloaded. Because `reload()` calls `self.marks.clear()` this almost certainly works, but the test does not pin the behavior. One more assertion (write file, construct, write smaller file, reload, assert marks shrank) makes the value semantics of 'reload = disk is truth' explicit. Tests should pin what the code is about, not just one happy path.",
+        "file": "tests/unit/browser/test_urlmarks.py",
+        "lines": "115-132",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`message.info` text is now part of the command's public contract via the feature test",
+        "detail": "`reload()` on the manager does the work and emits `changed`. The command then prints `Quickmarks reloaded.` This is fine \u2014 UI feedback belongs at the edge, not in the data layer \u2014 but note the e2e test asserts on the exact message string, which means the message text is now coupled to the test. If the asserted text and the emitted text ever drift, the e2e test will fail in a way unrelated to the reload behavior. Either factor the string to a single source, or accept that the string is part of the API and document that.",
+        "file": "qutebrowser/browser/commands.py",
+        "lines": "1190-1196, 1361-1367",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The core decomposition is in the right direction: `reload()` becomes the single function that takes the file (a value at time T) and produces the marks mapping, and `__init__` is now just a caller of that function. That is simple, not just easy. The real problems are at the edges \u2014 the e2e scenarios call command names (`:bookmarks-reload`, `:quickmarks-reload`) that do not match the methods defined (`bookmarks_reload`, `quickmarks_reload`), and the new commands pluralize while every neighbor is singular, so the command namespace now speaks two dialects for one concept. Minor: `_init_lineparser` is being re-run on every reload, which complects setup with read; and the unit test does not pin the 'disk is truth, including deletions' semantics that `reload()` quietly provides. Think about the names and the time semantics before merging; the data-flow refactor itself is good."
+  },
+  "raw": ""
+}

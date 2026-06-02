@@ -1,0 +1,75 @@
+{
+  "task_id": "vitest__9521",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Path comparison between changedFiles and isIncluded input lacks normalization, risking silent empty coverage",
+        "detail": "isIncluded compares slash(cleanUrl(filename)) against changedFiles.includes(filename), but VitestGit returns paths in whatever shape git produced (absolute vs relative, Windows separators). One side mismatches the other and every file falls out. Normalize both sides to a canonical (absolute, slashed, cleaned) shape at the boundary.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook duplicated across three call sites in core.ts instead of folded into start()",
+        "detail": "Three identical `await this.coverageProvider?.onTestRunStart?.()` lines follow each `_testRun.start(...)`. A future fourth call site will forget it and silently break changed-file filtering. Fold the hook into _testRun.start or a helper so there is one source of truth.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-886",
+        "flagged_by": [
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "isIncluded postcondition depends on hidden mutable changedFiles state set by a sibling lifecycle method",
+        "detail": "isIncluded was a pure function of filename plus include/exclude globs; now its answer flips depending on whether onTestRunStart has run. The globCache.clear() papers over ordering but the contract is no longer expressible from inputs alone. Document the invariant or pass changedFiles explicitly, and key the cache on filter state.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "149-181",
+        "flagged_by": [
+          "liskov",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Silent fallthrough when VitestGit returns null reports full coverage instead of failing loud",
+        "detail": "When findChangedFiles returns null (not a git repo, bad ref), changedFiles stays undefined and isIncluded falls back to reporting every file. A user who asked for changed-only coverage gets full coverage with no warning. Warn or throw when the resolution fails.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform handles boolean inputs the CLI parser never produces",
+        "detail": "The transform branches on `value === true` and `value === false`, but yargs yields strings. Either narrow the input type to string and let resolveConfig handle the boolean form, or document why programmatic callers feed this path. Dead branches invite later misuse.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "changedFiles stored as array; isIncluded does O(n) membership test on the hot path",
+        "detail": "changedFiles is a string[] and isIncluded runs `.includes(filename)` per file evaluated. With many changed files this is O(n*m) on a hot path. Build a Set<string> once in onTestRunStart for O(1) lookups; the cache-invalidation story is unchanged.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-177, 332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature is well-scoped but the file-path matching layer is fragile. Path normalization between VitestGit output and isIncluded input is undefined, risking silent empty coverage (especially on Windows), and silent fallthrough when git resolution fails reports everything instead of failing loud. The onTestRunStart lifecycle is wired by hand in three core.ts call sites \u2014 a future fourth will forget it. isIncluded's postcondition now depends on hidden mutable state set by a sibling method, and the underlying data structure (array membership on a hot path) is wrong. Tighten path normalization, consolidate the hook, fail loud on missing git data, and switch to a Set before this lands."
+  }
+}

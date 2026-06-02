@@ -1,0 +1,308 @@
+{
+  "task_id": "protocompile__645",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "Whether the reflection-based zero test is the right shape for the contract",
+        "positions": [
+          {
+            "persona": "knuth",
+            "position": "The test is sound but under-documents its actual predicate (only nullary accessors; indexed accessors covered transitively); needs a literate comment naming the coverage predicate."
+          },
+          {
+            "persona": "hickey",
+            "position": "The test is EASY-NOT-SIMPLE: it tests 'whatever methods return today' rather than the stated invariant, with hardcoded special cases for methods that don't fit; a table of explicit expectations would test the actual contract."
+          },
+          {
+            "persona": "torvalds",
+            "position": "Clever where a generated/boring table would be obvious; silently stops checking when methods get renamed or take arguments. Acceptable as-is since failure mode is coverage drop, not production break."
+          },
+          {
+            "persona": "liskov",
+            "position": "Test silently skips methods with parameters (NumIn != 1), so the LSP claim is unverified for parameterized accessors like ImportFor; either narrow the spec or extend the test."
+          },
+          {
+            "persona": "pike",
+            "position": "TOO-CLEVER: name-string special cases for IsZero/ValueNodeIndex/Context will accrete; a plain table of (type, accessor-name, expected) would be longer but obvious."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "TESTED-NOT-PROVED: a reflection sweep over currently-existing nullary methods cannot establish 'all accessors on a zero value return zero values'; testing shows presence of bugs, not absence; replace name-matching with per-type specification table."
+          }
+        ]
+      },
+      {
+        "topic": "How to fix the underlying zero-value safety problem",
+        "positions": [
+          {
+            "persona": "knuth",
+            "position": "Repeated pattern is a readability/literate-programming issue; a tiny `nilSafe[T]` helper would collapse the noise \u2014 not a correctness concern."
+          },
+          {
+            "persona": "hickey",
+            "position": "Decompose: separate the value (slice descriptor) from identity (*File handle), or push absence-check to construction/wrapping. The essential idea 'zero handle yields empty view' should live in one place."
+          },
+          {
+            "persona": "torvalds",
+            "position": "Bad taste / special-case-instead-of-eliminate-special-case: make seq.NewFixedSlice tolerate nil (it already does) or use one helper closure; eleven copies of the same five-line ritual."
+          },
+          {
+            "persona": "liskov",
+            "position": "Zero-safety responsibility belongs inside the type, not at every public boundary; consolidate into helpers so future accessors inherit zero-safety by construction; also state the contract in package and type doc comments."
+          },
+          {
+            "persona": "pike",
+            "position": "Data dominates: fix the data shape. Make Raw() return a sentinel zero *rawX so accessors don't need to know about zero at all \u2014 fix once at the root, not at fifteen leaves."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "DEFENSIVE-AS-SUBSTITUTE: per-method guards stand in for a missing type invariant; either the zero value is a valid inhabitant (document once) or it is a precondition violation (don't mask it). Adding N guards is unstructured discipline."
+          }
+        ]
+      },
+      {
+        "topic": "Whether *File nil-safety is uniform / complete",
+        "positions": [
+          {
+            "persona": "torvalds",
+            "position": "Inconsistent nil-discipline: some methods guard, some don't (IsDescriptorProto guards, InternedPath/Deprecated apparently don't); no stated rule. Either ALL or NONE."
+          },
+          {
+            "persona": "liskov",
+            "position": "Partial substitution \u2014 many *File accessors handle nil, others (InternedPath, Path, Package, ImportFor, Deprecated, AST) untouched. Worst-of-both: callers cannot rely on the new contract."
+          },
+          {
+            "persona": "pike",
+            "position": "Mixed style is the symptom \u2014 some guard early with `if x == nil { return zero }`, others build empty slices via var-then-conditional-assign. Pick one."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "Two different conventions (nil-receiver checks on File vs IsZero() on sibling types) with no stated invariant explaining why; a reader cannot derive the right predicate for the next accessor."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Nil/zero guards are open-coded across ~11-15 accessors instead of consolidated into one place",
+        "detail": "Every getter on *File (and several on *imports, Type) now carries the same five-to-six-line ritual: declare a zero local slice, conditionally populate from the receiver, then pass to seq.NewFixedSlice. The same idea 'zero handle yields empty view' is repeated at every leaf rather than expressed once. Hickey and Pike argue for fixing the data shape (separate value from identity, or make Raw()/NewFixedSlice tolerate nil). Torvalds calls it special-case-instead-of-eliminate-special-case. Liskov and Dijkstra argue the zero-safety contract belongs inside the type, not at every public boundary. Knuth treats it as a literate-programming/helper opportunity.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "180-365",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Reflection-driven zero test silently skips parameterized accessors and special-cases methods by name",
+        "detail": "testZeroAny filters on `NumIn() != 1`, so methods that take arguments (e.g. ImportFor on *File) are never exercised on a nil/zero receiver \u2014 the LSP claim is unverified for exactly the methods most likely to dereference. The harness also hardcodes `IsZero`, `ValueNodeIndex`, and `Context` as name-string special cases, encoding the spec in a switch rather than as data. A boring per-type table of (accessor, expected) would test the actual contract instead of 'whatever methods return today.'",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "90-137",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two different notions of 'absence' (nil pointer vs IsZero value) coexist with no stated rule",
+        "detail": "*File and *imports methods guard with `if f == nil`; Type, Member, Oneof, Element, ReservedName, Symbol guard with `IsZero()`. There is no documented invariant explaining which predicate applies to which type kind, so the next contributor cannot derive the right guard for a new accessor. Hickey calls this complecting two distinct absence models behind one API; Dijkstra calls it accreted complexity that structured discipline should prevent.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Nil-safety on *File is incomplete \u2014 only some accessors handle nil, no stated rule",
+        "detail": "IsDescriptorProto, Imports, TransitiveImports, Types, AllTypes, Extensions, AllExtensions, Extends, AllExtends, AllMembers, Services, Options, FeatureSet, Symbols are taught to accept a nil receiver. Others (InternedPath, Path, Package, InternedPackage, ImportFor, Deprecated, AST) appear untouched. Under the new contract nil should be substitutable everywhere, or the doc should explicitly exclude some methods. The current half-state is worst-of-both: callers cannot rely on the substitution.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "148-360",
+        "flagged_by": [
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Zero-safety contract is not written down anywhere \u2014 invariant exists only in scattered guards and a reflective test",
+        "detail": "The PR establishes a new ADT invariant ('every accessor on zero/nil receiver returns zero, no panic') but it is encoded only in code, not in package-level or type-level doc comments. Without a written spec, the test reads as an arbitrary lint and the next contributor will violate the invariant without realizing. The contract should be stated on File, Member, Type, Oneof, ReservedName, Element, Imports, Symbol.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three orthogonal patches landed as one commit",
+        "detail": "The diff bundles (1) the reflection-based zero-test harness, (2) *File nil-receiver fixes, (3) IsZero fixes on value types. Each should land independently so any one can be reverted without losing the others, and so the commit message can explain the 'why' for each (which is currently absent \u2014 PR description says what, not why).",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Transitive() uses opaque `i.files[:max(0, len(i.files)-1)]` slicing with an undocumented load-bearing invariant",
+        "detail": "The slice expression encodes 'descriptor.proto is always the last element of i.files when present.' This invariant is load-bearing across Transitive() and DescriptorProto() but is nowhere stated on the imports type. The new nil-guard does not fix this; it makes the latent assumption survive a nil receiver. For a non-nil imports with zero files the slice is empty; for one file it excludes that file regardless of whether it is descriptor.proto. A named accessor on *imports or a documented invariant on imports.files would localize the assumption.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "230-245",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AllMembers() loop invariant decoupled from iteration; index/value relationship no longer locally obvious",
+        "detail": "The previous form `i := 0; iterx.Map(f.arenas.members.Values(), ...)` made the relation between counter and arena values local. The new form declares `raw iter.Seq[*rawMember]`, conditionally assigns it under a nil-guard, then iterates while incrementing `i`. The invariant \u2014 i equals the 1-based index of the current rawMember within f.arenas.members \u2014 is correct but no longer reads top-to-bottom; a comment or an early-return for the nil case would restore readability.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "296-313",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Type.IsAny guarded with IsZero while parallel File.IsDescriptorProto guarded with nil \u2014 predicate audit incomplete",
+        "detail": "Same essential concern (predicate on a zero/nil receiver that dereferences session/builtins) gets two different fixes. The fix is local but coverage of 'all session-touching predicates' is implicit, not stated \u2014 other predicates on Type/File/Member that still panic may not be audited.",
+        "file": "experimental/ir/ir_type.go",
+        "lines": "196-199",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "DescriptorProto() conflates 'nil receiver' and 'non-nil receiver with empty files' into one nil return",
+        "detail": "After the nil guard, `imported, _ := slicesx.Last(i.files)` returns the zero imported on empty files, so both i == nil and i != nil && len(i.files)==0 yield nil with no documented distinction. The contract should state 'returns nil iff this file has no imports recorded' or the empty-files case should be handled explicitly.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "193-200",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Element.ValueNodeIndex sentinel of -1 widens postcondition without auditing callers or expressing it in the type",
+        "detail": "Doc comment was updated ('If the element is empty, this returns -1.') but the example in the same doc \u2014 `key := e.Value().MessageKeys().At(e.ValueNodeIndex())` \u2014 will index with -1 on a zero element, presumably panicking next. The return type is still `int`, so every caller must remember the sentinel; an `(int, bool)` signature or an `Ok()` would put the contract in the type rather than complecting index value with presence bit. The test also has to special-case this method by name.",
+        "file": "experimental/ir/ir_value.go",
+        "lines": "571-585",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Symbol.RawData zero-guard added only in export_test.go \u2014 production Raw() path remains a landmine",
+        "detail": "The guard `if s.IsZero() { return arena.Nil() }` is added in the test seam, implying the unexported production Raw() still panics or returns garbage on a zero Symbol. If the zero-safety contract applies to Symbol, the underlying accessor should be zero-safe, not just the test export. Currently the test passes without the type honoring the invariant.",
+        "file": "experimental/ir/export_test.go",
+        "lines": "38-42",
+        "flagged_by": [
+          "torvalds",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Reflection-test coverage predicate is narrower than the test name implies and is not stated",
+        "detail": "testZeroAny audits only nullary accessors (NumIn==1, NumOut>=1). Indexed accessors taking an argument are covered only transitively via Indexer.Len()==0. A comment naming the exact predicate ('we audit nullary accessors; indexed accessors covered via Len()==0') would make the test honest about what it proves. Today the coverage claim is broader in name than in fact.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "104-136",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "imports.Transitive/Directs closures capture i while only the slice is nil-guarded \u2014 correct by accident",
+        "detail": "The nil-guard builds an empty slice when i is nil, but closures passed to seq.NewFixedSlice still reference i.publicEnd/i.weakEnd. On a nil receiver the slice is empty so the closure never runs \u2014 correct but structurally fragile. A future change that makes the closure execute on empty input (logging, instrumentation) would dereference nil. Copy needed fields into locals or return a pre-built empty seq.Indexer when i is nil.",
+        "file": "experimental/ir/ir_imports.go",
+        "lines": "200-245",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Allocation behavior of zero-guarded accessors should be stated for hot paths",
+        "detail": "Each guarded accessor allocates a zero-valued local slice header before passing to seq.NewFixedSlice. Escape analysis should keep these on the stack and NewFixedSlice over a nil slice should produce a zero-length Indexer without heap allocation \u2014 but this is unstated. If NewFixedSlice changes, these hot-path accessors could quietly start allocating. A one-line comment on NewFixedSlice's tolerance of nil would lock in the assumption.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "213-365",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Mixed nil-receiver style within a single file: early-return vs build-empty-slice",
+        "detail": "IsDescriptorProto, FeatureSet, DescriptorProto use `if x == nil { return zero }`. The slice accessors use the longer var-then-conditional-assign path. Both work, but the inconsistency is noise; picking one style would aid readability.",
+        "file": "experimental/ir/ir_file.go",
+        "lines": "151-330",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "testZero/testZeroNode/testZeroAny three-layer indirection is hard to navigate",
+        "detail": "testZeroNode calls testZero which calls testZeroAny twice. The layering enforces zeroable and node interfaces at compile time via generics. Three names invite the reader to expect three behaviors when there is one. A comment ('these three exist only to constrain the type parameter') or folding the constraints into call sites would clarify intent.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "67-90",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "PR description states what, not why",
+        "detail": "The commit body says 'Add a zero test ... similar to ast ... fixes panics on zero values' but does not explain why zero-value safety matters here \u2014 is it a public-API concern, a fuzzer finding, a partial-parse diagnostic path? The maintainer reading git blame later will want the motivation.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test couples to method-name conventions for sentinel returns rather than a type-level property",
+        "detail": "The switch in testZeroAny matches method names IsZero, ValueNodeIndex, Context to drive different assertions. New exceptions accrete in the switch. Encoding per-type postconditions as data (a table of expected sentinel returns per method per type) would make the asymmetry explicit in the spec rather than buried in the harness.",
+        "file": "experimental/ir/zero_test.go",
+        "lines": "108-130",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "All six reviewers agree the PR is directionally right \u2014 zero-value safety on a long-lived IR API is worth establishing \u2014 and all six independently flag the same shape problem: the fix is open-coded at every leaf instead of expressed once. The strongest consensus claims are (a) the nil/IsZero guard pattern is duplicated across ~11-15 accessors and should be consolidated (helper, data-shape fix, or stated type invariant \u2014 all six flag this), and (b) the reflection-based test under-specifies the contract it claims to enforce by silently skipping parameterized accessors and hardcoding method-name special cases (all six flag this). The strongest preserved disagreement is in remedy: Hickey and Pike argue for fixing the data shape so accessors don't need to know about zero at all; Torvalds calls it bad taste solvable with one helper; Liskov and Dijkstra want a written ADT contract in doc comments; Knuth treats it as a literate-programming polish issue rather than a design flaw. Secondary concerns shared across the panel: the *File nil-safety audit is incomplete (Torvalds, Liskov, Pike, Dijkstra); ValueNodeIndex's -1 sentinel weakens a postcondition without auditing callers (five of six flag this); the Transitive()/imports.files invariant is load-bearing but undocumented (four flag this); and the Symbol zero-guard lives only in export_test.go, masking rather than fixing the production path (Torvalds, Liskov). No P0 issues; multiple reviewers (Knuth, Pike, Torvalds explicitly) say ship after light cleanup, while Dijkstra and Liskov want the contract stated before merge."
+  },
+  "raw": ""
+}

@@ -1,0 +1,70 @@
+{
+  "name": "generic_4",
+  "task_id": "metaflow__2653",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Blocking read after switch can hang indefinitely if writer never closes FIFO",
+        "detail": "Once switched to blocking mode, the inner while loop has no timeout, no poll, and no process-exit check. If the subprocess stalls or writes partial data then hangs (deadlock, signal, slow producer), the parent blocks forever. The previous code at least had poll() with timeout and check_process_exited() as escape hatches. Consider keeping poll-based waits even in the drain phase.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-145",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of check_process_exited fallback may regress macOS EOF detection",
+        "detail": "The deleted comment explicitly stated that on macOS, closed FIFOs may not produce BlockingIOError or proper EOF. The fix relies on the first read returning data so the blocking-mode switch triggers. If the writer closes before any data arrives (empty output but exit 0), the outer loop now spins forever with no content and no exit detection inside the loop body.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "146-158",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "BlockingIOError handler no longer breaks when content exists, changing semantics",
+        "detail": "Previously, a BlockingIOError with accumulated content was treated as file-closed and broke the loop. Now it just passes and continues. Combined with the removal of has_blocking_error tracking, this changes the exit conditions of the outer loop in subtle ways for the pre-first-data path. Worth verifying no path relies on the old break behavior.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "fcntl flag mutation lacks error handling and is not restored",
+        "detail": "If fcntl fails (rare but possible), the exception propagates without closing/cleaning up the fd state. Also, the descriptor's blocking state is permanently changed; if the fd is reused or shared elsewhere this could surprise callers. A try/finally or local-scope guarantee would be more defensive.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "134-135",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Dead branch: 'else' with only pass is now noise",
+        "detail": "The else branch on the empty-read path now does nothing but pass. The poll loop will simply re-enter. This is fine functionally but the comment implies waiting logic that no longer exists; consider simplifying or removing the dead branch entirely for clarity.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "150-154",
+        "flagged_by": [
+          "generic_4"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No new test exercises the race condition",
+        "detail": "The PR fixes an intermittent race but adds no regression test (even a deterministic simulation using a controlled FIFO writer that closes mid-buffer). Without one, future refactors could silently reintroduce the truncation. A targeted unit test feeding large JSON via FIFO with fast close would lock in the fix.",
+        "file": "metaflow/runner/utils.py",
+        "lines": null,
+        "flagged_by": [
+          "generic_4"
+        ]
+      }
+    ],
+    "summary": "The fix correctly identifies a real race condition and applies a reasonable POSIX-guaranteed solution (switch to blocking reads after first byte). However, the new blocking inner loop has no timeout or process-exit check, which trades one bug for a potential hang if the writer stalls. The removal of macOS-specific EOF-detection logic (via check_process_exited) could regress empty-output cases where the writer closes before any data is produced. The change is small and plausible but would benefit from preserving an escape hatch and adding a regression test."
+  }
+}

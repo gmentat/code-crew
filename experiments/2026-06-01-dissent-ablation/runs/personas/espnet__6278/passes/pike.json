@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "espnet__6278",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: code reads 'max_step' but docstring/config say 'max_steps'",
+        "detail": "The docstring lists 'max_steps' and 'val_interval', but __init__ reads trainer_args['max_step'] and run() never calls valid() between intervals correctly. Pick one name in the config and use the same key everywhere. Data shape mismatch between docs and code is the kind of bug a good struct/schema would make impossible.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "63-66",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "valid() runs every save_interval, not val_interval; the documented knob is dead",
+        "detail": "run() calls self.valid() immediately after self.train(), which exits after save_interval steps. There is no use of val_interval anywhere. Either delete the val_interval arg or actually drive validation off it. Right now the data structure (trainer_args dict) advertises a control that the algorithm ignores.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "147-160",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Specifier strings are a stringly-typed mini-language; parse once into a small record",
+        "detail": "Format 'task:name:data_json[:factor]' is split with .split() on whitespace, then parsed downstream. This is the classic case where the right data structure (a small dataclass list parsed once at CLI boundary) makes the algorithm self-evident. As written, every consumer re-parses and silently mishandles paths with colons or spaces.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-87, 196-204",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Checkpoint discovery sorts by parsing directory names; store step in the path index instead",
+        "detail": "_load_checkpoint globs 'step_*' dirs and sorts by int(name.split('step_')[-1]). One stray directory crashes training mid-run. A tiny 'latest' symlink or a checkpoints/index.json written at save time removes the string parsing entirely. Data structures, not string archaeology.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "95-115",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "get_global_grad_norm() can return None and is logged unconditionally to wandb",
+        "detail": "After step() in some DeepSpeed paths (skipped step, fp16 overflow), get_global_grad_norm() returns None. Logging None to wandb either errors or pollutes the metric. Guard it, or default to float('nan'). Same care belongs around get_lr()[0] when no param groups exist.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "180-184",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "_all_reduce_stats mutates input dict and forces sync per step; consider a filter shape",
+        "detail": "The function is a stateless transform but pretends to be in-place. Returning a new dict (or a small NamedTuple) makes the data flow obvious and removes the type-mutation footgun where stats[key] flips from local tensor to reduced tensor. Also: async_op gains nothing here since every handle.wait() happens before the next op uses it.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "118-145",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "Two real bugs sit on top of an otherwise small, readable trainer: the config key 'max_step' contradicts the documented 'max_steps', and val_interval is advertised but never used (validation actually fires every save_interval). Both are symptoms of the same thing: trainer_args is an untyped dict, so the data shape and the algorithm have drifted. The CLI also leans on a stringly-typed 'task:name:json:factor' mini-language that wants to be a small record parsed once at the boundary. Checkpoint discovery via filename-int-parsing and unconditional logging of get_global_grad_norm() are smaller traps in the same family. Strip the dict-as-API into a small dataclass and most of these vanish."
+  }
+}

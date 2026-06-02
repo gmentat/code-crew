@@ -1,0 +1,79 @@
+{
+  "task_id": "pipecat__3692",
+  "arm": "triple-A",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ServiceSwitcherRequestMetadataFrame embeds a live FrameProcessor reference instead of a stable identifier",
+        "detail": "The `service` field holds a mutable FrameProcessor instance on a value-like control frame. This complects value with runtime identity, breaks serialization/logging, creates lifecycle/GC coupling, and invites equality surprises. Carry a stable service id or name string and resolve at the switcher edge.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Targeting check `frame.service == self.strategy.active_service` relies on default object identity equality",
+        "detail": "FrameProcessor falls back to identity-based __eq__. If a subclass overrides equality, or the active service is wrapped/replaced, the suppression silently fails open and the control frame leaks downstream. Use `is`, or compare by a stable id, and document the invariant explicitly.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-238",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward-reference annotation `\"FrameProcessor\"` is unresolved and unimported in frames.py",
+        "detail": "The string annotation works at dataclass construction time but any `get_type_hints`, pydantic adapter, or IDE introspection will fail to resolve it. It also signals an entangled module boundary that a string service id would make honest. Add a TYPE_CHECKING import or switch the field to a value type.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTService now re-pushes the request frame instead of consuming it, splitting the protocol",
+        "detail": "STTService and its mock call `_push_stt_metadata()` then `push_frame(frame)`, relying on the switcher to swallow on target match. Outside a switcher the frame escapes downstream, and the handle-then-re-push contract is undocumented. Either consume at the service or route only at the switcher \u2014 not both.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Public rename ships without a backward-compatible deprecation alias",
+        "detail": "`RequestMetadataFrame` was an exported symbol; renaming it outright breaks downstream imports on the next version. A one-line alias plus a DeprecationWarning costs nothing and avoids triaging import errors for users. The changelog entry alone is insufficient for a public API break.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1740",
+        "flagged_by": [
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Non-active-target path and suppression invariant are implicit, with no test or comment",
+        "detail": "The new branch returns only on match; the mismatch path passes through downstream by inference. The implicit invariant \u2014 \"the request frame only arrives here after being handled by the active service\" \u2014 needs a literate one-line comment and at least one explicit test, otherwise a future broadcast refactor will cause duplicate emission.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "222-238",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "The panel unanimously identifies the same core taste flaw: a control frame should carry a stable identifier, not a live FrameProcessor handle. This complecting of value with runtime identity, combined with default-equality-based targeting in the switcher, is the principal NEEDS-WORK item. Secondary concerns also align across reviewers \u2014 an unresolved forward-reference annotation, a split handle-then-re-push protocol between STTService and the switcher, missing back-compat alias for the public rename, and an under-documented suppression invariant. The rename direction and test coverage are sound; the implementation reached for the easy answer rather than the simple one."
+  }
+}

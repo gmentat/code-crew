@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "pipecat__3328",
+  "review": {
+    "summary": "This PR updates SpeechmaticsSTTService for v0.0.99: adds a new TurnDetectionMode.FIXED (now the default), adds a split_sentences option, and switches the frame trigger for finalization from UserStoppedSpeakingFrame to VADUserStoppedSpeakingFrame. The behavioral default change is a breaking change for existing users, and there is a mismatch between turn_detection_mode (the public enum) and end_of_utterance_mode (the internal enum used in the VAD check) that warrants verification. The frame-type switch may also drop finalization in deployments using external/Pipecat VAD that emit UserStoppedSpeakingFrame but not VADUserStoppedSpeakingFrame.",
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Default turn_detection_mode change from EXTERNAL to FIXED is a silent breaking change",
+        "detail": "Line 211 changes the default from EXTERNAL to FIXED. Existing users who relied on Pipecat's external endpointing (the prior default) will silently get different turn-detection semantics on upgrade, potentially breaking interruption/turn behavior in production pipelines. This should be called out explicitly in the changelog as a breaking change and ideally gated by a major/minor version bump.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "208-211",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Finalization switched to VADUserStoppedSpeakingFrame may break external-VAD deployments",
+        "detail": "process_frame now finalizes only on VADUserStoppedSpeakingFrame instead of UserStoppedSpeakingFrame (line 680). Pipelines that emit only UserStoppedSpeakingFrame (e.g., turn-taking from non-VAD sources or manual interruption controllers) will no longer trigger client.finalize(), so transcripts may never finalize in TurnDetectionMode.EXTERNAL/FIXED. Verify all upstream emitters of stop-speaking signals also emit the VAD variant.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "677-685",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Public TurnDetectionMode.FIXED has no mapping to internal EndOfUtteranceMode.FIXED",
+        "detail": "The new TurnDetectionMode.FIXED is added (line ~76), and _enable_vad now checks EndOfUtteranceMode.FIXED (lines 337-340). However, the diff doesn't show how TurnDetectionMode is translated into end_of_utterance_mode/EndOfUtteranceMode. If the mapping logic elsewhere doesn't add a FIXED branch, the default config will silently fall through to VAD-enabled behavior, contradicting the PR intent.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "334-340",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "split_sentences default of False always overwrites speech_segment_config",
+        "detail": "Lines 516-518 unconditionally assign config.speech_segment_config = SpeechSegmentConfig(emit_sentences=params.split_sentences or False). This clobbers any existing speech_segment_config that the Speechmatics SDK or preset may have set with other fields, and forces emit_sentences=False even when the user did not opt-in. Consider only setting this when params.split_sentences is not None, or preserving other fields.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "516-519",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Commented-out start_processing_metrics call moved but not removed",
+        "detail": "In _handle_start_of_turn the `# await self.start_processing_metrics()` line was relocated from after the interruption call to before broadcast_frame. Either the metric should be wired up properly or the dead comment should be deleted. Leaving moved commented-out code is confusing for future maintainers.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "621-626",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Changelog split_sentences default contradicts code default",
+        "detail": "changelog/3328.added.md says split_sentences defaults to False, but the InputParams field is typed `bool | None = None` (line 240). The user-visible default in the model is None, which is then coerced to False at config time. Either type as `bool = False` for consistency or document the None-vs-False distinction.",
+        "file": "src/pipecat/services/speechmatics/stt.py",
+        "lines": "240, 516-518",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "dissents": []
+  }
+}

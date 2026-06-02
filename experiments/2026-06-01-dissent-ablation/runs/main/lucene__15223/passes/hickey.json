@@ -1,0 +1,74 @@
+{
+  "persona": "hickey",
+  "task_id": "lucene__15223",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Two formats with the same on-disk NAME 'Lucene99ScalarQuantizedVectorsFormat' now live in both backward_codecs and core packages until the core copies are deleted",
+        "detail": "The rename moves these classes to backward_codecs but keeps the same static NAME string. Until the originals under lucene/core/src/java/org/apache/lucene/codecs/lucene99 are fully removed (the diff is truncated, so unclear), there are two classes that identify themselves with the same name on disk. That is identity-vs-value complecting: the on-disk name is a value that identifies the format, and there must be exactly one class that owns that value at a time. Verify the old core copies are deleted in the same commit and that the SPI registration in core no longer lists them.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99ScalarQuantizedVectorsFormat.java",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fieldsWriter throws UnsupportedOperationException instead of the format being structurally read-only",
+        "detail": "Making a writer method throw at runtime is the easy fix; the simple fix is to not have a writer surface at all. KnnVectorsFormat conflates read and write concerns in one type, and this PR papers over that by making half the contract a landmine. A ReadOnlyKnnVectorsFormat base (or splitting the format into reader-format and writer-format) would express the actual fact: these legacy codecs are values you can read, not identities you can write through. The current shape will surface as production NPE-equivalents whenever something instantiates the old format and tries to index.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Lucene99HnswScalarQuantizedVectorsFormat constructor still accepts numMergeWorkers and mergeExec parameters that it now silently discards",
+        "detail": "The constructor signature still takes numMergeWorkers and ExecutorService mergeExec, but the fields were removed and fieldsWriter throws. Callers passing real executors will believe they configured something; they did not. Either narrow the constructor to the parameters the read-only path actually uses (similarity, bits, compress, confidenceInterval), or document loudly that these arguments are accepted only for source compatibility and have no effect. Right now the type signature is a lie about what the object does.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "126-135",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Visibility downgrade of protected to package-private fields in OffHeapQuantizedByteVectorValues breaks the subclass contract for any external extender",
+        "detail": "OffHeapQuantizedByteVectorValues is a public abstract class; its protected fields are now package-private. Inside backward_codecs that may be fine because the only subclasses live in the same package, but the class itself remains public and someone outside the package could have subclassed it before the move. For a backward-compat module this is a small but real break of the protected contract. Either keep them protected or make the class package-private to match the new field visibility \u2014 pick one consistent altitude.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/OffHeapQuantizedByteVectorValues.java",
+        "lines": "39-53",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Two RW test formats (V0 and V1) plus a base RW format encode version-as-class-identity instead of version-as-value",
+        "detail": "Lucene99RWV0HnswScalarQuantizationVectorsFormat and Lucene99RWV1HnswScalarQuantizationVectorsFormat are two classes that differ only in which writer version they exercise. That is version (a value, a number) complected into identity (a class). A single test format parameterized by a version int, or a builder that takes the version as data, would express the same intent without doubling the surface area. Acceptable for test code, but it is the early sign of a pattern that bites in core later.",
+        "file": "lucene/backward-codecs/src/test/org/apache/lucene/backward_codecs/lucene99/Lucene99RWV1HnswScalarQuantizationVectorsFormat.java",
+        "lines": null,
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Lucene99HnswScalarQuantizedVectorsFormat lost its @Deprecated annotation in the move",
+        "detail": "Before the move the class was @Deprecated; in the new location the annotation is gone. The fact 'this is legacy' is a value about the format that should travel with it. Being in the backward_codecs package is a hint, not a tool-checkable signal. Restoring @Deprecated (or a since-tagged variant) gives the compiler and IDEs a chance to warn callers who are still constructing the legacy format directly.",
+        "file": "lucene/backward-codecs/src/java/org/apache/lucene/backward_codecs/lucene99/Lucene99HnswScalarQuantizedVectorsFormat.java",
+        "lines": "46",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "This PR moves the Lucene99 scalar-quantized formats into backward_codecs, which is the right direction \u2014 those classes represent old on-disk values and should be readable but not writable. The complecting that remains: KnnVectorsFormat still entangles read and write concerns in one type, so the read-only-ness has to be expressed by throwing UnsupportedOperationException from fieldsWriter, and the constructor still accepts merge-executor parameters that no longer do anything. That is easy (familiar Java pattern) but not simple \u2014 a ReadOnlyKnnVectorsFormat split or a narrower constructor would make the actual fact (this is a value you can read) explicit. The test scaffolding doubles into V0/V1 classes that encode a version number as class identity rather than as data, and the on-disk NAME string is briefly duplicated between core and backward_codecs during the transition; both worth a second look before merging."
+  },
+  "raw": ""
+}

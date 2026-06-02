@@ -1,0 +1,70 @@
+{
+  "name": "dijkstra",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil result silently propagates an unreasoned failure mode upward",
+        "detail": "When CompareAndSwap fails and t.result.Load() returns nil, the function returns nil. No caller invariant in run's signature states that *result may be nil; every other branch returns a non-nil output. The comment 'Leader panicked but we did see a result' is itself ungrammatical and unreasoned \u2014 should it be 'did not see'? The postcondition is unstated and almost certainly violated downstream.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "The race window between CompareAndSwap and Load is not reasoned about, only patched",
+        "detail": "The author has identified one nil-deref symptom and inserted a guard. But the invariant relating t.result's lifecycle (nil -> output -> nil-on-panic -> ?) is never stated. Can the leader store, panic-clear, and a new leader CAS again between our failed CAS and our Load? Without a stated invariant on t.result's state machine, this fix is TESTED-NOT-PROVED at best.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle-detection branch still dereferences t.result.Load() with the same nil hazard it purports to fix",
+        "detail": "The early branch `if output := t.result.Load(); output != nil` (line ~441) loads once, then calls waitUntilDone with that captured output \u2014 good. But this only works if the captured non-nil output is still a live result. If the leader panics and clears t.result after the load, the done channel may belong to an abandoned result. The frame condition on result lifetime is unstated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-468",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle extraction is cosmetic and obscures the original guard condition",
+        "detail": "Extracting the cycle scan into a method is fine, but the original code's structural comment 'only possible if output is pending' now lives on the method rather than at the call site, where the precondition (t.result.Load() != nil) must hold. A reader at the call site no longer sees why this check is safe to run here and not elsewhere.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Leader panic recovery is the actual root cause and is left undisclosed",
+        "detail": "The PR description says 'the leader goroutine panics, it sets t.result to nil to clean up.' That mechanism is the source of the hazard and is not shown in this diff. A correctness fix that does not exhibit the cleanup path it guards against cannot be reasoned about. Where is the defer that nils t.result, and what is its postcondition?",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No test exhibits the panic-during-leader-execution scenario",
+        "detail": "A race fix unaccompanied by a deterministic reproducer (or at minimum a go test -race exercise that forces leader panic with a waiter contending) is REFUSED on discipline grounds. Testing does not prove absence of bugs, but the absence of even one test for the specific interleaving means the claim 'fixed' rests on inspection of code whose invariants are unstated.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "This patch addresses a symptom \u2014 a nil dereference of t.result.Load().done \u2014 without stating or reasoning about the invariant governing t.result's lifecycle across leader panic, CAS failure, and waiter contention. The fix introduces a new failure mode (returning a bare nil *result) whose postcondition is undocumented and almost certainly violates caller expectations. The cycle-detection refactor is cosmetic and moves the structural precondition away from its call site. Verdict: TESTED-NOT-PROVED and DEFENSIVE-AS-SUBSTITUTE. Refuse until the author can state, in writing, the state machine of t.result and the postcondition of run on every exit path."
+  }
+}

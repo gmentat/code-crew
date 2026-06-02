@@ -1,0 +1,89 @@
+{
+  "task_id": "stylelint__8985",
+  "mode": "consensus",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "summary": "The panel agrees the fix is correct and small in scope, but the implementation leaks abstraction: `findHue` conflates relative-color syntax detection with hue indexing via integer offset arithmetic, and the function lacks a stated invariant/precondition. Five of six reviewers flag the offset arithmetic (`0 + offset`, `2 + offset`) as obscure and recommend either a slice-based decomposition or a named index. Four reviewers independently flag suspicious test fixture payloads where `fix.text: '0deg'` appears inconsistent with the stated fixed output (e.g., `10` -> `10deg`); this needs verification before landing. Coverage gaps for nested relative colors, `none`/`calc()` channels, and `var()` origins are also noted. Ship-safe, but warrants a refactor pass and test-payload audit.",
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Test fixture `fix.text: '0deg'` is inconsistent with the stated fixed output (e.g., `10` -> `10deg`)",
+        "detail": "Multiple new reject cases declare `fix: { range: [31, 32], text: '0deg' }` while the `fixed` output clearly appends `deg` after existing digits (e.g., `oklch(from red l c 10)` -> `oklch(from red l c 10deg)`). The actual edit appears to be `range: [33, 33], text: 'deg'`, not a character-replacement producing `0deg`. Either the test harness ignores `fix.text` when `fixed` is present (making the field misleading dead weight), or the fixtures are internally inconsistent and encode an incorrect fixer behavior. Verify against the actual fixer and either correct the fixture or document the fix-record contract.",
+        "file": "lib/rules/hue-degree-notation/__tests__/index.mjs",
+        "lines": "148-200",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`findHue` complects relative-color detection with hue indexing; offset arithmetic should be a slice-based decomposition",
+        "detail": "The fix threads an `offset` integer through `args[0 + offset]` and `args[2 + offset]`, conflating 'detect the `from <origin>` prelude' with 'index the hue channel'. A cleaner decomposition extracts the channel list first (`const channels = isRelativeColor ? args.slice(2) : args;`) so hue selection reduces to `channels[0]` or `channels[2]` with no arithmetic. This localizes the relative-color concern, removes the magic `2`, and makes the postcondition self-evident from the code shape rather than reconstructed by the reader.",
+        "file": "lib/rules/hue-degree-notation/index.mjs",
+        "lines": "100-116",
+        "flagged_by": [
+          "hickey",
+          "liskov",
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "`findHue` lacks a stated invariant/precondition; relative-color detection is an unspecified string sniff",
+        "detail": "The function would benefit from a one-line invariant comment stating that `args[offset..]` is the channel list and `args[0..offset-1]` is the optional `from <origin-color>` prelude. The detection `args[0]?.value.toLowerCase() === 'from'` is a positional string compare encoding a CSS spec fact (relative-color syntax) implicitly, and the assumption that the origin color occupies exactly one `args` slot is load-bearing but undocumented. State the precondition (or extract `isRelativeColor(args)` / `RELATIVE_COLOR_KEYWORD` as a named predicate/constant colocated with `HUE_FIRST_ARG_FUNCS`).",
+        "file": "lib/rules/hue-degree-notation/index.mjs",
+        "lines": "100-117",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "liskov",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "`args[0 + offset]` is arithmetic noise; collapse to a single computed start index",
+        "detail": "`return args[0 + offset];` is constant-folding the reader has to perform. Replace with either `args[offset]` and `args[2 + offset]`, or better, a named `const hueIndex = isRelativeColor ? 2 : 0;` (and `+ 2` for the third-arg branch), or a `channel(i) => args[i + offset]` helper. Eliminates the visual symmetry trick and makes the intent legible.",
+        "file": "lib/rules/hue-degree-notation/index.mjs",
+        "lines": "108-114",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test coverage missing for nested relative colors, `none`/`calc()` channels, and `var()` origins",
+        "detail": "The new tests cover lowercase `from`, one uppercase `FROM`, and one nested origin `oklch(from hsl(270deg 60% 50%) l c h)`. They do not exercise (a) nested relative colors like `oklch(from oklch(from red l c h) l c h)`, (b) `none` keyword in the hue slot under relative-color syntax, (c) `calc(...)` in the hue slot, (d) `var(--c)` as the origin color, or (e) `from` appearing in a non-leading position. Add a few rows to pin down the invariant that offset=2 always lands on the channel list.",
+        "file": "lib/rules/hue-degree-notation/__tests__/index.mjs",
+        "lines": "65-79, 269-277",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Tighten the type check on `args[0]` to guard against non-word nodes",
+        "detail": "`args[0]?.value.toLowerCase() === 'from'` is safe today because `args` is filtered to `word|function` (both have string `.value`), but the safer and more intention-revealing form is `args[0]?.type === 'word' && args[0].value.toLowerCase() === 'from'`. This makes the precondition visible at the call site and prevents a future filter refactor from silently breaking the check. Also resolves the question of whether the optional chain defends a reachable empty-`args` case or is a substitute for a stated precondition.",
+        "file": "lib/rules/hue-degree-notation/index.mjs",
+        "lines": "104-105",
+        "flagged_by": [
+          "knuth",
+          "dijkstra"
+        ]
+      }
+    ],
+    "dissents": []
+  },
+  "raw": ""
+}

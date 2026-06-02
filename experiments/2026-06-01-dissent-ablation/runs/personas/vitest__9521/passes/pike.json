@@ -1,0 +1,70 @@
+{
+  "name": "pike",
+  "task_id": "vitest__9521",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "changedFiles path comparison may fail due to absolute-vs-relative shape mismatch",
+        "detail": "VitestGit.findChangedFiles and config.related typically return absolute paths, while isIncluded receives a filename that gets slashed and cleanUrl'd but not normalized to the same root. The membership check `this.changedFiles.includes(filename)` is a raw string compare on two data shapes that may not align across providers/platforms. Pick one canonical shape (absolute, slashed, cleaned) at the boundary and store it.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "168-178",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Wrong data structure: array membership test on every isIncluded call",
+        "detail": "changedFiles is a string[] and isIncluded does `.includes(filename)` per file. With many files this is O(n*m), and isIncluded is on the hot path. The right data structure is a Set<string> built once in onTestRunStart. Pick the right structure and the lookup becomes self-evident: O(1) and the cache invalidation story stays the same.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "175-177, 332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "onTestRunStart hook wired in three call sites; missing one silently breaks coverage.changed",
+        "detail": "The new lifecycle is invoked manually after each `_testRun.start(...)` in core.ts (three places). That is exactly the kind of duplicated coupling Pike's rules warn about: the data (\"run started\") is being broadcast by hand. Move the call into `_testRun.start` itself, or have generateCoverage lazily resolve changedFiles. One source of truth, no fourth caller to forget.",
+        "file": "packages/vitest/src/node/core.ts",
+        "lines": "607-610, 749-753, 880-886",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "CLI transform duplicates yargs/boolean coercion that already exists elsewhere",
+        "detail": "The inline transform handling 'true'/'yes'/'false'/'no' is a small filter that probably already exists for the sibling `--changed` option. Compose with the existing helper rather than re-implementing string-to-bool here; otherwise the two options drift on accepted spellings.",
+        "file": "packages/vitest/src/node/cli/cli-config.ts",
+        "lines": "309-322",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Inheritance from test.changed is implicit and asymmetric",
+        "detail": "resolveConfig copies `resolved.changed` into `resolved.coverage.changed` only when undefined. That is fine, but the data flow is hidden: a reader of coverage.ts must know coverage.changed may have been silently filled from test.changed, while onTestRunStart still also reads ctx.config.changed as a fallback. Pick one: either always normalize at resolve time, or always branch at use time. Two layers doing the same job is the framework smell.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "332-345",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "cleanUrl added to isIncluded changes cache key semantics for all callers",
+        "detail": "Adding cleanUrl to the cache key is a quiet behavior change unrelated to this feature: any caller passing a URL with a query string now collapses to the bare path in globCache. Probably correct, but it belongs in a separate commit with its own test, not bundled into a feature PR. Small tools doing one thing each.",
+        "file": "packages/vitest/src/node/coverage.ts",
+        "lines": "151-153",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The feature is the right shape: a coverage-time filter applied to a stream of filenames. The data structure is wrong, though - changedFiles should be a Set, not an array searched on every isIncluded call. The lifecycle hook is wired through three manual call sites in core.ts, which is the kind of duplication that quietly rots; consolidate it. cleanUrl creeping into the cache key is an unrelated behavior change bundled in. Inheritance from test.changed is done in two places (resolveConfig and onTestRunStart fallback) - pick one. Otherwise small, composable, and on the right side of Pike's rules."
+  }
+}

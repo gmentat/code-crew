@@ -1,0 +1,79 @@
+{
+  "task_id": "espnet__6278",
+  "triple_key": "liskov+pike+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "trainer_args key mismatch: docstring says max_steps but code reads max_step",
+        "detail": "Docstring documents max_steps, val_interval, deepspeed_config but __init__ reads trainer_args['max_step']. First launch with a documented config will KeyError. Pick one spelling, validate required keys at __init__, and fix the other side.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "55-66",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "val_interval is advertised in the config but never used; validation actually runs every save_interval",
+        "detail": "run() calls self.valid() immediately after self.train() which exits at save_interval steps. val_interval is documented as a control knob but is dead code. Either delete the parameter or drive validation off it. The data structure advertises a knob the algorithm ignores.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "147-167",
+        "flagged_by": [
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Checkpoint resume scans step_* by name parse with no atomicity guard against half-written dirs",
+        "detail": "_load_checkpoint globs step_* and picks the highest int(name.split('step_')[-1]). A crashed save leaves a partial directory that becomes the resume target; one stray dir crashes the parse. Write a 'latest' marker on successful save or maintain a checkpoints index, and fail loudly when resume_path is explicit but missing.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "94-128",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "_all_reduce_stats is both in-place and rebinding; ownership/frame condition is confusing",
+        "detail": "The function all_reduces tensors in place, then reassigns stats[key] = stats[key] / world_size, replacing entries. Callers holding the original tensor see partial mutation. Make it either pure (return new dict) or clearly destructive with a stated frame, not both.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "118-160",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Specifier mini-language is stringly-typed and whitespace-split, breaking on paths with spaces or colons",
+        "detail": "Format 'task:name:data_json[:factor]' is documented only in argparse help; valid_*_specifier.split() splits on whitespace while train uses the specifier whole. One space in a data_json path produces bogus specs. Parse once into a small dataclass at the CLI boundary and reuse everywhere.",
+        "file": "espnet2/speechlm/bin/train.py",
+        "lines": "44-87, 187-204",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "run() loop boundaries are wrong: missed final save and double-validation on partial windows",
+        "detail": "Outer while loop calls train() (advances by save_interval), then valid(), then save. If global_step already equals max_step on resume the loop exits without saving final state; if save_interval does not divide max_step the last window validates/saves at an odd step. Make boundary semantics explicit and deterministic.",
+        "file": "espnet2/speechlm/trainer/deepspeed_trainer.py",
+        "lines": "162-176",
+        "flagged_by": [
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "Panel consensus: the PR lands a reasonably shaped DeepSpeed trainer plus launcher, but ships with two P0 contract bugs around trainer_args \u2014 code reads max_step while docs say max_steps, and val_interval is advertised but never honored (validation fires every save_interval). Checkpoint resume scans step_* directories by name with no atomicity guard, silently resuming from half-written dirs. Secondary issues cluster around stringly-typed specifier parsing, ambiguous in-place mutation in _all_reduce_stats, and brittle run() loop boundaries. Root cause across most findings: trainer_args and CLI specifiers are untyped dicts/strings; lifting them into small typed records would eliminate most of these traps. NEEDS-WORK before merge."
+  }
+}

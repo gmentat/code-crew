@@ -1,0 +1,70 @@
+{
+  "name": "generic_5",
+  "task_id": "pipecat__3692",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Breaking rename of public RequestMetadataFrame without backward-compatible alias",
+        "detail": "RequestMetadataFrame was an exported dataclass in pipecat.frames.frames. Renaming it without keeping an alias (e.g., RequestMetadataFrame = ServiceSwitcherRequestMetadataFrame) will break any external code, plugins, or services that import it. The changelog notes the rename, but a deprecation shim would be more responsible for a public API.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1737",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Dataclass field typed as string-forward-ref FrameProcessor may not resolve at runtime",
+        "detail": "`service: \"FrameProcessor\"` is a forward reference but FrameProcessor isn't imported in frames.py. If anything calls get_type_hints() or a serializer inspects annotations (common for dataclass tooling/logging), it will fail with NameError. Either import FrameProcessor under TYPE_CHECKING + ensure annotations are lazy, or use `Any`.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frame holds a strong reference to a FrameProcessor instance, risking cycles and serialization breakage",
+        "detail": "Embedding a live FrameProcessor inside a Frame is a structural shift \u2014 frames previously carried data, not processor handles. This complicates queuing, logging, repr, equality, and any future serialization (e.g., observability dumps). Consider passing a service name/id string and looking it up, instead of the processor object.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Switcher only suppresses the frame when service matches active; stale targets leak downstream",
+        "detail": "In push_frame, if frame.service != active_service (e.g., user switched again before propagation), the ServiceSwitcherRequestMetadataFrame escapes the switcher to downstream processors that aren't supposed to see this internal control frame. Previously all RequestMetadataFrames were suppressed. Consider always suppressing when the targeted service is any managed service.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "232-237",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Equality check `frame.service == self.strategy.active_service` relies on default dataclass equality semantics",
+        "detail": "ServiceSwitcherRequestMetadataFrame is a @dataclass without eq=False, so dataclass-generated __eq__ will compare all fields. Service comparison via `==` should be identity (`is`) to avoid accidental field-based equality on processors. Minor but worth tightening.",
+        "file": "src/pipecat/pipeline/service_switcher.py",
+        "lines": "236",
+        "flagged_by": [
+          "generic_5"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "STTService now pushes the request frame downstream \u2014 verify no downstream processor reacts to it",
+        "detail": "Previously RequestMetadataFrame was consumed by STTService; now it is forwarded after metadata. If any downstream processor matches on isinstance(ServiceSwitcherRequestMetadataFrame), behavior changes. The switcher catches it for the active service path, but in pipelines where STTService isn't behind a ServiceSwitcher, the frame now escapes to the rest of the pipeline.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "generic_5"
+        ]
+      }
+    ],
+    "summary": "The rename is mechanically clean and tests are updated, but the change has API-compatibility and structural concerns. The biggest issues are the breaking rename of a public frame without a deprecation alias, embedding a live FrameProcessor instance into a Frame (a departure from the data-only frame pattern), and the use of a string forward-reference for an unimported type. The push_frame suppression logic also has a small gap when frame.service doesn't match the active service, allowing internal control frames to leak downstream."
+  }
+}

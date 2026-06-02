@@ -1,0 +1,70 @@
+{
+  "name": "knuth",
+  "task_id": "protocompile__590",
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning a bare nil result from run() when leader panicked breaks the post-condition that run never returns nil",
+        "detail": "The new branch `if output == nil { return nil }` violates the implicit invariant of run(): it returns a *result. Callers downstream (e.g. anything that dereferences output.done, output.Fatal, or output.value) will now panic on nil instead of the prior nil-deref on t.result.Load().done. The fix swaps one nil-deref for another, further upstream. State and document the invariant: what does a nil return mean to the caller chain?",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "TOCTOU race remains between CompareAndSwap failure and the subsequent t.result.Load()",
+        "detail": "Between `CompareAndSwap(nil, output)` failing and `t.result.Load()` on the next line, the leader can panic and clear t.result back to nil. The new check catches that snapshot, but offers no proof of progress or termination: the comment even says 'Leader panicked but we did see a result' which contradicts the code path (output is nil here). Either retry the CAS loop or state the invariant precisely; the current code is one snapshot away from the same bug.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Comment is wrong: says 'we did see a result' on the path where output is nil",
+        "detail": "The comment reads 'Leader panicked but we did see a result' on the `return nil` branch, which is precisely when output is nil and we did NOT see a result. For literate-grade code in a concurrency primitive, the comment must match the branch. Suggest: 'Leader panicked and cleared t.result before we could observe it; abandon this wait.'",
+        "file": "experimental/incremental/task.go",
+        "lines": "458",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop invariant of the cycle-detection walk is not stated in checkCycle",
+        "detail": "checkCycle does a two-pass walk over caller.path to (a) detect a repeated Key() and (b) reconstruct the cycle. The invariant \u2014 'on the second walk, nodes are appended in caller-to-callee order up to and including the matching node' \u2014 is load-bearing for the reverse step and the appended AsAny(q). State it in one sentence; the current comments explain individual steps but not the invariant that makes the reversal correct.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection is O(depth^2); acceptable but should be documented",
+        "detail": "Two nested Walk()s over caller.path make this O(d^2) in path depth, walked on every pending-task hit. For deep import graphs this can become noticeable. The asymptotic cost is fine for the common case, but the choice deserves a one-line note ('we accept O(d^2) because cycles are exceptional and d is bounded by source nesting'), or rewrite as one pass with a hash set keyed by Query.Key().",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Shadowed `output` in the CAS-failure branch hurts readability",
+        "detail": "Inside `run`, `output` is the named return. The new branch reuses the name: `output := t.result.Load()`. This shadowing means the named return is no longer touched on that path, and a reader must track two `output`s in one function. Rename the local (e.g. `winner`) so the named return is the only `output`. Small, but this is exactly the kind of readability cost Knuth-mode flags.",
+        "file": "experimental/incremental/task.go",
+        "lines": "456-460",
+        "flagged_by": [
+          "knuth"
+        ]
+      }
+    ],
+    "summary": "UNDER-AUDITED. The fix moves the nil-deref one layer up rather than eliminating it: the new branch returns a bare nil from run(), and the post-conditions of run() and waitUntilDone() are not stated, so callers may now nil-deref on output.done or output.Fatal instead of on t.result.Load().done. The TOCTOU window between CompareAndSwap failing and the follow-up Load is still open in principle; the patch handles one snapshot of it. The cycle-detection extraction is a clean refactor but lacks a stated loop invariant for the two-pass walk, and the inline comment on the new nil-return branch contradicts the code. Recommend: state the invariant ('run() never returns nil; a panicked leader produces a result with Fatal set'), restructure the CAS-failure path to either retry or synthesize a result, and fix the misleading comment."
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "persona": "pike",
+  "task_id": "pip__13482",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Resolver no longer marks prepared/needs_more_preparation; state machine now relies on callers to call prepare_linked_requirements_more in the right order",
+        "detail": "The old resolver loop did `req.prepared = True; req.needs_more_preparation = False` after the more-prepare pass. Removing that block without changing the flags' semantics means those booleans are now only ever written inside prepare_linked_requirement(s)_more. Any caller that forgets to call prepare_linked_requirements_more (or calls it on a subset of requirement_set.requirements.values()) leaves requirements in an inconsistent half-prepared state. The data structure (per-requirement flags + an external multi-step preparer) is fighting the algorithm. The right shape is either: drop the flags entirely and make preparation idempotent, or own the staging in one place so callers can't get the order wrong.",
+        "file": "src/pip/_internal/resolution/resolvelib/resolver.py",
+        "lines": "180-185",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three commands now repeat the same prepare-more incantation; obvious candidate for composition",
+        "detail": "download.py, install.py, and wheel.py each gained an identical `preparer.prepare_linked_requirements_more(requirement_set.requirements.values())` call at the top of their post-resolve section. That's the same line, copied three times, doing the same thing the resolver used to do for everyone. This is exactly the case where a small helper (or a `requirement_set.finalize(preparer)` method) replaces three drift-prone copies with one. Today they agree; in a year one of them will be subtly different and nobody will know which is right.",
+        "file": "src/pip/_internal/commands/install.py",
+        "lines": "417-422",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "set_dist/get_dist introduces a third source of truth for the distribution alongside metadata_directory and local_file_path",
+        "detail": "InstallRequirement already resolves get_dist() from `metadata_directory` or `local_file_path`. The new `_distribution` cache adds a third branch, checked first, with no invariant about how it relates to the other two. If later code populates metadata_directory after set_dist() was called with a metadata-only dist, get_dist() will keep returning the stale cached one. Data dominates here: the right structure is probably a single `dist: BaseDistribution | None` field that the preparer sets once, with the directory/wheel-file paths kept only as inputs to construction. The current shape preserves all three and hopes they stay consistent.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "168-172, 608-620",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "download_info is being synthesized inside _fetch_metadata_only as a side effect, in the wrong layer",
+        "detail": "`prepare_linked_requirement` now reaches into the requirement and conditionally assigns `req.download_info = direct_url_from_link(req.link, req.source_dir)` when metadata-only fetching succeeds. The metadata fetch path is now responsible for two unrelated things: returning a dist, and patching download_info onto the requirement so unrelated commands (`pip lock`, `--report`) work. That's a filter that grew a side channel. Either compute download_info unconditionally where it's consumed, or have the metadata fetcher return a (dist, download_info) pair and let the caller assign. Hiding the assignment behind an `if req.download_info is None` makes the data flow harder to follow than it needs to be.",
+        "file": "src/pip/_internal/operations/prepare.py",
+        "lines": "531-540",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "set_dist is a one-line setter with no invariants; a plain attribute would be clearer",
+        "detail": "`set_dist` just assigns to `self._distribution`. There is no validation, no event, no laziness. In Python this is a getter/setter pair around a field \u2014 the kind of ceremony that exists in Java for binary-compatibility reasons and earns nothing here. Either give `_distribution` a real invariant (e.g. clear metadata_directory when it's set, or assert the link matches) or expose it as a plain `distribution` attribute and delete the method. Cleverness/ceremony should be load-bearing.",
+        "file": "src/pip/_internal/req/req_install.py",
+        "lines": "611-612",
+        "flagged_by": [
+          "pike"
+        ]
+      }
+    ],
+    "summary": "The change moves a multi-step preparation pass out of the resolver and into each command, which is reasonable \u2014 the resolver shouldn't be downloading wheels \u2014 but the seams are rough. Three commands now repeat the same prepare-more line, and the per-requirement `prepared` / `needs_more_preparation` flags lost their one centralized writer, so correctness now depends on every caller doing the dance in the right order. The new `_distribution` cache on InstallRequirement adds a third source of truth alongside `metadata_directory` and `local_file_path` without an invariant tying them together; that's the data structure fighting the algorithm. The `download_info` patch inside `_fetch_metadata_only` is a side effect hidden in a metadata fetcher to make unrelated commands work \u2014 a filter with a side channel. Strip the get/set ceremony, lift the prepare-more call into one shared place, and pick one canonical field for the distribution."
+  },
+  "raw": ""
+}

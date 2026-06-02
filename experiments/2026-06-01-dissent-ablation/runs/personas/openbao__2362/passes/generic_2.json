@@ -1,0 +1,70 @@
+{
+  "name": "generic_2",
+  "task_id": "openbao__2362",
+  "review": {
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "AllowOperation panics when namespace.FromContext returns nil ns with no error path through HasParent",
+        "detail": "In vault/acl.go AllowOperation, after `ns, err := namespace.FromContext(ctx)` it checks err but does not guard against nil ns before calling `ns.HasParent(a.root)`. If FromContext ever returns (nil, nil) (or the root ACL check runs before path checks), and the request is missing namespace, this will nil-deref. Previously the root fast-path didn't touch ns at all.",
+        "file": "vault/acl.go",
+        "lines": "342-360",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Root namespace ACL semantics changed: root token in root ns may no longer pass HasParent check correctly",
+        "detail": "HasParent semantics determine whether the root ACL's namespace is an ancestor of the request ns. If HasParent is strict (excludes self), a root-ns root token making a root-ns request would fail. This is a behavioral change in the auth fast-path with no test for the root-ns-calling-root-ns case beyond the existing one; needs verification HasParent treats self as parent.",
+        "file": "vault/acl.go",
+        "lines": "350-362",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "NamespaceSealed stub silently returns false, masking sealed-namespace conditions",
+        "detail": "vault/core.go adds `NamespaceSealed` that always returns false with a TODO. Callers (e.g., ListAllNamespaces' sealed-inclusion logic mentioned in PR description) will treat all namespaces as unsealed. If any caller relies on this for access control or to skip operations, security/behavior gaps are introduced until SealManager lands. Should at minimum log or panic on unexpected use, or gate behind a feature flag.",
+        "file": "vault/core.go",
+        "lines": "1399-1404",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "AdjustErrorStatusCode refactor drops independent matching across error types",
+        "detail": "sdk/logical/response_util.go converted independent `if` checks to a `switch` with cases. Previously multiple matches could apply sequentially (e.g., a sealed error that also implements HTTPCodedError could let coded.Code() override). The new switch short-circuits on first match, changing precedence: ErrSealed/ErrNamespaceSealed now wins over an HTTPCodedError wrapper. This is a subtle behavioral regression.",
+        "file": "sdk/logical/response_util.go",
+        "lines": "159-176",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Removal of root-namespace ID check in NewACL weakens defense-in-depth",
+        "detail": "vault/acl.go NewACL previously rejected root policy outside the root namespace. The new code accepts it in any namespace and stores ns on a.root. This is intentional for ns-owned roots, but there's no validation that the namespace is one allowed to own root policies (e.g., is it a real, existing namespace?). Any caller that constructs a Policy{Name:\"root\"} with an arbitrary ns context now gets a root ACL.",
+        "file": "vault/acl.go",
+        "lines": "100-110",
+        "flagged_by": [
+          "generic_2"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Test uses bare Namespace{Path:\"ns1\"} with empty ID, may produce misleading coverage",
+        "detail": "vault/acl_test.go testACLRoot 'child namespace' subtest constructs `&namespace.Namespace{Path: \"ns1\"}` with no ID. The negative-case assertion `if ns.ID != namespace.RootNamespaceID` then runs because ID is empty string, not because it's a true child. The test is exercising an unrealistic namespace shape that won't match production namespace records.",
+        "file": "vault/acl_test.go",
+        "lines": "163-188",
+        "flagged_by": [
+          "generic_2"
+        ]
+      }
+    ],
+    "dissents": [],
+    "summary": "The PR makes a structural change to root-policy ACL semantics so root tokens can be scoped to a namespace, plus introduces stubs for ErrNamespaceSealed and Core.NamespaceSealed ahead of a SealManager. The main risks are in vault/acl.go: a possible nil-ns deref in AllowOperation, dependency on HasParent's exact semantics for the existing root-ns case, and removal of the previous root-only-in-root-ns guard with no replacement validation. The response_util.go refactor changes match precedence between sealed-style errors and HTTPCodedError. Stub NamespaceSealed returning false could mask intended behavior until SealManager lands."
+  }
+}

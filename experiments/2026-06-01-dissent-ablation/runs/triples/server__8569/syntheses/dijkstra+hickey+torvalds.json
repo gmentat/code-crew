@@ -1,0 +1,80 @@
+{
+  "task_id": "server__8569",
+  "triple_key": "dijkstra+hickey+torvalds",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Shared TritonLoraConfig.is_registered is mutated without locks and before backend ack, racing concurrent first-requests.",
+        "detail": "_get_lora_config returns one shared instance; _create_trtllm_generate_request flips is_registered=True after attaching inputs, without synchronization or proof of backend registration. Concurrent first calls both see False and double-load, or a request that fails leaves the flag True so subsequent calls omit weights for a task_id the backend never learned. Needs a per-LoRA lock and an acknowledged-registration signal.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "230-244",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "lora_task_id assigned by enumeration order is non-deterministic and can collide across repos/restarts.",
+        "detail": "task_id starts at 1 and increments per entry inside _parse_lora_configs, with no stated uniqueness invariant tying it to LoRA identity. Across restarts, multiple model repos, or reloads, the same logical adapter can receive different task_ids and different adapters can share one. TRT-LLM caches by task_id, so collisions serve the wrong adapter. Derive task_id deterministically from the LoRA itself.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "625-712",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Debug print statements and traceback.print left in parser and FastAPI routers.",
+        "detail": "print(f'backend: {backend}') in the parse loop and print(traceback.format_exc()) sprinkled across routers and the parser are debug residue, not logging. They bypass the configured logger, cannot be filtered, and will spam stdout in production. Remove or route through logger.debug before merge.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "684, 712, plus routers",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Bare except Exception returns None, conflating malformed config with 'no LoRAs configured'.",
+        "detail": "The except block prints a traceback and returns None for the whole repo path, so a JSON decode error or missing file silently disables LoRA support and is indistinguishable from no-LoRA. Operators cannot tell broken from absent. Either propagate, fail loud at startup, or return a tagged result; do not both print and swallow.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "707-714",
+        "flagged_by": [
+          "dijkstra",
+          "hickey",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Variable shadowing: lora_config_path rebound mid-function to a different path.",
+        "detail": "lora_config_path is bound to the outer multi_lora.json path, then rebound inside the loop body to model.lora_config.npy in the same scope. A reader following the name encounters two meanings within ~30 lines. Rename one binding to restore single-meaning identifiers.",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "658, 696",
+        "flagged_by": [
+          "dijkstra",
+          "torvalds"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Return type annotation of _parse_lora_configs lies about the shape.",
+        "detail": "Signature is annotated `-> None | List[tuple[str, str]]` but the function returns List[TritonLoraConfig]. Stale from the rename; misleads type checkers and future maintainers. Update to Optional[List[TritonLoraConfig]].",
+        "file": "python/openai/openai_frontend/engine/utils/triton.py",
+        "lines": "618-620",
+        "flagged_by": [
+          "hickey",
+          "torvalds"
+        ]
+      }
+    ],
+    "summary": "The panel unanimously refuses the patch as-is. Two P0 correctness hazards dominate: a shared mutable is_registered flag flipped without locks or backend acknowledgment, and a positional lora_task_id whose uniqueness invariant is unspecified across restarts and repos \u2014 together these can serve the wrong adapter or send a task_id the backend never learned. Secondary issues include debug prints and traceback dumps shipped into production paths, a bare except that conflates malformed config with absent LoRA, variable shadowing, and a stale return-type annotation. Fix: lock or eliminate is_registered with a real registered-with-backend signal, derive task_id deterministically from the LoRA, strip prints, tighten the exception contract, then resubmit."
+  }
+}

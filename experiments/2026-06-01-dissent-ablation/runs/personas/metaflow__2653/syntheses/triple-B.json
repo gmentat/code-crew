@@ -1,0 +1,78 @@
+{
+  "task_id": "metaflow__2653",
+  "arm": "triple-B",
+  "synthesis": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "Unbounded blocking read has no escape if writer hangs after first byte, replacing a race with a deadlock",
+        "detail": "The inner while-True blocking read loop has no poll, timeout, or process-liveness check. A subprocess that writes one byte then hangs will block the parent forever. The previous poll-based loop bounded the wait and could detect hung writers; that invariant is silently lost. Add a timeout or periodic liveness check.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "138-145",
+        "flagged_by": [
+          "dijkstra",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "fcntl mode switch to blocking is never restored, leaking fd state across the function boundary",
+        "detail": "The function mutates the caller-owned fifo_fd via fcntl to clear O_NONBLOCK and never restores it. This violates the frame: the fd's blocking state is observable to the caller and any later reuse, cleanup, or retry path. Wrap in try/finally to restore flags, or document that the function takes ownership of the fd.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "133-137",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two parallel read loops with overlapping responsibilities \u2014 the shape is wrong",
+        "detail": "The function now has an outer poll/non-blocking loop and an inner blocking drain loop that both append to content and both decide EOF. The data is a byte stream until EOF; one loop with one termination rule is the obvious shape. Split into wait_for_first_byte() and drain_blocking() helpers, or unify the control flow.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "129-160",
+        "flagged_by": [
+          "dijkstra",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Function contract under failure modes (writer crash, partial write) is unstated and silently inconsistent",
+        "detail": "The old code raised CalledProcessError when content was empty; the new code may return a partial buffer because the blocking read loop has no check for abnormal writer exit. Postconditions for writer-crash-mid-write and writer-hang are undefined. State the contract explicitly in a docstring naming the poll-then-blocking-drain phases.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "120-160",
+        "flagged_by": [
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "BlockingIOError handler is now dead or vestigial control flow",
+        "detail": "After the rewrite switches to blocking mode following the first successful read, BlockingIOError can only fire on the initial pre-data reads \u2014 which are already gated by poll. The except clause reduces to pass with no logic. Either delete the branch or document why it remains defensive.",
+        "file": "metaflow/runner/utils.py",
+        "lines": "155-158",
+        "flagged_by": [
+          "dijkstra",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "No regression test exercises the original race or the new blocking path",
+        "detail": "The PR cites an intermittent JSONDecodeError at char 86672 and justifies the fix via a POSIX appeal, but ships no regression test, no fault-injection harness, and no test of the new blocking drain path. Correctness rests on prose. Add at least one test that reproduces the truncation scenario.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "dijkstra"
+        ]
+      }
+    ],
+    "summary": "The panel agrees the fix correctly identifies a real POSIX-level race and that switching to blocking mode after the first byte is the right oracle for EOF. However, the implementation trades intermittent truncation for a potential deadlock: the inner blocking loop has no escape if the writer hangs, and the fd mode flip leaks across the function boundary without restoration. The function now has two parallel read loops doing the same job, vestigial BlockingIOError handling, and an unstated contract for failure modes. Land only after restoring fd flags via try/finally, adding a bounded wait or liveness check on the blocking path, unifying the loop shape, and writing the contract down \u2014 ideally with a regression test."
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "persona": "liskov",
+  "task_id": "pipecat__3692",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "ServiceSwitcherRequestMetadataFrame.service field has an unspecified contract \u2014 what does 'service' mean to non-switcher consumers?",
+        "detail": "The frame's docstring says 'The target service that should re-emit its metadata' but the contract is ambiguous when this frame travels through arbitrary processors. Is a service required to compare frame.service against self and ignore the frame if it doesn't match? Or is the comparison only the ServiceSwitcher's responsibility? Both STTService and MockMetadataService unconditionally re-emit metadata when they see this frame, ignoring the service field. That means the targeting only works because the ServiceSwitcher filters on push_frame \u2014 the contract is enforced at the boundary, not by the receiver. State this explicitly in the frame's docstring (preconditions/postconditions) or you will get LSP violations later when a new STT subclass decides to honor the targeting field and breaks pipelines that depend on the current behavior.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1721-1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Frame holds a live FrameProcessor reference \u2014 leaky abstraction across the frame boundary",
+        "detail": "Frames are control values that flow through the pipeline; making one carry a direct FrameProcessor reference couples the frame to the live object graph. This breaks several useful abstractions: frames can no longer be serialized, logged structurally, or compared by value; equality on the dataclass now depends on object identity of a mutable processor; and any downstream consumer that holds onto the frame implicitly extends the lifetime of the processor. A service identifier (name, id, or weakref) would preserve the targeting contract without leaking the implementation type of the target through the frame.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "STTService and ServiceSwitcher disagree on the postcondition of handling the request frame",
+        "detail": "STTService now pushes the ServiceSwitcherRequestMetadataFrame downstream after handling it. ServiceSwitcher.push_frame consumes the frame only when frame.service == active_service. So if an STT service receives this frame while inactive (which the switcher's filters should prevent, but the contract should not assume), the frame escapes downstream of the switcher and reaches arbitrary processors that have never been told what to do with it. State the invariant: 'This frame is only ever delivered to its target service, and is consumed by the enclosing ServiceSwitcher after the target handles it.' Then audit whether non-switcher pipelines (STTService used standalone) might leak this control frame into user code.",
+        "file": "src/pipecat/services/stt_service.py",
+        "lines": "267-269",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Forward reference 'FrameProcessor' in dataclass field may create import-cycle fragility",
+        "detail": "The type annotation uses a string forward reference 'FrameProcessor' but there is no visible import or TYPE_CHECKING guard in the diff for frames.py. Dataclass field types are not evaluated at runtime by default, so this likely works, but the contract that frames.py does not depend on processors.frame_processor should be explicit \u2014 either add a TYPE_CHECKING import for type-checker support, or document why the string is intentionally unresolved. The module boundary between frames and processors is load-bearing for this codebase.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Equality semantics of the renamed dataclass changed silently",
+        "detail": "Adding a non-default field to a @dataclass changes __eq__ and __hash__ behavior. Two ServiceSwitcherRequestMetadataFrame instances are now equal only if they target the same FrameProcessor instance (by identity, since FrameProcessor likely does not override __eq__). Tests or downstream code that compared the old parameterless RequestMetadataFrame for equality will now silently behave differently. Worth a one-line note in the changelog or a field(compare=False) if identity-based comparison is not intended.",
+        "file": "src/pipecat/frames/frames.py",
+        "lines": "1720-1736",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The rename is mechanical and clean, but the new `service` field introduces an under-specified contract and a leaky abstraction. The frame now carries a live FrameProcessor reference, which couples a control-plane value to the live object graph and breaks serializability, value-equality, and clean module boundaries between frames and processors. More importantly, the targeting contract is enforced only at the ServiceSwitcher boundary \u2014 the receiving services (STTService, MockMetadataService) ignore frame.service entirely and unconditionally re-emit metadata, so the LSP-style guarantee (\"a service re-emits iff it is the target\") is not actually maintained by the subtypes that handle the frame. Write down the preconditions, postconditions, and invariants for this frame: who sets `service`, who reads it, what receiving services must do, and what the enclosing switcher promises to suppress. Consider replacing the live processor reference with a stable identifier so the frame stays a value."
+  },
+  "raw": ""
+}

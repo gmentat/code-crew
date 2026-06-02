@@ -1,0 +1,346 @@
+{
+  "task_id": "protocompile__590",
+  "mode": "dissent",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "synthesis": {
+    "dissents": [
+      {
+        "topic": "Where the fix belongs: consumer-side nil-check vs. producer-side invariant",
+        "positions": [
+          {
+            "persona": "dijkstra",
+            "position": "The fix is at the wrong layer \u2014 SMUGGLED-GOTO. Fix the producer: the leader's panic recovery MUST close output.done (with Fatal set) before mutating t.result, so consumers never need nil checks."
+          },
+          {
+            "persona": "pike",
+            "position": "Root cause is the data structure: t.result uses nil to mean both 'not started' and 'aborted'. Use a sentinel aborted-result (done already closed, Fatal set) so the algorithm stays self-evident."
+          },
+          {
+            "persona": "hickey",
+            "position": "t.result is complected \u2014 serving as identity slot, value, and signaling channel at once. Decompose so waiters never re-Load the slot once they have a value; name the invariant explicitly."
+          },
+          {
+            "persona": "liskov",
+            "position": "Write down the task ADT's invariants for the leader-panic case (what t.result is allowed to be when, what waiters observe) \u2014 current spec is missing, which is why fixes keep playing whack-a-mole."
+          },
+          {
+            "persona": "torvalds",
+            "position": "Synthesize a result with Fatal set (e.g. ErrLeaderPanicked) instead of bare nil; the consumer-side patch is half-done and hostile to callers."
+          },
+          {
+            "persona": "knuth",
+            "position": "State the invariant explicitly and prove termination on the follower path; current fix narrows but does not close the window."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the symmetric early branch (top of run()) also still has the race",
+        "positions": [
+          {
+            "persona": "torvalds",
+            "position": "P0 \u2014 the top branch 'if output := t.result.Load(); output != nil' followed by closed(output.done) can still panic on the exact same race; fix is half-done."
+          },
+          {
+            "persona": "pike",
+            "position": "P1 \u2014 the closed(output.done) branch at the top of run() still reads t.result.Load() with the same racy pattern; fix must be applied consistently."
+          },
+          {
+            "persona": "liskov",
+            "position": "P1 \u2014 race window persists earlier in run() at the top branch; capturing output early closes that specific deref but the invariant must be stated."
+          },
+          {
+            "persona": "knuth",
+            "position": "P0 \u2014 no proven invariant that once a follower observes non-nil output, done will eventually be closed; can still block forever."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "P1 \u2014 output's binding at the pending branch is not shown to be non-nil in the diff; author owes the proof."
+          },
+          {
+            "persona": "hickey",
+            "position": "Two paths into waitUntilDone observe t.result at different time-points; make explicit which value each path commits to."
+          }
+        ]
+      },
+      {
+        "topic": "Severity of cycle-detection scope change",
+        "positions": [
+          {
+            "persona": "torvalds",
+            "position": "P1 \u2014 PR admits cycle detection now only runs on one of two paths; this is a behavior change deferred to a follow-up PR and needs a test pinning the new behavior."
+          },
+          {
+            "persona": "liskov",
+            "position": "P1 \u2014 LSP-style asymmetry: two waiter paths in semantically identical states have different contracts (one can return ErrCycle, the other cannot)."
+          },
+          {
+            "persona": "hickey",
+            "position": "P1 \u2014 TODO should live in the type (rename to checkCycleAmongPending or move the precondition inside), not just the PR prose."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "P1 \u2014 partial fix with admitted unfinished reasoning; should not land as a half-step."
+          }
+        ]
+      },
+      {
+        "topic": "Whether the checkCycle extraction is good",
+        "positions": [
+          {
+            "persona": "torvalds",
+            "position": "P2 GOOD-TASTE \u2014 keep it; drops indentation, removes post-check, makes call site one line."
+          },
+          {
+            "persona": "pike",
+            "position": "P2 positive signal \u2014 clean win, exactly the right composition direction."
+          },
+          {
+            "persona": "dijkstra",
+            "position": "P2 \u2014 REASONED, semantics-preserving, the one part of the diff that should survive a rewrite."
+          },
+          {
+            "persona": "knuth",
+            "position": "P1/P2 \u2014 readability win but inherits a stale doc comment and deserves a literate-programming-grade rewrite naming the invariant."
+          },
+          {
+            "persona": "hickey",
+            "position": "P1 \u2014 extraction is good but the precondition ('only possible if output is pending') is implicit and complected between caller and callee."
+          },
+          {
+            "persona": "liskov",
+            "position": "P1 \u2014 receiver t is unused; should be a method on *Task or a free function, not a method on *task."
+          }
+        ]
+      }
+    ],
+    "issues": [
+      {
+        "severity": "P0",
+        "description": "Returning bare nil from run() violates its postcondition and pushes nil-deref to every caller",
+        "detail": "The new branch returns a bare nil *result when t.result.Load() returns nil after a failed CAS. Every other return site in run() yields a non-nil *result, and callers downstream dereference output.done, output.Fatal, output.Value, etc. The patch does not fix the panic \u2014 it moves it one frame up. The correct fix is to synthesize a result with Fatal set (e.g., ErrLeaderPanicked) and done already closed, preserving run()'s contract. This is also an LSP-style contract violation and a DEFENSIVE-AS-SUBSTITUTE pattern.",
+        "file": "experimental/incremental/task.go",
+        "lines": "453-460",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Comment 'Leader panicked but we did see a result' contradicts the code (typo for 'did not see')",
+        "detail": "The branch is taken precisely when output == nil, i.e., we did NOT see a result. The comment is the opposite of the truth. For a concurrency fix where the comment is the entire specification of a subtle edge case, this signals the author has not held the state machine clearly in their head. Fix the wording and expand it to specify who clears t.result, when, and what waiters are entitled to assume.",
+        "file": "experimental/incremental/task.go",
+        "lines": "457-458",
+        "flagged_by": [
+          "knuth",
+          "hickey",
+          "torvalds",
+          "liskov",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Symmetric early branch at top of run() still does closed(output.done) on a racy Load \u2014 fix is half-done",
+        "detail": "The top of run() reads `output := t.result.Load()` and then does `closed(output.done)` and passes output to checkCycle. If a previous leader panicked and set t.result back to nil, this very first Load can return nil and the existing closed(output.done) line will panic with exactly the nil-deref this patch claims to fix. The fix only hardened the CompareAndSwap-failure path; the symmetric path needs the same guard or the race is half-fixed.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~441-449",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "liskov",
+          "knuth",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "Termination of waitUntilDone on the panic path is not proved \u2014 waiter may block forever",
+        "detail": "The fix protects against t.result.Load() returning nil at deref time, but the precondition for the select on output.done to fire is that someone closes output.done. If the leader panics and only nils t.result without closing output.done, every waiter that captured output before the nil-out blocks until caller.ctx.Done(). That is correctness by accident. State the termination function and prove the leader's panic path closes output.done before nilling t.result; if it does not, fix that at the producer.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~547-550",
+        "flagged_by": [
+          "dijkstra",
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P0",
+        "description": "t.result is complected / place-oriented \u2014 encodes three states (not started, pending, aborted) in one nil pointer",
+        "detail": "t.result is simultaneously an identity slot ('a leader exists'), a value (the computed result), and a signaling channel (via .done). Reusing nil for two different states ('not started' and 'aborted') is the root cause of this class of race. The patch papers over one window without naming the invariant. Either decompose so waiters never re-read the slot once they have a value, or use a sentinel aborted-result (done already closed, Fatal set) so the algorithm stays self-evident.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "hickey",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Race window between CAS-failure and Load is narrowed but not proven closed",
+        "detail": "Between CompareAndSwap returning false and the subsequent t.result.Load(), the leader can complete-and-clear, so the new Load can still return nil. The patch handles that case (by returning nil \u2014 see other P0), but there is no stated invariant about when t.result may transition non-nil to nil, nor proof that, once a follower observes non-nil output, that output's done channel will eventually be closed. Document the invariant on the atomic field.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "knuth",
+          "torvalds",
+          "liskov",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "No regression test reproduces the leader-panic race",
+        "detail": "A race-condition fix with no regression test will regress. The PR body describes a precise sequence (leader panics, sets t.result to nil, waiters Load it, deref). That shape maps directly to a deterministic test: synchronize a fake task to panic mid-leadership, fire N waiters at it, assert no panic and a sensible typed error. Without that test, the next refactor reintroduces the bug.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "hickey",
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Cycle detection is now skipped on the CAS-loser waiter path \u2014 asymmetric contract",
+        "detail": "In the original code, cycle detection ran whenever the current goroutine was going to wait on an already-pending result. In the new code, checkCycle still runs only on the top branch; the CAS-loser branch also ends up waiting on a pending result owned by another goroutine but bypasses checkCycle entirely. Two callers in semantically identical waiting states now have different contracts: one may return ErrCycle, the other cannot. PR admits cycle detection is incomplete and defers to a follow-up \u2014 this needs a test pinning the new behavior or to land with the follow-up.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "torvalds",
+          "liskov",
+          "hickey",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Shadowing the outer named return `output` inside the CAS-failure branch is a footgun",
+        "detail": "The enclosing function has `output *result` as a named return. Inside the CAS-failure branch the patch declares `output := t.result.Load()` with `:=`, shadowing it. That works today but the named-return + shadow combo is exactly the pattern that gets miscompiled in someone's head during the next edit and silently returns the wrong thing. Use a different local name (leader, leaderResult, loaded, winner) or assign with `=`.",
+        "file": "experimental/incremental/task.go",
+        "lines": "~456",
+        "flagged_by": [
+          "torvalds",
+          "knuth",
+          "pike"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle's doc comment is stale / precondition implicit",
+        "detail": "The extracted helper inherits 'This is only possible if output is pending; if it isn't, it can't be in our history path' \u2014 referring to an output variable no longer in scope. checkCycle does not enforce or check that precondition; it relies on the caller to invoke it only on the pending branch. Either move the pending-check inside checkCycle, rename it (e.g., checkCycleAmongPending), or rewrite the doc to describe inputs (caller, q), guarantee (returns *ErrCycle if q.Key() appears in caller.path, else nil), and the cycle ordering convention.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle receiver t is unused \u2014 abstraction leak",
+        "detail": "The extracted method `func (t *task) checkCycle(caller *Task, q *AnyQuery) error` does not reference its receiver t at all. From an ADT perspective the method belongs to *Task (the caller's path) or it should be a free function, not a method on *task. Callers reading the signature reasonably expect t's state to participate in the check, and it does not. Move it to a method on *Task or a package-level function.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "The task ADT has no written specification for the leader-panic case",
+        "detail": "This is the second time this corner has needed a patch (per linked #576). The task ADT has no written specification for: what state is t.result left in after leader panic, what waiters observe, whether the panic propagates, whether the task can be re-leadered. Until that contract is written down, future fixes will keep playing whack-a-mole. Add a comment block on the task type documenting the invariants on t.result through the leader lifecycle (including panic), the postcondition waiters can rely on, and what state may change between a waiter's Load and its select.",
+        "file": "experimental/incremental/task.go",
+        "lines": null,
+        "flagged_by": [
+          "liskov",
+          "knuth",
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Two paths into waitUntilDone observe t.result at different time-points",
+        "detail": "In the early branch, output is the already-loaded result from the closed-check above. In the CAS-failure branch a fresh Load() is performed. These are two different time-points observing the same place. If the leader transitions between 'pending' and 'panicked-cleared' between these reads, the two callers see different things. Make explicit which value of t.result each path is committing to, and document that waitUntilDone now operates on a snapshot, not the live slot.",
+        "file": "experimental/incremental/task.go",
+        "lines": "441-460",
+        "flagged_by": [
+          "hickey"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "checkCycle does an O(2d) two-pass walk where one pass suffices",
+        "detail": "checkCycle walks caller.path twice: once to locate a matching node, once to materialize the cycle. A single pass that records prefix queries into a scratch slice and truncates at the match point would be one pass, no Reverse, and zero allocation on the no-match path. Not necessarily worth changing without a measurement, but the extraction is a natural moment to ask whether the algorithm should improve too. Also: the assumption that caller.path is not mutated concurrently during these two walks should be stated.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth",
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Loop invariant and termination argument for checkCycle are not documented",
+        "detail": "The invariant ('the prefix of path up to and including node forms the cycle, in caller->callee order') is implicit. A two-line literate comment naming the invariant and the termination condition (node2 == node must occur because the first walk found node in the same list, assumed immutable during the walk) would let a careful reader follow this without simulating it.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-432",
+        "flagged_by": [
+          "knuth"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Three changes bundled in one diff: refactor + race fix + cycle-detection scope change",
+        "detail": "This patch is doing three things: (1) extract checkCycle, (2) fix the nil-deref on the CAS-failure path, (3) implicitly narrow when cycle detection runs. Each is reviewable on its own. Splitting would have made (1) and (2) trivially landable. The cycle-detection narrowing in particular needs the follow-up PR referenced or an explicit test pinning the new behavior.",
+        "file": null,
+        "lines": null,
+        "flagged_by": [
+          "torvalds",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "checkCycle extraction is a clean, semantics-preserving improvement (positive signal)",
+        "detail": "Pulling cycle detection out of run() into checkCycle(caller, q) error is the right move \u2014 run() becomes shorter, cycle detection is now a stateless transform over caller.path that returns an error or nil, and it can be tested in isolation. Drops a level of indentation, removes the `cycle != nil` post-check, makes the call site one line. This is the one part of the diff that should survive a rewrite.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-433",
+        "flagged_by": [
+          "torvalds",
+          "pike",
+          "dijkstra"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Passing output explicitly into waitUntilDone is directionally correct",
+        "detail": "Threading the snapshotted *result through waitUntilDone instead of having it re-Load is the correct fix and removes the immediate race on the wait path. Minor: the parameter is named `output` which shadows the named return in run(); pending or leaderResult would read more clearly at the call site.",
+        "file": "experimental/incremental/task.go",
+        "lines": "535-550",
+        "flagged_by": [
+          "pike"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Follow-up PR for dependency cycles acknowledged in prose but not in the type",
+        "detail": "PR description says 'A follow up PR will be added for dependency cycles' and that 'current cycle detection only checks the immediate call path'. Leave a TODO in checkCycle naming this gap, so the next reader of the code (not the PR) learns the same thing.",
+        "file": "experimental/incremental/task.go",
+        "lines": "407-409",
+        "flagged_by": [
+          "hickey"
+        ]
+      }
+    ],
+    "summary": "All six reviewers converge on two P0s: returning bare nil from run() violates its postcondition and merely relocates the nil-deref to callers (synthesize a Fatal result instead), and the comment 'Leader panicked but we did see a result' contradicts the code it documents \u2014 a load-bearing typo on the only spec for the new edge case. Five reviewers (Torvalds, Pike, Liskov, Knuth, Dijkstra) further argue the fix is half-done: the symmetric early branch at the top of run() still dereferences t.result.Load() and is vulnerable to the same race. Dijkstra and Knuth raise an even deeper P0: nothing proves output.done is ever closed on the leader-panic path, so waiters who captured output may block until context cancellation rather than terminate. The strongest preserved disagreement is about where to fix this \u2014 Dijkstra/Pike/Hickey argue the producer must satisfy a 'published result is always closeable-to-completion' invariant (or use a sentinel aborted-result so nil never means two things), while Torvalds takes the more pragmatic line of synthesizing a Fatal result at the return site; Liskov frames it as the missing ADT specification that keeps producing whack-a-mole patches. The checkCycle extraction is unanimously praised as good taste, but it ships with a stale doc comment, an unused receiver (Liskov), and a quietly narrowed scope that drops cycle detection on the CAS-loser path \u2014 a behavior change with no test and a deferred follow-up. No reviewer accepts the patch as-is; the panel's verdict ranges from NEEDS-WORK to REFUSED, all citing the absence of a regression test for a concurrency fix."
+  },
+  "raw": ""
+}

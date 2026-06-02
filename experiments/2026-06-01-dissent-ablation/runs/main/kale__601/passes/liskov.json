@@ -1,0 +1,74 @@
+{
+  "persona": "liskov",
+  "task_id": "kale__601",
+  "model": "claude-sonnet-via-workflow",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "review": {
+    "dissents": [],
+    "issues": [
+      {
+        "severity": "P1",
+        "description": "compile_notebook RPC contract silently changed: response now carries full script payload alongside a path, conflating two abstractions",
+        "detail": "The RPC's abstract data type was 'return references to compiled artifacts' (pipeline_package_path, pipeline_metadata). Adding script_content changes the contract from 'return locations' to 'return locations AND inline content,' which is a different ADT. The postcondition is now stronger (must read and embed file contents) and the response size is unbounded in the size of the user's notebook. Either commit to the new contract explicitly (document it, bound it, version it) or expose a separate get_compiled_script(path) operation so the existing contract stays clean.",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "116-125",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "Abstraction leak: frontend receives both a path and the bytes at that path, with no invariant tying them together",
+        "detail": "compiledPath and compiledContent are now two representations of the same underlying artifact passed through the same interface, with no stated invariant that content == read(path). A future caller (or a later compile step that rewrites the file) can desynchronize them, and the type system gives no help. Either drop compiledPath in favor of content, drop content in favor of an on-demand fetch by path, or define and enforce the invariant at the boundary (e.g., a single CompiledArtifact value type).",
+        "file": "labextension/src/widgets/deploys-progress/DeploysProgress.tsx",
+        "lines": "36-90",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P1",
+        "description": "script_path read has no precondition check or failure spec; postcondition under I/O failure is unspecified",
+        "detail": "open(script_path) is called unconditionally after compile_pipeline, but the function's contract does not state what happens if the script is missing, unreadable, or non-UTF8. An IOError here will now fail the whole compile RPC even though the pipeline package was produced successfully, weakening the prior postcondition ('on success, package_path is returned'). State the precondition (script_path exists and is readable) and decide the frame: does a read failure invalidate the compile, or is script_content optional in the response?",
+        "file": "backend/kale/rpc/nb.py",
+        "lines": "116-125",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "DeployProgress download handler reaches into DOM globals instead of a download abstraction",
+        "detail": "handleDownloadClick directly manipulates document.body, URL.createObjectURL, and an anchor element inline. This couples a presentational component to a side-effecting browser primitive with its own contract (revokeObjectURL must be paired, append/remove ordering matters). A small downloadBlob(name, content) helper would be the right module boundary; the component would then depend only on a stated 'trigger a download' operation rather than on DOM mechanics.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-183",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Download icon is rendered unconditionally inside the success branch but guarded only at click time",
+        "detail": "The GetAppIcon is always shown when compiledPath is a normal value, but handleDownloadClick silently no-ops if compiledContent is missing. The visible affordance and the operation's precondition are out of sync; a caller (user) sees a button that promises an action and gets nothing. Either gate rendering on (compiledPath && compiledContent), or make compiledContent a required field of the success state so the type encodes the invariant.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "232-238",
+        "flagged_by": [
+          "liskov"
+        ]
+      },
+      {
+        "severity": "P2",
+        "description": "Filename derivation duplicates logic already encoded in Commands.ts path construction",
+        "detail": "Commands.ts already knows the compiled filename ('kale.py' / 'pipeline.yaml'); DeployProgress re-derives it by splitting compiledPath and falling back to 'pipeline.kale.py'. That fallback is a third, inconsistent name. Pass the intended download filename through the state explicitly, or have a single function own the (path -> displayName) mapping so the contract is stated once.",
+        "file": "labextension/src/widgets/deploys-progress/DeployProgress.tsx",
+        "lines": "170-176",
+        "flagged_by": [
+          "liskov"
+        ]
+      }
+    ],
+    "summary": "The feature is small but it quietly changes the compile_notebook RPC's abstract data type from \"return references to artifacts\" to \"return references and inline payload,\" without restating the contract, bounding the payload, or specifying behavior on read failure. On the frontend, compiledPath and compiledContent are now two views of the same artifact carried through the same interface with no invariant linking them, which is a classic abstraction leak waiting to desynchronize. The download handler also reaches directly into DOM globals from a presentational component, mixing module responsibilities. Nothing here is catastrophic, but the contracts should be written down before this pattern propagates: either commit to a single CompiledArtifact value type at the boundary, or split content retrieval into its own operation so the existing compile contract stays clean."
+  },
+  "raw": ""
+}
