@@ -7,7 +7,7 @@
 
 ## Result
 
-**Style A (archetype-inspired) wins on every metric. Decisively.**
+**Style A (archetype-inspired) wins on every metric. Recall is directionally strong; precision is statistically clean.**
 
 | Metric | A (archetype) | B (direct-named) | Δ (B−A) | paired wins (A : B : ties) | p_two_sided |
 |---|---|---|---|---|---|
@@ -25,7 +25,7 @@ Per pre-registration, the decision rule is:
 > **Style A > Style B (Δ recall ≤ −2pp, p<0.05) → Keep current "archetype-inspired" framing; note in CLAUDE.md that direct naming was tested and underperformed.**
 
 - Δ recall = **−3.9pp** ✓ (meets the −2pp threshold)
-- Two-sided p_recall = 0.078 (borderline; one-sided p for A>B = 0.013)
+- Two-sided p_recall = 0.078 (borderline; one-sided p for A>B = 0.039)
 - Two-sided p_precision = **0.027** ✓ (independently confirms A > B)
 
 **Verdict: KEEP current "archetype-inspired" framing.** Update docs to record that direct-named framing was tested and underperformed. Do not modify the plugin briefs.
@@ -46,7 +46,7 @@ The body of the briefs (Operating Principles, Process, Decision Labels) was held
 
 - **Plugin briefs unchanged.** The shipped `plugins/code-crew/skills/code-crew/briefs/{knuth,hickey,torvalds}_agent.md` files stay as-is.
 - **Don't add new accomplishments to other personas.** Same effect would apply to Dijkstra, Liskov, Pike if their briefs were rewritten in the direct-named style.
-- **The non-impersonation disclaimer is doing useful work.** Both arms had the disclaimer, but the archetype framing reduces the model's tendency to surface the person's identity in the output. The current framing should be preserved.
+- **What the test isolates is method/archetype lead vs identity/accomplishments lead** — not the disclaimer. Both arms kept the non-impersonation disclaimer; the difference between A and B is purely in how the first paragraph leads (with the lens's reasoning style, vs. with the person's name and works). The archetype framing should be preserved on this evidence, but no claim is being made about the disclaimer in isolation.
 - **Future improvement direction.** Per the research synthesis, the actual upgrade path is deeper *method-and-anchor content* under the archetype frame (specific examples of how this lens phrases a critique, refusal, tradeoff) — not more biographical detail. This is a follow-up experiment, not done here.
 
 ## Caveats

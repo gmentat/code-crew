@@ -59,7 +59,7 @@ The two brief-modification experiments together produce a coherent secondary fin
 
 | Modification | Δ chars per brief | Δ recall | Δ precision | Δ fabrication | Conclusion |
 |---|---|---|---|---|---|
-| Run #5 (direct naming) | +~3K | −0.039 (p=0.013 one-sided) | −0.035 (p=0.027) | +0.099 | Hurt significantly |
+| Run #5 (direct naming) | +~3K | −0.039 (p=0.039 one-sided A>B; p=0.078 two-sided) | −0.035 (p=0.013 one-sided A>B; p=0.027 two-sided) | +0.099 | Hurt significantly (precision p<0.05 two-sided; recall borderline two-sided, clean one-sided) |
 | Run #6 (behavioral anchors) | +~3K | −0.023 (p=0.40 two-sided) | −0.024 (p=0.48) | +0.033 | Null, slight negative |
 
 **Adding content to the briefs reliably moves recall down a little, regardless of what the content is.** The framing experiment hits significance because the added content also activates persona-fabrication (the +9.9pp fabrication delta vs +3.3pp here is the smoking gun). The anchors experiment doesn't hit significance because the anchor vignettes are deliberately written in third-person and don't invent quotes — but the brief-length tax persists at a smaller scale.

@@ -80,8 +80,8 @@ This is the review-oriented overview of every experiment run in this directory. 
 
 9. **Direct-naming the persona in the lead paragraph underperforms the "reasoning archetype inspired by X" framing.**
    - Same K+H+T crew, same 50 PRs, same judge; only the first content paragraph of each brief differed.
-   - Recall: 0.215 → 0.176 (**−3.9pp**, 15 wins for A vs 6 for B out of 21 discordant pairs; two-sided p=0.078; one-sided p=0.013 for A>B).
-   - Precision: 0.106 → 0.071 (**−3.5pp**, two-sided p=0.027; significant).
+   - Recall: 0.215 → 0.176 (**−3.9pp**, 15 wins for A vs 6 for B out of 21 discordant pairs; two-sided p=0.078; **one-sided p=0.039 for A>B**).
+   - Precision: 0.106 → 0.071 (**−3.5pp**, two-sided p=0.027; one-sided p=0.013 for A>B; significant).
    - Fabrication rate: 0.645 → 0.743 (**+9.9pp**; consistent with persona-fabrication research even if per-PR p not significant at n=50).
    - **Replicates a published research effect.** "Principled Personas" (Luz de Araujo et al., EMNLP 2025) shows irrelevant biographical attributes can swing performance by ~30pp; PRISM shows accomplishment-list framings degrade closed-form work; persona-fabrication research (Deshpande EMNLP 2023; Sadeq et al.; TimeChara ACL 2024) shows richer real-person profiles increase off-profile fabrication.
    - **Implication for the plugin:** keep current "archetype-inspired" framing for all 6 persona briefs. Do not add accomplishments / direct-naming to Dijkstra, Liskov, Pike (untested but research predicts the same effect).

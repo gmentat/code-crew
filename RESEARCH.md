@@ -59,7 +59,7 @@ This document lists the academic literature that grounds Code Crew's design and 
 
 - The **persona ablation** (n=50, K+H+T vs the sextet vs solo personas vs generic-6) replicates Zheng et al.'s "personas don't help on average" finding for the named-vs-generic comparison: Δ recall = 0.000, p = 0.50. See [`experiments/2026-06-01-dissent-ablation/runs/personas/SUMMARY.md`](experiments/2026-06-01-dissent-ablation/runs/personas/SUMMARY.md).
 
-- The **framing A/B** (n=50, direct-named vs archetype-inspired) replicates the Luz de Araujo / PRISM / Deshpande triad: direct-named recall −3.9pp (p=0.013 one-sided), precision −3.5pp (p=0.027 two-sided), fabrication +9.9pp. See [`experiments/2026-06-01-dissent-ablation/runs/framing/SUMMARY.md`](experiments/2026-06-01-dissent-ablation/runs/framing/SUMMARY.md).
+- The **framing A/B** (n=50, direct-named vs archetype-inspired) replicates the Luz de Araujo / PRISM / Deshpande triad: direct-named recall −3.9pp (p=0.039 one-sided A>B; p=0.078 two-sided), precision −3.5pp (p=0.013 one-sided A>B; p=0.027 two-sided), fabrication +9.9pp (not significant). See [`experiments/2026-06-01-dissent-ablation/runs/framing/SUMMARY.md`](experiments/2026-06-01-dissent-ablation/runs/framing/SUMMARY.md).
 
 - The **triple search** (10 of C(6,3) triples on n≈41 each) supports Liang et al.'s heterogeneity claim: triples without a pragmatic-axis member (Torvalds) or with two overlapping architectural lenses (Liskov + Pike) cluster near the bottom. See [`experiments/2026-06-01-dissent-ablation/runs/triples/SUMMARY.md`](experiments/2026-06-01-dissent-ablation/runs/triples/SUMMARY.md).
 
