@@ -2,7 +2,7 @@
 name: code-crew
 description: Use the famous-programmer Code Crew for code review, design critique, refactoring judgment, and multi-lens engineering decisions. Default crew Knuth+Hickey+Torvalds with mandatory diff-grounded verifier between blind passes and synthesis.
 version: 0.2.0
-license: CC-BY-4.0
+license: MIT
 metadata: {"tags":["code-review","software-engineering","multi-agent","critique"]}
 ---
 
