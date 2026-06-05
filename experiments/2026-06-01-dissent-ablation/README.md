@@ -28,6 +28,10 @@ Three pre-registered hypotheses, in [`PROTOCOL.md`](PROTOCOL.md):
 
 Substrate: [`foundry-ai/swe-prbench`](https://huggingface.co/datasets/foundry-ai/swe-prbench) — 350 real PRs, human-annotated review comments as ground truth.
 
+## Data and attribution
+
+All scored content under `runs/*/<task_id>/` is derived from the public [`foundry-ai/swe-prbench`](https://huggingface.co/datasets/foundry-ai/swe-prbench) dataset (CC BY 4.0). The `human_review_comments` ground truth and embedded PR content include real-author attribution from the upstream dataset; we redistribute that derived content under the dataset's existing terms and do not add new PII.
+
 ## How to run (the way we ran it)
 
 The crew is designed to be invoked from inside Claude Code / Codex as subagents — not driven from a Python API loop. The runnable harness here dispatches everything through the Workflow tool, using your Claude Code subscription credentials. **No API keys required.**
@@ -125,4 +129,4 @@ When code_crew is released open-source, this experiment ships with it as a **pro
 
 ## License
 
-CC BY 4.0 for the protocol, prompts, and analysis. SWE-PRBench is independently CC BY 4.0.
+The repository's own code, prompts, plugin files, and analysis scripts are MIT licensed. SWE-PRBench-derived scored content remains under the upstream dataset's CC BY 4.0 terms; see "Data and attribution" above.

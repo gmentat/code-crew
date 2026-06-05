@@ -62,6 +62,8 @@ In Codex, use it in one of three ways:
 - Invoke it explicitly in the prompt: `$code-crew review the current diff`.
 - Ask naturally: `Use Code Crew to review this PR with the default Knuth + Hickey + Torvalds crew`.
 
+In fresh Codex sessions the installed skill may appear as `code-crew:code-crew`. That is expected. Code Crew is not exposed as a callable review tool; it is a skill the host agent loads when selected or invoked.
+
 Codex may route clearly matching review or architecture prompts to the skill based on its `SKILL.md` name and description, but users should not rely on it running automatically for every coding task. The predictable path is explicit invocation.
 
 Code Crew does not currently provide `/code-crew` commands. If command support becomes useful, it should be a thin convenience layer over the same skill, not a separate behavior path.

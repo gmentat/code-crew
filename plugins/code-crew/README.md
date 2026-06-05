@@ -102,6 +102,8 @@ In Codex, either choose it from `/skills` or invoke it directly:
 $code-crew review the current diff
 ```
 
+In fresh Codex sessions the installed skill may appear as `code-crew:code-crew`. That is expected. Code Crew is not exposed as a callable review tool; it is a skill the host agent loads when selected or invoked.
+
 You can also ask your agent:
 
 ```text

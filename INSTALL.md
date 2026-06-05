@@ -129,4 +129,6 @@ It only installs skill files and persona briefs. Nothing runs in the background.
 
 Code Crew is a prompt skill. The host agent loads the skill when selected explicitly, invoked by name, or routed from a matching review/design request. It is not a resident process and does not run on every file edit or commit.
 
+In Codex, the installed skill may appear as `code-crew:code-crew`. That is expected. It is not a callable tool exposed in the tool list.
+
 If a runtime supports custom commands, any command should call the same `code-crew` skill instructions rather than maintaining a separate prompt.
