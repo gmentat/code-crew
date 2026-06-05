@@ -27,7 +27,7 @@ codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
 
-The first command registers this GitHub repo as a Codex plugin marketplace. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs the `code-crew` plugin from that marketplace.
+The first command tells Codex where this repo's plugin marketplace lives. Most users run it once per Codex profile or machine; after that, the second command installs `code-crew` from that marketplace.
 
 From a full local clone, run from the repository root:
 
@@ -102,7 +102,7 @@ In Codex, either choose it from `/skills` or invoke it directly:
 $code-crew review the current diff
 ```
 
-In fresh Codex sessions the installed skill may appear as `code-crew:code-crew`. That is expected. Code Crew is not exposed as a callable review tool; it is a skill the host agent loads when selected or invoked.
+In fresh Codex sessions the installed skill may appear as `code-crew:code-crew`. That is expected. Code Crew is not exposed as a callable review tool; it is a skill the host agent loads when selected or invoked. If an agent tries to search for a separate Code Crew tool, it is using the wrong mental model; selecting `$code-crew` is already the invocation.
 
 You can also ask your agent:
 
@@ -132,7 +132,11 @@ Code Crew is working as intended when:
 
 ## Evidence Boundary
 
-The benchmark result supports the default K+H+T preset as the best tested composition in this repo's PR-review experiments. It does not prove that famous names alone improve recall. The naming is retained because it makes the lenses memorable and easier to discuss.
+The benchmark result supports the default K+H+T preset as the best tested composition in this repo's PR-review experiments. The reported recall numbers are raw recall because the original fixed-precision metric was not computable under the skeptic judge. The result does not prove that famous names alone improve recall. The naming is retained because it makes the lenses memorable and easier to discuss.
+
+## License
+
+The plugin package is MIT licensed; see `LICENSE`. If you are using the full repository, also read the root `NOTICE` for the license boundary around SWE-PRBench-derived experiment data.
 
 ## Contributor Note
 

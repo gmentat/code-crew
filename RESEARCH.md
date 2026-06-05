@@ -49,7 +49,7 @@ This document lists the academic literature that grounds Code Crew's design and 
 
 | Code Crew finding | Grounded by |
 |---|---|
-| K+H+T (a 3-persona crew with multi-pass) beats naive single Claude on PR review recall | Du et al. (multi-agent debate), Liang et al. (DoT), Wang et al. (must beat self-consistency baseline) |
+| Main-run multi-perspective review beats naive single Claude on PR review raw recall | Du et al. (multi-agent debate), Liang et al. (DoT), Wang et al. (must beat self-consistency baseline) |
 | Adding personas to K+H+T degrades synthesis (sextet does worse than the triple) | Smit et al. on MAD overhead (in synthesis doc), Liang et al. on coordination cost when agents are not heterogeneous |
 | Named archetypes don't improve recall over generic numbered reviewers (Δ ≈ 0) | Zheng et al. (personas don't help on average), Kong et al. (role/method carries the lift, not the name) |
 | Direct-naming briefs ("X — author of TAOCP...") underperformed archetype-inspired briefs | Luz de Araujo et al. (irrelevant attributes destabilize), Hu et al. (PRISM dose-response on accuracy), Deshpande et al. (richer profiles → more fabrication) |

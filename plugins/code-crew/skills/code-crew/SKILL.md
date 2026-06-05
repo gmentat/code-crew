@@ -1,7 +1,6 @@
 ---
 name: code-crew
 description: Use the famous-programmer Code Crew for code review, design critique, refactoring judgment, and multi-lens engineering decisions. Default crew Knuth+Hickey+Torvalds with mandatory diff-grounded verifier between blind passes and synthesis.
-version: 0.2.1
 license: MIT
 metadata: {"tags":["code-review","software-engineering","multi-agent","critique"]}
 ---
@@ -10,7 +9,7 @@ metadata: {"tags":["code-review","software-engineering","multi-agent","critique"
 
 Use Code Crew when the user asks for a serious software review, architecture critique, refactoring decision, or "what would the crew say" analysis.
 
-Invocation note: when a user selects this skill from Codex or writes `$code-crew ...`, the skill is already invoked. Do not look for a separate "Code Crew review" callable tool. Code Crew is a skill/procedure package; if the host lacks subagent dispatch, label the result as a single-context approximation and continue with the verifier and synthesis rules that can be applied locally.
+Invocation note: when a user selects this skill from Codex or writes `$code-crew ...`, Code Crew is already invoked. Do not search for a separate Code Crew callable tool, and do not report "no callable Code Crew tool" as a blocker. Code Crew is a skill/procedure package: use the host's generic subagent facility when it exists, such as Codex `spawn_agent` or Claude Code's Agent tool. If the host lacks subagent dispatch, label the result as a single-context approximation and continue with the verifier and synthesis rules that can be applied locally.
 
 Code Crew uses reasoning archetypes inspired by famous programmers and computer scientists. These are not impersonations, endorsements, or claims to represent the real people. They are named review contracts: each lens focuses attention on a different kind of engineering failure.
 
@@ -35,7 +34,7 @@ When the user just says "review this" without naming a lens, use **K+H+T**:
 - **Hickey** — simplicity vs ease, value/identity/time semantics, incidental complexity.
 - **Torvalds** — maintainer-grade patch review, scope control, working systems.
 
-In our SWE-PRBench experiments (n=50 PRs, paired binomial test) this 3-persona crew outperformed the full 6-persona sextet on recall (+6.4pp, p=0.047), precision (0.106 vs 0.084), and fabrication rate (0.645 vs 0.679). It also held its lead against 8 other tested triples. Treat that as evidence for this preset, not proof famous names alone improve outputs.
+In our SWE-PRBench experiments (n=50 PRs, paired binomial test) this 3-persona crew outperformed the full 6-persona sextet on raw recall (+6.4pp, p=0.047), precision (0.106 vs 0.084), and fabrication rate (0.645 vs 0.679). It also held its lead against 8 other tested triples. Treat that as evidence for this preset, not proof famous names alone improve outputs.
 
 ## Bundled Files
 
@@ -118,7 +117,7 @@ This skill is prompt-only. It does not install dependencies, contact services, r
 
 ## Scope And Evidence Boundary
 
-Empirically tested scope: PR / diff review. The K+H+T result and the 64%-fabrication number both come from SWE-PRBench experiments at n=50 PRs with paired sign tests, all on PR-review tasks. K+H+T is the best tested default we have for PR review, not a proven global optimum (10 of 20 possible triples were tested).
+Empirically tested scope: PR / diff review. The K+H+T result and the 64%-fabrication number both come from SWE-PRBench experiments at n=50 PRs with paired sign tests, all on PR-review tasks. The reported recall numbers are raw recall; the pre-registered fixed-precision metric was not computable because all arms scored far below the 0.70 precision threshold under the skeptic judge. K+H+T is the best tested default we have for PR review, not a proven global optimum (10 of 20 possible triples were tested).
 
 Broader uses (design critique, file review, refactoring judgment) are supported by the persona briefs and run in source-mode of the verifier, but **the empirical claims do not transfer**. We have no measurement of K+H+T vs other crews on design critique or file review, and the source-mode verifier is a logical adaptation of the diff-mode rubric, not an independently tested procedure.
 

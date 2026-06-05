@@ -11,7 +11,7 @@ This repo is a code-review crew + the empirically tested plugin that packages it
 
 ## Default crew
 
-When asked for "a review", use **Knuth + Hickey + Torvalds**. This is the empirically best-tested 3-persona crew in our SWE-PRBench experiments: n=50, +6.4pp recall over the full 6-sextet (p=0.047), and the highest recall *and* precision of the 10 triples that were tested. Fabrication rate is second-lowest at 0.645 (L+P+T edges it at 0.640, a 0.005 gap on n≈41). Do **not** auto-escalate to the full 6-crew "to be thorough" — adding personas to K+H+T measurably degrades the synthesis. See `experiments/2026-06-01-dissent-ablation/runs/personas/SUMMARY.md` and `experiments/2026-06-01-dissent-ablation/runs/triples/SUMMARY.md`.
+When asked for "a review", use **Knuth + Hickey + Torvalds**. This is the empirically best-tested 3-persona crew in our SWE-PRBench experiments: n=50, +6.4pp raw recall over the full 6-sextet (p=0.047), and the highest raw recall *and* precision of the 10 triples that were tested. Fabrication rate is second-lowest at 0.645 (L+P+T edges it at 0.640, a 0.005 gap on n≈41). Do **not** auto-escalate to the full 6-crew "to be thorough" — adding personas to K+H+T measurably degrades the synthesis. See `experiments/2026-06-01-dissent-ablation/runs/personas/SUMMARY.md` and `experiments/2026-06-01-dissent-ablation/runs/triples/SUMMARY.md`.
 
 For single-lens shortcuts and the full triage logic, load `plugins/code-crew/skills/code-crew/procedures/triage.md`.
 

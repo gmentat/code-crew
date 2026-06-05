@@ -191,12 +191,14 @@ uv run python scripts/analyze.py --run main
 
 ---
 
-## Open items requiring a decision before final OSS release
+## Future replication work
 
-- [ ] Decide whether to rerun/complete the triple search to full n=50 for every tested challenger and score the remaining 10 triples
-- [ ] Decide whether to invest in a non-Claude judge run (cost: ~$260 + API keys) to retire the judge-bias caveat
-- [ ] Decide whether the n=50 sample is enough, or if it should be expanded to 80 per the original protocol
-- [ ] Decide whether to fold this dir's findings up into the top-level code_crew README, or keep the OSS pitch separate from the experimental record
+These are not release blockers for the open-source package; they are the next tests that would make the empirical story stronger.
+
+- [ ] Complete the triple search to full n=50 for every tested challenger and score the remaining 10 triples
+- [ ] Run a non-Claude judge pass to retire the judge-bias caveat
+- [ ] Expand the main sample from n=50 to n=80 per the original protocol, if the extra power is worth the cost
+- [x] Fold this directory's public-facing findings into the top-level README while keeping the full experimental record here
 
 ---
 

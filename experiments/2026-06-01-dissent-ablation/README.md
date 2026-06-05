@@ -2,7 +2,7 @@
 
 Empirical test of the **code_crew pattern** against a single-agent baseline on real code review.
 
-This directory contains a reproducible experiment that measures whether the crew's distinctive features — preserved dissent in synthesis, blind-pass independence, named reasoning archetypes — translate to measurable improvement in code review recall over a budget-matched single Claude agent.
+This directory contains a reproducible experiment that measures whether the crew's distinctive features — preserved dissent in synthesis, blind-pass independence, named reasoning archetypes — translate to measurable improvement in code review recall over single-Claude baselines.
 
 ## TL;DR — what we found
 
@@ -13,8 +13,10 @@ This directory contains a reproducible experiment that measures whether the crew
 
 **Headline:** the pilot did not replicate. At n=50 with an anonymized + skeptic-framed judge:
 - **Preserved-dissent synthesis is NOT the active ingredient** (consensus synthesis is statistically indistinguishable on recall).
-- **Multi-perspective review DOES beat naive single-agent** (+7pp recall, paired p=0.004).
+- **Multi-perspective review DOES beat naive single-agent** (+7pp raw recall, paired p=0.004).
 - The crew's value is in *process* (interpretable disagreement, persona-attributed dissent visible to reviewers) — **not in measurably better issue-list outputs** vs a comparably-budgeted single agent.
+
+Important caveat: the H2 "budget-matched" comparator did not record reliable token usage for the single-agent arm, so H2 should not be cited as a clean equal-compute result. The surviving public claim is the raw-recall sanity comparison against the naive single-agent baseline, plus the process/auditability claim.
 
 Full writeup: [`runs/main/SUMMARY.md`](runs/main/SUMMARY.md). Pilot for comparison: [`runs/pilot/SUMMARY.md`](runs/pilot/SUMMARY.md).
 
@@ -23,10 +25,10 @@ Full writeup: [`runs/main/SUMMARY.md`](runs/main/SUMMARY.md). Pilot for comparis
 Three pre-registered hypotheses, in [`PROTOCOL.md`](PROTOCOL.md):
 
 - **H1 — preserved dissent matters.** Crew synthesis that preserves dissent beats crew synthesis that collapses to consensus on recall (paired sign test).
-- **H2 — multi-pass beats single-pass at equal compute.** Crew beats a single Claude agent with the same realized token budget.
+- **H2 — multi-pass beats single-pass at intended equal compute.** Crew beats a single Claude agent with the same realized token budget. The execution did not capture enough token accounting to validate this as a clean equal-compute comparison; see caveats and `DEVIATIONS.md`.
 - **H3 — personas actually diverge** (manipulation check, gating). If H3 fails, H1/H2 conclusions are aborted.
 
-Substrate: [`foundry-ai/swe-prbench`](https://huggingface.co/datasets/foundry-ai/swe-prbench) — 350 real PRs, human-annotated review comments as ground truth.
+Substrate: [`foundry-ai/swe-prbench`](https://huggingface.co/datasets/foundry-ai/swe-prbench) — 350 real PRs, human-annotated review comments as ground truth. Rerun scripts pin the dataset revision to `b87f5797aef3ed2c3153bb1304ea4d801d36ba6e`.
 
 ## Data and attribution
 
@@ -40,7 +42,7 @@ The crew is designed to be invoked from inside Claude Code / Codex as subagents 
 # Install Python deps (used only for sampling / preprocessing / analysis)
 uv sync
 
-# Sample PRs (deterministic; seed=42)
+# Sample PRs (deterministic; seed=42; dataset revision pinned)
 uv run python scripts/select_prs.py --pilot   # 3 PRs, harness validation
 uv run python scripts/select_prs.py --main    # 50 PRs, the main run
 
@@ -79,8 +81,8 @@ If you want to run this with raw API access (e.g. for a non-Claude judge to remo
 | Outcome | What gets published | **Triggered?** |
 |---|---|---|
 | H1 confirmed + H3 passes | *"Preserved dissent improves PR review recall by Xpp over consensus synthesis at equal compute."* | ❌ |
-| H1 null, H2 confirmed | *"Multi-pass review beats single-pass at equal compute, but dissent isn't the active ingredient."* | ◐ (H2 direction right, n.s.) |
-| **Both null** | ***"Multi-persona review does not outperform single-agent extended-thinking on PR recall at equal budget. OSS pivots to process/audit claim."*** | **✅** |
+| H1 null, H2 confirmed | *"Multi-pass review beats single-pass at equal compute, but dissent isn't the active ingredient."* | ◐ (H2 direction right, n.s.; token accounting incomplete) |
+| **Both null** | ***"Multi-persona review does not outperform single-agent extended-thinking on PR recall at equal budget. OSS pivots to process/audit claim."*** | **✅, with H2 equal-compute caveat** |
 | H3 fails | Methodology note only. Ship v2 with stronger persona enforcement and retest. | n/a (H3 passed) |
 
 OSS framing therefore shifts from "preserved dissent improves recall" → **"the crew's product is auditable disagreement, not better issue lists."**

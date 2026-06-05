@@ -14,6 +14,9 @@ DATA = ROOT / "data"
 RUNS = ROOT / "runs"
 
 PERSONAS = ["knuth", "hickey", "torvalds", "liskov", "pike", "dijkstra"]
+SWE_PRBENCH_DATASET = "foundry-ai/swe-prbench"
+SWE_PRBENCH_CONFIG = "eval_split"
+SWE_PRBENCH_REVISION = "b87f5797aef3ed2c3153bb1304ea4d801d36ba6e"  # pragma: allowlist secret
 
 
 @dataclass
@@ -61,7 +64,11 @@ def load_pr_by_task_id(task_id: str) -> dict[str, Any]:
     """Load a single PR row from swe-prbench by task_id."""
     from datasets import load_dataset
 
-    ds = load_dataset("foundry-ai/swe-prbench", "eval_split")["train"]
+    ds = load_dataset(
+        SWE_PRBENCH_DATASET,
+        SWE_PRBENCH_CONFIG,
+        revision=SWE_PRBENCH_REVISION,
+    )["train"]
     for row in ds:
         if row["task_id"] == task_id:
             return dict(row)

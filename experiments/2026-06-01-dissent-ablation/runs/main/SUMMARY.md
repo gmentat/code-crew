@@ -38,6 +38,8 @@ Per the pre-registered decision rules in `PROTOCOL.md`:
 
 > **H1 null + H2 null** → "At equal token budget, multi-persona review does not outperform single-agent extended-thinking on PR recall."
 
+Release caveat: the Workflow-driven run did not capture reliable token counts for Arm C, so treat the "equal token budget" wording as the intended comparator from the protocol, not as a verified equal-compute result.
+
 The honest reading is slightly more nuanced:
 
 1. **Multi-pass crew beats naive single-agent** (+7.4pp recall, p=0.0035). Multi-perspective review *does* surface more concerns than asking one Claude instance once.
@@ -68,9 +70,11 @@ Per `PROTOCOL.md`'s decision rule: "OSS framing shifts from 'better outputs' to 
 
 3. **`PROTOCOL.md` specified n=80; we ran n=50.** Workflow agent cap limited shard size; recorded in `DEVIATIONS.md`. Additional power would tighten CIs but is unlikely to flip an H1 verdict where the point estimate is +0.012 with 32 ties out of 50.
 
-4. **The synthesis prompts may be the active variable, not the dissent mechanism.** A different operationalization of "preserved dissent" (e.g. structured dissent-with-evidence section that the consumer must address) could produce different results. We tested *one* operationalization of dissent preservation; it didn't separate.
+4. **H2 token accounting incomplete.** Arm C was intended as a budget-matched extended-thinking single-agent comparator, but the run record does not prove a hard token cap or a realized token match within 15%. Do not cite H2 as a clean equal-compute result.
 
-5. **Naive baseline is genuinely naive.** It's a single Claude call with no thinking budget and a short prompt. The +0.074 delta against it is the easiest comparison to win; the meaningful comparison is H2 (budget-matched single-agent with extended thinking), which is null.
+5. **The synthesis prompts may be the active variable, not the dissent mechanism.** A different operationalization of "preserved dissent" (e.g. structured dissent-with-evidence section that the consumer must address) could produce different results. We tested *one* operationalization of dissent preservation; it didn't separate.
+
+6. **Naive baseline is genuinely naive.** It's a single Claude call with no thinking budget and a short prompt. The +0.074 delta against it is the easiest comparison to win; the stronger intended comparison is H2, which is null and token-accounting-limited.
 
 ## What changed vs the pilot
 

@@ -6,11 +6,11 @@ Loaded when the host first invokes Code Crew on a review request. Decides which 
 
 | Request shape | Crew | Why |
 |---|---|---|
-| "review this PR / diff" (default) | **K+H+T** | Empirically the best tested triple (n=50, +6.4pp recall vs the full sextet, p=0.047). Read `briefs/{knuth,hickey,torvalds}_agent.md`. |
+| "review this PR / diff" (default) | **K+H+T** | Empirically the best tested triple (n=50, +6.4pp raw recall vs the full sextet, p=0.047). Read `briefs/{knuth,hickey,torvalds}_agent.md`. |
 | "should I land this patch" / "is this ready to merge" | **Torvalds solo** (or T+K if architecture is in scope) | Patch-acceptance is Torvalds's specific lens. |
 | "is this algorithm correct" / "is the complexity claim right" | **Knuth solo** | Algorithmic rigor and invariant analysis. |
 | "is this design overcomplicated" / "what's the simple version" | **Hickey solo** | Simple-not-easy, value/identity/time, incidental complexity. |
-| "audit for correctness" / "what's structurally wrong" | **Dijkstra solo** | Formal-correctness style brutal critique. Best individual solo recall in our experiments (0.175). |
+| "audit for correctness" / "what's structurally wrong" | **Dijkstra solo** | Formal-correctness style brutal critique. Best individual solo raw recall in our experiments (0.175). |
 | "audit abstractions / contracts / subtypes" | **Liskov solo** | Substitution discipline, contract review. |
 | "could this be smaller / more composable" | **Pike solo** | Unix-philosophy decomposition. |
 | "exhaustive sextet" / "council review" / explicit user ask | **K+H+T+D+L+P** | Available; in our experiments it scored 0.151 vs K+H+T at 0.215, so use only when the user wants maximum interpretive diversity, not for better recall. |

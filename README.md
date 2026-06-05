@@ -10,7 +10,7 @@ This is a **review-and-improvement shop for software**. The crew is designed to 
 
 | Problem | Code Crew response |
 |---|---|
-| Single-pass reviews miss classes of defects | Knuth + Hickey + Torvalds (K+H+T) blind passes cover rigor, simplicity, and maintainer reality separately |
+| Single-pass reviews miss classes of defects | Knuth + Hickey + Torvalds (K+H+T: Donald Knuth, Rich Hickey, Linus Torvalds) blind passes cover rigor, simplicity, and maintainer reality separately |
 | Persona roleplay fabricates plausible findings | Mandatory diff-grounded verifier drops uncited claims before synthesis |
 | Bigger crews feel thorough but degrade output | Default stays at the measured 3-persona preset; sextet is opt-in |
 | Agent edits drift into drive-by refactors | Implementation discipline requires stated assumptions, surgical scope, and concrete verification |
@@ -26,7 +26,7 @@ codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
 
-The first command registers this GitHub repo as a Codex plugin marketplace. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs the `code-crew` plugin from that marketplace.
+The first command tells Codex where this repo's plugin marketplace lives. Most users run it once per Codex profile or machine; after that, the second command installs `code-crew` from that marketplace.
 
 Codex installs [`plugins/code-crew/`](plugins/code-crew/): a `.codex-plugin/plugin.json` manifest, the `code-crew` skill, and the full core persona briefs bundled under `skills/code-crew/briefs/`.
 
@@ -73,6 +73,8 @@ Code Crew does not currently provide `/code-crew` commands. If command support b
 Headlines from [`experiments/`](experiments/) (read each run's `SUMMARY.md` for full details):
 
 `pp` means **percentage points**. For example, +7pp means recall moved from roughly 20% to 27%, not a 7% relative increase.
+
+The recall headlines below are **raw recall**. The original fixed-precision primary metric was not computable in the main run because all arms scored far below the 0.70 precision threshold under the skeptic judge, so the public claims use the raw recall analysis and carry that caveat.
 
 - **Multi-perspective beats naive single Claude** on PR review recall (+7 percentage points, paired n=50, p=0.004).
 - **Three personas beat six.** The K+H+T triple (Knuth + Hickey + Torvalds: Donald Knuth, Rich Hickey, and Linus Torvalds) beats the full sextuplet by +6.4 percentage points recall at n=50 (p=0.047) with better precision and lower fabrication. **The default recommended crew is 3, not 6.**
@@ -193,6 +195,7 @@ For a full code-review run, the operating rhythm is: Foreman dispatches each len
 - [crew_disagreements.md](crew_disagreements.md) — built-in disagreement map (the seams the system is designed around)
 - [safety_floor.md](safety_floor.md) — autonomy boundaries, AI provenance, refusal rules (binding)
 - [INSTALL.md](INSTALL.md) — install paths for Codex, Claude Code, Hermes, and AgentSkills-compatible agents
+- [NOTICE](NOTICE) — license boundary for MIT project files vs CC BY SWE-PRBench-derived experiment data
 - [CURSOR.md](CURSOR.md) — Cursor project-rule usage
 - [plugins/code-crew/](plugins/code-crew/) — distributable plugin/skill package
 - [plugins/code-crew/CURSOR.md](plugins/code-crew/CURSOR.md) — Cursor usage from the plugin package alone
@@ -203,4 +206,4 @@ For a full code-review run, the operating rhythm is: Foreman dispatches each len
 
 ## Release hygiene
 
-Cut public releases from tracked Git contents, for example with `git archive HEAD` or GitHub's source archive. Do not publish a manual zip of a local working tree: ignored directories such as `/runs/`, `/docs/superpowers/`, `.claude/`, and `.gstack/` are developer-local unless intentionally added to Git.
+Cut public releases from tracked Git contents, for example with `git archive HEAD` or GitHub's source archive. Do not publish a manual zip of a local working tree: ignored directories such as `/runs/`, `/docs/superpowers/`, and local tool config folders are developer-local unless intentionally added to Git.

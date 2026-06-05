@@ -20,7 +20,7 @@ codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
 
-The marketplace command registers this GitHub repo as a Codex plugin source. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs `code-crew` from that source.
+The marketplace command tells Codex where this repo's plugin source lives. Most users run it once per Codex profile or machine; after that, the second command installs `code-crew` from that source.
 
 Install from a local clone:
 
@@ -130,5 +130,7 @@ It only installs skill files and persona briefs. Nothing runs in the background.
 Code Crew is a prompt skill. The host agent loads the skill when selected explicitly, invoked by name, or routed from a matching review/design request. It is not a resident process and does not run on every file edit or commit.
 
 In Codex, the installed skill may appear as `code-crew:code-crew`. That is expected. It is not a callable tool exposed in the tool list.
+
+If an agent says it cannot find a Code Crew callable tool after you selected `$code-crew`, that is a routing mistake. The skill is already loaded; it should use the host's generic subagent mechanism when available, or label the run as a single-context approximation when not.
 
 If a runtime supports custom commands, any command should call the same `code-crew` skill instructions rather than maintaining a separate prompt.

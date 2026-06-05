@@ -59,3 +59,19 @@ These do not eliminate Claude-judging-Claude bias; they reduce its most obvious 
 **Main-run fix:** One LLM classifier per PR receives all 6 persona issue lists and outputs a 6×6 pairwise-similarity matrix where two issues match if they identify the same underlying concern (paraphrase OK). `analyze.py` falls back to the old exact fingerprint if `h3_similarity.json` is missing.
 
 **Caveat:** This is itself a Claude-classifying-Claude step. We accept it as gating-only — H3 is a sanity check that personas diverged, not a headline metric. If H3 reports < 0.30 distance, the experiment is aborted regardless of H1/H2 results.
+
+## 2026-06-05 — H2 token-budget comparison not cleanly validated
+
+**Original protocol:** Arm C is a single Claude agent with extended thinking, hard-capped at the realized median total token count of Arm A. If the token gap exceeds 15%, the H2 comparison is invalid.
+
+**Reality:** The Workflow-driven main run did not capture reliable input/output token accounting for the single-agent arms; materialized metadata records zero token counts for those outputs. The prompt asked the single-agent arm to take extra care, but the run record does not prove a hard token cap or a realized token match within 15%.
+
+**Adjustment:** Treat H2 as an intended extended-thinking single-agent comparator, not as a clean equal-compute result. Do not cite the H2 result as proving or disproving equal-compute superiority. The public empirical claim that survives is the raw-recall sanity comparison against the naive single-agent baseline, plus the process/auditability claim.
+
+## 2026-06-05 — Dataset revision pinned for reruns
+
+**Original protocol:** Load `foundry-ai/swe-prbench` / `eval_split` from HuggingFace.
+
+**Reality:** The scripts originally loaded the dataset without a revision, so future reruns could drift if upstream changed the dataset.
+
+**Adjustment:** Rerun scripts now pin the dataset revision to `b87f5797aef3ed2c3153bb1304ea4d801d36ba6e`. The committed sampled files (`data/prs_pilot.json`, `data/prs_main.json`) remain the files of record for the completed run.

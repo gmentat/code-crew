@@ -13,6 +13,8 @@ from pathlib import Path
 import click
 from datasets import load_dataset
 
+from lib import SWE_PRBENCH_CONFIG, SWE_PRBENCH_DATASET, SWE_PRBENCH_REVISION
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 SEED = 42
@@ -72,7 +74,11 @@ def stratified_sample(
 )
 def main(pilot: bool, main_run: bool) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
-    ds = load_dataset("foundry-ai/swe-prbench", "eval_split")["train"]
+    ds = load_dataset(
+        SWE_PRBENCH_DATASET,
+        SWE_PRBENCH_CONFIG,
+        revision=SWE_PRBENCH_REVISION,
+    )["train"]
     all_rows = list(ds)
 
     if pilot and main_run:

@@ -16,8 +16,8 @@ See [project_workflow.md](project_workflow.md) for the full autonomous loop.
 
 Empirical claims about this crew are tested under [`experiments/`](experiments/). Headlines (full writeups in each run's `SUMMARY.md`):
 
-- **Multi-perspective review beats a naive single Claude call** on PR review recall (+7pp, paired n=50, p=0.004). `experiments/2026-06-01-dissent-ablation/runs/main/`.
-- **Preserved-dissent synthesis does NOT measurably improve outputs** over consensus synthesis at equal compute. Dissent visibility is a UX product (reviewer can see what each lens said), not a recall-improvement mechanism.
+- **Multi-perspective review beats a naive single Claude call** on PR review raw recall (+7pp, paired n=50, p=0.004). `experiments/2026-06-01-dissent-ablation/runs/main/`.
+- **Preserved-dissent synthesis does NOT measurably improve outputs** over consensus synthesis in the main run. Dissent visibility is a UX product (reviewer can see what each lens said), not a recall-improvement mechanism.
 - **The recommended default crew is THREE personas, not six**: Knuth + Hickey + Torvalds beats the full sextuplet by +6.4pp recall at n=50 (p=0.047), with higher precision and lower fabrication. Adding the other three (Dijkstra, Liskov, Pike) measurably degrades output quality. `experiments/2026-06-01-dissent-ablation/runs/personas/`.
 - **Named archetypes don't improve recall over generic numbered reviewers** (Δ ≈ 0, p=0.50). What they do produce is ~18% more inter-pass divergence (named Jaccard distance 0.57 vs generic 0.48), which surfaces as auditable disagreement in the synthesis. **Names are for transparency, not for output quality.**
 - **The choice of which 3 matters.** K+H+T beats D+L+P by +5.4pp (p=0.054 borderline). Don't substitute personas arbitrarily.
