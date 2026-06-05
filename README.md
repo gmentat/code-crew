@@ -1,8 +1,8 @@
 # Code Crew
 
-A downloadable famous-programmer code review crew for Codex, Claude Code, Hermes, and AgentSkills-compatible agents.
+A downloadable famous-programmer code review crew for Codex, Claude Code, Hermes, Cursor, and AgentSkills-compatible agents.
 
-Code Crew packages named software-engineering reasoning lenses for working through code quality, system design, and code improvement. Foreman dispatches the right persona specs as independent subagents, each follows its process, and Foreman synthesizes the returned reports.
+Code Crew packages named software-engineering reasoning lenses for working through code quality, system design, and code improvement. Think of it as a reusable review discipline you can ask for when a diff deserves more than one opinion. Foreman dispatches the right persona specs as independent subagents, each follows its process, and Foreman synthesizes the returned reports.
 
 This is a **review-and-improvement shop for software**. The crew is designed to attack a piece of code or a system from multiple angles, with built-in disagreement so you don't get a comfortable consensus that misses what's wrong.
 
@@ -10,14 +10,14 @@ This is a **review-and-improvement shop for software**. The crew is designed to 
 
 | Problem | Code Crew response |
 |---|---|
-| Single-pass reviews miss classes of defects | K+H+T blind passes cover rigor, simplicity, and maintainer reality separately |
+| Single-pass reviews miss classes of defects | Knuth + Hickey + Torvalds (K+H+T) blind passes cover rigor, simplicity, and maintainer reality separately |
 | Persona roleplay fabricates plausible findings | Mandatory diff-grounded verifier drops uncited claims before synthesis |
 | Bigger crews feel thorough but degrade output | Default stays at the measured 3-persona preset; sextet is opt-in |
 | Agent edits drift into drive-by refactors | Implementation discipline requires stated assumptions, surgical scope, and concrete verification |
 
 ## Install
 
-The canonical distributable package is [`plugins/code-crew/`](plugins/code-crew/). It is prompt-only: no binaries, hooks, MCP servers, background processes, or network calls.
+The canonical distributable package is [`plugins/code-crew/`](plugins/code-crew/). It is prompt-only: it adds reusable skill instructions and persona briefs, not running software.
 
 Codex:
 
@@ -25,6 +25,8 @@ Codex:
 codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
+
+The first command registers this GitHub repo as a Codex plugin marketplace. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs the `code-crew` plugin from that marketplace.
 
 Codex installs [`plugins/code-crew/`](plugins/code-crew/): a `.codex-plugin/plugin.json` manifest, the `code-crew` skill, and the full core persona briefs bundled under `skills/code-crew/briefs/`.
 
@@ -52,7 +54,7 @@ For local development and fallback manual installs, see [`INSTALL.md`](INSTALL.m
 
 ## After install
 
-Installing Code Crew makes the `code-crew` skill available to the host agent. It does **not** install a daemon, background reviewer, git hook, MCP server, or custom slash command.
+Installing Code Crew makes the `code-crew` skill available to the host agent. It does not run in the background or review every change automatically; you ask for it when you want the crew.
 
 In Codex, use it in one of three ways:
 
@@ -68,8 +70,10 @@ Code Crew does not currently provide `/code-crew` commands. If command support b
 
 Headlines from [`experiments/`](experiments/) (read each run's `SUMMARY.md` for full details):
 
-- **Multi-perspective beats naive single Claude** on PR review recall (+7pp, paired n=50, p=0.004).
-- **Three personas beat six.** The K+H+T triple (Knuth + Hickey + Torvalds) beats the full sextuplet by +6.4pp recall at n=50 (p=0.047) with better precision and lower fabrication. **The default recommended crew is 3, not 6.**
+`pp` means **percentage points**. For example, +7pp means recall moved from roughly 20% to 27%, not a 7% relative increase.
+
+- **Multi-perspective beats naive single Claude** on PR review recall (+7 percentage points, paired n=50, p=0.004).
+- **Three personas beat six.** The K+H+T triple (Knuth + Hickey + Torvalds: Donald Knuth, Rich Hickey, and Linus Torvalds) beats the full sextuplet by +6.4 percentage points recall at n=50 (p=0.047) with better precision and lower fabrication. **The default recommended crew is 3, not 6.**
 - **Named archetypes don't improve recall over generic numbered reviewers** (Δ ≈ 0, p=0.50). What they do is produce ~18% more semantic divergence between passes, which surfaces as auditable disagreement. Names are for interpretability, not output quality.
 - **Preserved-dissent synthesis ≠ better outputs.** Dissent visibility is a UX product (reviewer can see who said what); it doesn't improve recall over consensus synthesis.
 - **K+H+T is the best tested default, not a magic formula.** A follow-up triple search tested 10 of 20 possible 3-persona combinations and found no challenger with a better point estimate, but several challengers are statistical ties and the untested 10 remain open.
@@ -93,7 +97,7 @@ The full literature synthesis that informed individual design decisions (a 4-sur
 
 ## Why Knuth + Hickey + Torvalds?
 
-The default is **K+H+T Classic**: Knuth for rigor, Hickey for simplicity/data/time, and Torvalds for maintainer reality. The names are not magic. They are memorable review contracts for three complementary engineering lenses.
+The default is **K+H+T Classic**: Knuth for rigor, Hickey for simplicity/data/time, and Torvalds for maintainer reality. In full: Donald Knuth, Rich Hickey, and Linus Torvalds, used here as reasoning archetypes rather than impersonations. The names are not magic. They are memorable review contracts for three complementary engineering lenses.
 
 Synthetic roles may become useful specialized presets, but they need to beat this default in the harness before replacing it. For v0, K+H+T is the public default because it is the best-tested composition and the easiest version to explain.
 

@@ -8,7 +8,7 @@ Default preset:
 - Hickey: simplicity, data, value/identity/time, incidental complexity.
 - Torvalds: maintainer-grade patch acceptance and practical systems review.
 
-The package is prompt-only. It adds no tools, MCP servers, network calls, hooks, or executable code.
+The package is prompt-only. It adds reusable skill instructions and persona briefs, not running software.
 
 The package includes the full core persona briefs under `skills/code-crew/briefs/`. Those files are byte-identical to the persona prompts used by the experiment harness.
 
@@ -26,6 +26,8 @@ From GitHub:
 codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
+
+The first command registers this GitHub repo as a Codex plugin marketplace. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs the `code-crew` plugin from that marketplace.
 
 From a full local clone, run from the repository root:
 
@@ -92,7 +94,7 @@ The full source repo includes a Cursor project rule at `.cursor/rules/code-crew.
 
 ## Usage
 
-Code Crew installs as a skill. It does not add a daemon, background hook, MCP server, or custom slash command.
+Code Crew installs as a skill. It does not run in the background or review every change automatically; ask for it when you want the crew.
 
 In Codex, either choose it from `/skills` or invoke it directly:
 

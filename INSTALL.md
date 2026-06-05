@@ -20,6 +20,8 @@ codex plugin marketplace add gmentat/code-crew
 codex plugin add code-crew@code-crew
 ```
 
+The marketplace command registers this GitHub repo as a Codex plugin source. Run it once per Codex profile/machine, unless you have already added the marketplace. The second command installs `code-crew` from that source.
+
 Install from a local clone:
 
 ```bash
@@ -121,7 +123,7 @@ The skill adds the famous-programmer review crew:
 - Hickey for simplicity, data, value/identity/time, and incidental complexity.
 - Torvalds for practical maintainer review, patch scope, and working systems.
 
-It does not install binaries, hooks, MCP servers, or background processes.
+It only installs skill files and persona briefs. Nothing runs in the background.
 
 ## Invocation Model
 
