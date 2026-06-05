@@ -1,7 +1,7 @@
 ---
 name: code-crew
 description: Use the famous-programmer Code Crew for code review, design critique, refactoring judgment, and multi-lens engineering decisions. Default crew Knuth+Hickey+Torvalds with mandatory diff-grounded verifier between blind passes and synthesis.
-version: 0.2.0
+version: 0.2.1
 license: MIT
 metadata: {"tags":["code-review","software-engineering","multi-agent","critique"]}
 ---
@@ -9,6 +9,8 @@ metadata: {"tags":["code-review","software-engineering","multi-agent","critique"
 # Code Crew
 
 Use Code Crew when the user asks for a serious software review, architecture critique, refactoring decision, or "what would the crew say" analysis.
+
+Invocation note: when a user selects this skill from Codex or writes `$code-crew ...`, the skill is already invoked. Do not look for a separate "Code Crew review" callable tool. Code Crew is a skill/procedure package; if the host lacks subagent dispatch, label the result as a single-context approximation and continue with the verifier and synthesis rules that can be applied locally.
 
 Code Crew uses reasoning archetypes inspired by famous programmers and computer scientists. These are not impersonations, endorsements, or claims to represent the real people. They are named review contracts: each lens focuses attention on a different kind of engineering failure.
 
