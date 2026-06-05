@@ -15,11 +15,12 @@ Code Crew uses reasoning archetypes inspired by famous programmers and computer 
 ## How To Run A Review
 
 ```
-1. triage   → procedures/triage.md   ← which crew?
-2. briefs   → briefs/<persona>_agent.md  ← per-persona blind passes
-3. verify   → procedures/verify.md   ← drop fabrications against the diff
-4. synth    → procedures/synthesis.md  ← decision-changing findings only
-5. artifact → procedures/artifact-format.md  ← only if asked
+1. triage      → procedures/triage.md   ← which crew?
+2. discipline  → procedures/implementation-discipline.md  ← only when changing code
+3. briefs      → briefs/<persona>_agent.md  ← per-persona blind passes
+4. verify      → procedures/verify.md   ← drop fabrications against the diff
+5. synth       → procedures/synthesis.md  ← decision-changing findings only
+6. artifact    → procedures/artifact-format.md  ← only if asked
 ```
 
 Each step is in a file. Load it when you reach that step. Do not skip the verifier — prior runs measured ~64% of K+H+T synthesis findings as FABRICATED by the judge on SWE-PRBench, and the verifier is the precision gate designed to drop them before synthesis.
@@ -50,9 +51,14 @@ The skill ships these files; load them on demand, not always-on:
 **Procedures** (`procedures/`): the steps of a review.
 
 - `procedures/triage.md` — pick the crew before any pass runs
+- `procedures/implementation-discipline.md` — scope, assumptions, and verification loop for code-changing follow-ups
 - `procedures/verify.md` — diff-grounded gate; **mandatory** between blind passes and synthesis
 - `procedures/synthesis.md` — final review writeup with severity ranking
 - `procedures/artifact-format.md` — `runs/YYYY-MM-DD-topic_host/` layout if persistence is requested
+
+**Examples** (`examples/`): optional calibration material.
+
+- `examples/review-examples.md` — good/bad examples for crew runs, findings, verifier output, and implementation follow-up
 
 For a default K+H+T run, you will load: triage.md (briefly), 3 briefs (one per persona ≈ 25 KB combined), verify.md, synthesis.md. Total ≈34 KB read on-demand. Always-on cost of this skill is just this SKILL.md (~100 tok per session per Claude Code's projection); the on-demand content stays out of the always-on context.
 
@@ -68,6 +74,7 @@ These are not stylistic guidance — they are conditions for calling the output 
 6. **No recommendation in conflict with findings.** Listing 2 Critical findings precludes a LAND recommendation. Reconcile before emitting.
 7. **No silent personas.** If a single lens carries the entire review (all findings from one persona, others empty), say so explicitly in the output — that is a data point about the diff, not a hiding-the-disagreement moment.
 8. **Highest reasoning budget for dispatched lenses.** When the host exposes a subagent reasoning-budget setting, use the highest available for every persona pass and for the verifier. In Codex, request `reasoning_effort: xhigh` on each `spawn_agent` call. In Claude Code, prefer the highest-thinking model variant or the maximum `thinking.budget_tokens` the host allows. If the host exposes no such control, proceed at the default and note "ran at host-default reasoning budget" in the Verification block. A K+H+T crew run at minimal-thinking budgets is not what the experiments measured and should not be labelled a formal crew run.
+9. **No implementation scope creep.** When the user asks Code Crew to change code, load `procedures/implementation-discipline.md` before editing. The implementation must state assumptions, keep the diff tied to the request, and verify with concrete checks.
 
 ## Single-Lens Shortcuts
 

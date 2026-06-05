@@ -10,12 +10,12 @@ This is the review-oriented overview of every experiment run in this directory. 
 
 | # | Experiment | n | Status | Headline |
 |---|---|---|---|---|
-| 1 | Pilot (DA-PRB) | 3 PRs | ✅ committed `1c44030` | Dissent crew dominates, +20pp recall. *Did not replicate.* |
-| 2 | Main run (DA-PRB) | 50 PRs | ✅ committed `d70a58e` | Pilot reversed. Dissent ≠ better; multi-pass beats naive single by +7pp. |
-| 3 | Persona ablation | 50 PRs | ✅ committed `944ab2c` | 3-persona crew (K+H+T) beats the full 6-crew by +6.4pp. Named archetypes don't improve recall vs generic, but produce 18% more semantic divergence. |
-| 4 | Triple composition search | 40-50 PRs per tested triple | ✅ partial coverage | 10 of 20 triples tested. **K+H+T remains the best point estimate**, but several challengers are statistical ties and 10 triples remain untested. |
-| 5 | Persona framing A/B (direct-named vs archetype) | 50 PRs paired | ✅ complete | **Direct-named "X — accomplishments" framing underperformed archetype-inspired framing on every metric** (−3.9pp recall, −3.5pp precision p=0.027, +9.9pp fabrication). Keep archetype framing; matches independent research prediction. |
-| 6 | Persona behavioral-anchors A/B | 50 PRs paired | ✅ complete | **NULL by pre-registered threshold; direction slightly negative.** Adding 4 method anchors per persona: Δ recall = −2.3pp p=0.40; Δ precision = −2.4pp p=0.48. Literature's "anchors lift quality" prediction did NOT replicate. Briefs appear saturated; look elsewhere for quality lifts. |
+| 1 | Pilot (DA-PRB) | 3 PRs | ✅ complete — `runs/pilot/` | Dissent crew dominates, +20pp recall. *Did not replicate.* |
+| 2 | Main run (DA-PRB) | 50 PRs | ✅ complete — `runs/main/` | Pilot reversed. Dissent ≠ better; multi-pass beats naive single by +7pp. |
+| 3 | Persona ablation | 50 PRs | ✅ complete — `runs/personas/` | 3-persona crew (K+H+T) beats the full 6-crew by +6.4pp. Named archetypes don't improve recall vs generic, but produce 18% more semantic divergence. |
+| 4 | Triple composition search | 40-50 PRs per tested triple | ✅ partial coverage — `runs/triples/` | 10 of 20 triples tested. **K+H+T remains the best point estimate**, but several challengers are statistical ties and 10 triples remain untested. |
+| 5 | Persona framing A/B (direct-named vs archetype) | 50 PRs paired | ✅ complete — `runs/framing/` | **Direct-named "X — accomplishments" framing underperformed archetype-inspired framing on every metric** (−3.9pp recall, −3.5pp precision p=0.027, +9.9pp fabrication). Keep archetype framing; matches independent research prediction. |
+| 6 | Persona behavioral-anchors A/B | 50 PRs paired | ✅ complete — `runs/anchored/` | **NULL by pre-registered threshold; direction slightly negative.** Adding 4 method anchors per persona: Δ recall = −2.3pp p=0.40; Δ precision = −2.4pp p=0.48. Literature's "anchors lift quality" prediction did NOT replicate. Briefs appear saturated; look elsewhere for quality lifts. |
 
 ---
 
@@ -131,7 +131,7 @@ K+H+T uniquely spans all three axes with no internal redundancy. D+L+P has rigor
 | User request | Response | Result |
 |---|---|---|
 | "Test the crew on a real benchmark" | Built DA-PRB harness on `foundry-ai/swe-prbench` | Pilot ran, gave optimistic n=3 result |
-| "Put it in the OSS repo as tests" | Committed full harness + pilot at `1c44030` | Reproducible from clone |
+| "Put it in the OSS repo as tests" | Added the full harness and pilot artifacts under `runs/pilot/` | Reproducible from clone |
 | "What's left — should we drop dissent?" | Ran n=50 with bias-mitigated judge | Pilot null; pivoted OSS framing |
 | "Drop dissent if it doesn't work; play with personas" | Persona ablation: solos vs sextuplet vs triples vs generic | Triple K+H+T wins; names don't help recall |
 | "Maybe some personas are weaker?" | Profile + triple composition search (in progress) | Profile says individuals are fine; testing if K+H+T is optimal among C(6,3) |

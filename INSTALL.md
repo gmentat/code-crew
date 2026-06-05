@@ -27,6 +27,10 @@ codex plugin marketplace add .
 codex plugin add code-crew@code-crew
 ```
 
+If you downloaded only the `plugins/code-crew/` package directory, install from the GitHub marketplace source above or place that package under your own Codex marketplace. A bare plugin directory is not itself a Codex marketplace root.
+
+Do not run `codex plugin marketplace add .` from inside `plugins/code-crew/`; that directory is a plugin root, not a supported Codex marketplace shape.
+
 This installs `plugins/code-crew/`, including the full core persona briefs in `plugins/code-crew/skills/code-crew/briefs/`.
 
 After installation, Code Crew is available as a skill. In an interactive Codex session, either select it with `/skills` or invoke it directly:
@@ -93,6 +97,21 @@ hermes skills list | grep code-crew
 The plugin root includes `openclaw.plugin.json`, which points at the same `SKILL.md` folder. A local OpenClaw binary was not available during validation, so this repo does not publish a tested OpenClaw CLI command yet.
 
 Use `plugins/code-crew/` as the plugin root in runtimes that support OpenClaw-style plugin manifests. Use `plugins/code-crew/skills/code-crew/` as the skill root in runtimes that support AgentSkills-compatible `SKILL.md` folders.
+
+## Cursor
+
+From a full source clone, Cursor can use the project rule already committed at `.cursor/rules/code-crew.mdc`.
+
+To install the rule into another project:
+
+```bash
+mkdir -p /path/to/target-project/.cursor/rules
+cp .cursor/rules/code-crew.mdc /path/to/target-project/.cursor/rules/code-crew.mdc
+```
+
+If you downloaded only the plugin package, copy `plugins/code-crew/cursor/code-crew.mdc` into the target project's `.cursor/rules/` directory instead.
+
+The Cursor rule is opt-in. It does not run as an always-on reviewer; ask Cursor to use Code Crew when you want the review.
 
 ## What It Installs
 

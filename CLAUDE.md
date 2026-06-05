@@ -34,6 +34,7 @@ When editing the plugin (`plugins/code-crew/`):
 - Run the Codex validator too: `uvx --with pyyaml python ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ./plugins/code-crew`.
 - End-to-end install/uninstall the plugin (`claude plugin marketplace add ./ --scope project` → `install` → `details` → `uninstall` → `marketplace remove`) before claiming the plugin works.
 - For changes to procedure files or hard gates, smoke-test the actual skill invocation: `claude --plugin-dir ./plugins/code-crew -p "Use code-crew to review the following diff..."` with a known-buggy diff.
+- Keep duplicated distribution surfaces synchronized when changing usage or install behavior: root `README.md`, `INSTALL.md`, `CURSOR.md`, `.cursor/rules/code-crew.mdc`, `plugins/code-crew/CURSOR.md`, `plugins/code-crew/cursor/code-crew.mdc`, `plugins/code-crew/README.md`, plugin manifests, marketplace manifests, and `plugins/code-crew/skills/code-crew/SKILL.md`.
 
 ## Experiments rules
 

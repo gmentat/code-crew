@@ -6,6 +6,15 @@ Code Crew packages named software-engineering reasoning lenses for working throu
 
 This is a **review-and-improvement shop for software**. The crew is designed to attack a piece of code or a system from multiple angles, with built-in disagreement so you don't get a comfortable consensus that misses what's wrong.
 
+## Problems Code Crew Solves
+
+| Problem | Code Crew response |
+|---|---|
+| Single-pass reviews miss classes of defects | K+H+T blind passes cover rigor, simplicity, and maintainer reality separately |
+| Persona roleplay fabricates plausible findings | Mandatory diff-grounded verifier drops uncited claims before synthesis |
+| Bigger crews feel thorough but degrade output | Default stays at the measured 3-persona preset; sextet is opt-in |
+| Agent edits drift into drive-by refactors | Implementation discipline requires stated assumptions, surgical scope, and concrete verification |
+
 ## Install
 
 The canonical distributable package is [`plugins/code-crew/`](plugins/code-crew/). It is prompt-only: no binaries, hooks, MCP servers, background processes, or network calls.
@@ -36,6 +45,8 @@ hermes skills install https://raw.githubusercontent.com/gmentat/code-crew/main/p
 ```
 
 OpenClaw-compatible runtimes: the package includes [`plugins/code-crew/openclaw.plugin.json`](plugins/code-crew/openclaw.plugin.json), but this repository does not yet publish a locally verified OpenClaw CLI install command.
+
+Cursor: this repo includes a project rule at [`.cursor/rules/code-crew.mdc`](.cursor/rules/code-crew.mdc). The plugin package also includes a copyable template at [`plugins/code-crew/cursor/code-crew.mdc`](plugins/code-crew/cursor/code-crew.mdc). It is an explicit-invocation rule, not an always-on reviewer. See [`CURSOR.md`](CURSOR.md).
 
 For local development and fallback manual installs, see [`INSTALL.md`](INSTALL.md).
 
@@ -176,8 +187,14 @@ For a full code-review run, the operating rhythm is: Foreman dispatches each len
 - [crew_disagreements.md](crew_disagreements.md) — built-in disagreement map (the seams the system is designed around)
 - [safety_floor.md](safety_floor.md) — autonomy boundaries, AI provenance, refusal rules (binding)
 - [INSTALL.md](INSTALL.md) — install paths for Codex, Claude Code, Hermes, and AgentSkills-compatible agents
+- [CURSOR.md](CURSOR.md) — Cursor project-rule usage
 - [plugins/code-crew/](plugins/code-crew/) — distributable plugin/skill package
+- [plugins/code-crew/CURSOR.md](plugins/code-crew/CURSOR.md) — Cursor usage from the plugin package alone
 - `agents/` — core persona files (historical archetypes)
 - `agents/operations/` — synthetic ops-agent files (Foreman, Surveyor, Forge, Sentry, Telemeter, Ledger, Scribe)
 - `agents/council/` — extended council persona files
 - `runs/` — local formal run history, ignored by default unless a run is intentionally published with `git add -f`
+
+## Release hygiene
+
+Cut public releases from tracked Git contents, for example with `git archive HEAD` or GitHub's source archive. Do not publish a manual zip of a local working tree: ignored directories such as `/runs/`, `/docs/superpowers/`, `.claude/`, and `.gstack/` are developer-local unless intentionally added to Git.
