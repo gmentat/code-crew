@@ -65,6 +65,27 @@ def load_frontmatter(path: Path, validation: Validation) -> dict[str, Any]:
     return value
 
 
+def find_marketplace_plugin(
+    marketplace: dict[str, Any], path: Path, validation: Validation
+) -> dict[str, Any]:
+    plugins = marketplace.get("plugins")
+    if not isinstance(plugins, list):
+        validation.errors.append(f"{path.relative_to(ROOT)}: plugins must be a list")
+        return {}
+
+    matches = [
+        plugin
+        for plugin in plugins
+        if isinstance(plugin, dict) and plugin.get("name") == "code-crew"
+    ]
+    if len(matches) != 1:
+        validation.errors.append(
+            f"{path.relative_to(ROOT)}: expected exactly one code-crew plugin entry"
+        )
+        return {}
+    return matches[0]
+
+
 def validate_versions(validation: Validation, skill_metadata: dict[str, Any]) -> str:
     expected = str(skill_metadata.get("version", ""))
     validation.check(
@@ -75,10 +96,23 @@ def validate_versions(validation: Validation, skill_metadata: dict[str, Any]) ->
     claude_marketplace = load_json(
         ROOT / ".claude-plugin" / "marketplace.json", validation
     )
+    codex_marketplace = load_json(
+        ROOT / ".agents" / "plugins" / "marketplace.json", validation
+    )
     claude_plugin = load_json(PACKAGE / ".claude-plugin" / "plugin.json", validation)
     codex_plugin = load_json(PACKAGE / ".codex-plugin" / "plugin.json", validation)
     cursor_plugin = load_json(PACKAGE / ".cursor-plugin" / "plugin.json", validation)
     openclaw_plugin = load_json(PACKAGE / "openclaw.plugin.json", validation)
+    claude_entry = find_marketplace_plugin(
+        claude_marketplace,
+        ROOT / ".claude-plugin" / "marketplace.json",
+        validation,
+    )
+    codex_entry = find_marketplace_plugin(
+        codex_marketplace,
+        ROOT / ".agents" / "plugins" / "marketplace.json",
+        validation,
+    )
 
     versions: list[tuple[str, Any]] = [
         (".claude-plugin/marketplace.json version", claude_marketplace.get("version")),
@@ -102,19 +136,11 @@ def validate_versions(validation: Validation, skill_metadata: dict[str, Any]) ->
             "plugins/code-crew/openclaw.plugin.json version",
             openclaw_plugin.get("version"),
         ),
+        (
+            ".claude-plugin/marketplace.json code-crew version",
+            claude_entry.get("version"),
+        ),
     ]
-    plugins = claude_marketplace.get("plugins", [])
-    if isinstance(plugins, list) and plugins and isinstance(plugins[0], dict):
-        versions.append(
-            (
-                ".claude-plugin/marketplace.json plugins[0].version",
-                plugins[0].get("version"),
-            )
-        )
-    else:
-        validation.errors.append(
-            ".claude-plugin/marketplace.json: plugins[0] is missing"
-        )
 
     for label, value in versions:
         validation.check(
@@ -132,6 +158,22 @@ def validate_versions(validation: Validation, skill_metadata: dict[str, Any]) ->
     )
     validation.check(
         openclaw_plugin.get("id") == "code-crew", "OpenClaw plugin id must be code-crew"
+    )
+    validation.check(
+        claude_marketplace.get("name") == "code-crew",
+        "Claude marketplace name must be code-crew",
+    )
+    validation.check(
+        claude_entry.get("source") == "./plugins/code-crew",
+        "Claude marketplace code-crew source must be ./plugins/code-crew",
+    )
+    validation.check(
+        codex_marketplace.get("name") == "code-crew",
+        "Codex marketplace name must be code-crew",
+    )
+    validation.check(
+        codex_entry.get("source") == {"source": "local", "path": "./plugins/code-crew"},
+        "Codex marketplace code-crew source must point to ./plugins/code-crew",
     )
     return expected
 
@@ -261,6 +303,7 @@ def validate_portability(validation: Validation) -> None:
 
     forbidden = {
         "macOS home path": re.compile(r"/Users/[^/\s]+/"),
+        "Linux home path": re.compile(r"/home/[^/\s]+/"),
         "Windows home path": re.compile(r"[A-Za-z]:\\Users\\[^\\\s]+\\"),
         "OpenAI-style secret": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
         "GitHub token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),

@@ -4,7 +4,7 @@ description: Use when the user explicitly asks for Code Crew, K+H+T, famous-prog
 license: MIT
 metadata:
   author: Code Crew contributors
-  version: "0.2.3"
+  version: "0.2.4"
   tags: code-review, software-engineering, multi-agent, critique
 ---
 
