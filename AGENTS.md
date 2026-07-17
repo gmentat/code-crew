@@ -34,7 +34,7 @@ For any run with more than one historical or operations lens, Foreman must dispa
 
 Run artifact directories under `runs/` must include the executing orchestrator suffix: use `_codex` for Codex-run folders, `_claude` for Claude-run folders, and the corresponding suffix for any other named agent runner. The suffix is part of the directory name, not just the README metadata.
 
-Crew subagent dispatches must use the highest reasoning budget available. For Codex `spawn_agent` calls, set `reasoning_effort` to `xhigh` for every Foreman-dispatched lens, ops role, or reviewer subagent unless the runtime does not expose that option.
+Crew subagent dispatches must use the highest reasoning budget the active host and model expose. Inspect the current dispatch schema or host settings instead of hardcoding a token such as `xhigh`, `max`, or `ultra`; supported levels change by model and release. If no per-subagent control exists, inherit the session setting and record that fact in the run metadata.
 
 Blind passes must be produced independently and saved before synthesis. Each subagent receives the artifact, the relevant role brief, and any shared Surveyor context; it does not receive another lens's draft, conclusion, or private scratchpad.
 

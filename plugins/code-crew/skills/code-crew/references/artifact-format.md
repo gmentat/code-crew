@@ -52,7 +52,7 @@ Number the verifier `02_` since there's only one persona pass. Synthesis stays `
   "host": "claude | codex | hermes | <other>",
   "model": "<model-id reported by the host>",
   "crew": ["knuth", "hickey", "torvalds"],
-  "briefs_loaded": ["briefs/knuth_agent.md", "briefs/hickey_agent.md", "briefs/torvalds_agent.md"],
+  "references_loaded": ["references/knuth.md", "references/hickey.md", "references/torvalds.md"],
   "verifier_used": true,
   "scope": {
     "type": "diff | file | pr | design",

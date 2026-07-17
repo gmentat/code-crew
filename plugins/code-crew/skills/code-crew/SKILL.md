@@ -1,34 +1,39 @@
 ---
 name: code-crew
-description: Use the famous-programmer Code Crew for code review, design critique, refactoring judgment, and multi-lens engineering decisions. Default crew Knuth+Hickey+Torvalds with mandatory diff-grounded verifier between blind passes and synthesis.
+description: Use when the user explicitly asks for Code Crew, K+H+T, famous-programmer review lenses, or an independent multi-lens engineering review. Runs Knuth+Hickey+Torvalds blind passes, a diff-grounded verifier, and synthesis for code review, design critique, and refactoring judgment. Do not auto-invoke for an ordinary review request that does not ask for this workflow.
 license: MIT
-metadata: {"tags":["code-review","software-engineering","multi-agent","critique"]}
+metadata:
+  author: Code Crew contributors
+  version: "0.2.3"
+  tags: code-review, software-engineering, multi-agent, critique
 ---
 
 # Code Crew
 
-Use Code Crew when the user asks for a serious software review, architecture critique, refactoring decision, or "what would the crew say" analysis.
+Use Code Crew when the user explicitly requests the crew, its named lenses, famous-programmer perspectives, or an independent multi-lens review. Do not silently turn every ordinary code review into a multi-agent run.
 
-Invocation note: when a user selects this skill from Codex or writes `$code-crew ...`, Code Crew is already invoked. Do not search for a separate Code Crew callable tool, and do not report "no callable Code Crew tool" as a blocker. Code Crew is a skill/procedure package: use the host's generic subagent facility when it exists, such as Codex `spawn_agent` or Claude Code's Agent tool. If the host lacks subagent dispatch, label the result as a single-context approximation and continue with the verifier and synthesis rules that can be applied locally.
+Formal crew runs require a host that can dispatch independent subagents. Other hosts can run a clearly labelled single-context approximation.
+
+Invocation note: when a user selects this skill or writes `$code-crew ...`, Code Crew is already invoked. Do not search for a separate Code Crew callable tool, and do not report "no callable Code Crew tool" as a blocker. Use the host's native subagent facility when one exists. If the host lacks independent subagent dispatch, label the result as a single-context approximation and continue with the verifier and synthesis rules that can be applied locally.
 
 Code Crew uses reasoning archetypes inspired by famous programmers and computer scientists. These are not impersonations, endorsements, or claims to represent the real people. They are named review contracts: each lens focuses attention on a different kind of engineering failure.
 
 ## How To Run A Review
 
 ```
-1. triage      → procedures/triage.md   ← which crew?
-2. discipline  → procedures/implementation-discipline.md  ← only when changing code
-3. briefs      → briefs/<persona>_agent.md  ← per-persona blind passes
-4. verify      → procedures/verify.md   ← drop fabrications against the diff
-5. synth       → procedures/synthesis.md  ← decision-changing findings only
-6. artifact    → procedures/artifact-format.md  ← only if asked
+1. triage      -> references/triage.md                     <- which crew?
+2. discipline  -> references/implementation-discipline.md <- only when changing code
+3. lenses      -> references/<persona>.md                  <- per-persona blind passes
+4. verify      -> references/verify.md                     <- check candidates against the diff
+5. synth       -> references/synthesis.md                  <- decision-changing findings only
+6. artifact    -> references/artifact-format.md            <- only if asked
 ```
 
-Each step is in a file. Load it when you reach that step. Do not skip the verifier — prior runs measured ~64% of K+H+T synthesis findings as FABRICATED by the judge on SWE-PRBench, and the verifier is the precision gate designed to drop them before synthesis.
+Each step is in a file. Load it when you reach that step. Do not skip the verifier: prior runs measured about 64% of unverified K+H+T synthesis findings as fabricated by the judge on SWE-PRBench. The verifier is a defensive precision gate; its incremental effect has not yet been measured independently.
 
 ## Default Crew
 
-When the user just says "review this" without naming a lens, use **K+H+T**:
+Once Code Crew is invoked, use **K+H+T** when the user does not name a lens:
 
 - **Knuth** — algorithmic rigor, invariants, complexity, data structures, literate clarity.
 - **Hickey** — simplicity vs ease, value/identity/time semantics, incidental complexity.
@@ -40,28 +45,28 @@ In our SWE-PRBench experiments (n=50 PRs, paired binomial test) this 3-persona c
 
 The skill ships these files; load them on demand, not always-on:
 
-**Persona briefs** (`briefs/`): the full archetypes used in the experiments.
+**Persona references** (`references/`): the full archetypes used in the experiments.
 
-- `briefs/knuth_agent.md`
-- `briefs/hickey_agent.md`
-- `briefs/torvalds_agent.md`
-- `briefs/dijkstra_agent.md`
-- `briefs/liskov_agent.md`
-- `briefs/pike_agent.md`
+- `references/knuth.md`
+- `references/hickey.md`
+- `references/torvalds.md`
+- `references/dijkstra.md`
+- `references/liskov.md`
+- `references/pike.md`
 
-**Procedures** (`procedures/`): the steps of a review.
+**Workflow references** (`references/`): the steps of a review.
 
-- `procedures/triage.md` — pick the crew before any pass runs
-- `procedures/implementation-discipline.md` — scope, assumptions, and verification loop for code-changing follow-ups
-- `procedures/verify.md` — diff-grounded gate; **mandatory** between blind passes and synthesis
-- `procedures/synthesis.md` — final review writeup with severity ranking
-- `procedures/artifact-format.md` — `runs/YYYY-MM-DD-topic_host/` layout if persistence is requested
+- `references/triage.md` - pick the crew before any pass runs
+- `references/implementation-discipline.md` - scope, assumptions, and verification loop for code-changing follow-ups
+- `references/verify.md` - diff-grounded gate; **mandatory** between blind passes and synthesis
+- `references/synthesis.md` - final review writeup with severity ranking
+- `references/artifact-format.md` - `runs/YYYY-MM-DD-topic_host/` layout if persistence is requested
 
 **Examples** (`examples/`): optional calibration material.
 
 - `examples/review-examples.md` — good/bad examples for crew runs, findings, verifier output, and implementation follow-up
 
-For a default K+H+T run, you will load: triage.md (briefly), 3 briefs (one per persona ≈ 25 KB combined), verify.md, synthesis.md. Total ≈34 KB read on-demand. Always-on cost of this skill is just this SKILL.md (~100 tok per session per Claude Code's projection); the on-demand content stays out of the always-on context.
+For a default K+H+T run, load `triage.md` briefly, the three persona references, `verify.md`, and `synthesis.md`. Keep the remaining files out of context unless the request needs them.
 
 ## Hard Gates
 
@@ -74,8 +79,8 @@ These are not stylistic guidance — they are conditions for calling the output 
 5. **No verification claim without action.** If you did not run the test, type-check, or build, the Verification block must say "Not run" with a reason. Do not claim "tests pass" you didn't run.
 6. **No recommendation in conflict with findings.** Listing 2 Critical findings precludes a LAND recommendation. Reconcile before emitting.
 7. **No silent personas.** If a single lens carries the entire review (all findings from one persona, others empty), say so explicitly in the output — that is a data point about the diff, not a hiding-the-disagreement moment.
-8. **Highest reasoning budget for dispatched lenses.** When the host exposes a subagent reasoning-budget setting, use the highest available for every persona pass and for the verifier. In Codex, request `reasoning_effort: xhigh` on each `spawn_agent` call. In Claude Code, prefer the highest-thinking model variant or the maximum `thinking.budget_tokens` the host allows. If the host exposes no such control, proceed at the default and note "ran at host-default reasoning budget" in the Verification block. A K+H+T crew run at minimal-thinking budgets is not what the experiments measured and should not be labelled a formal crew run.
-9. **No implementation scope creep.** When the user asks Code Crew to change code, load `procedures/implementation-discipline.md` before editing. The implementation must state assumptions, keep the diff tied to the request, and verify with concrete checks.
+8. **Use the highest reasoning budget the active host and model expose.** Inspect the current dispatch tool or host settings instead of assuming a fixed token such as `xhigh`, `max`, or `ultra`; supported levels change by model and release. If the host exposes no control, proceed at the default and note "ran at host-default reasoning budget" in the Verification block. The original experiment artifacts did not record an exact reasoning-effort setting, so report the runtime setting as execution metadata, not as an experimentally validated requirement.
+9. **No implementation scope creep.** When the user asks Code Crew to change code, load `references/implementation-discipline.md` before editing. The implementation must state assumptions, keep the diff tied to the request, and verify with concrete checks.
 
 ## Single-Lens Shortcuts
 
@@ -92,7 +97,7 @@ Solo passes still run the verifier. Label single-lens output clearly; do not pre
 
 ## Output Format
 
-The final review emitted by `procedures/synthesis.md`:
+The final review emitted by `references/synthesis.md`:
 
 ```text
 ## Findings
@@ -113,7 +118,7 @@ What was actually checked. "Not run" with reason if nothing ran.
 
 This skill does not authorize destructive operations, commits, pushes, deploys, external comments, or package publication. Ask for explicit user approval before any irreversible or external action.
 
-This skill is prompt-only. It does not install dependencies, contact services, run code, or modify files outside what the user explicitly asks for as implementation work.
+This skill contains no executable payload, dependencies, hooks, or network integrations. The host may still read files, run tests, or edit code when the user asks; its normal permissions and approval boundaries continue to apply.
 
 ## Scope And Evidence Boundary
 

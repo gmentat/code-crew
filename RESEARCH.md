@@ -45,6 +45,14 @@ This document lists the academic literature that grounds Code Crew's design and 
 - **Wang, X., Wei, J., Schuurmans, D., et al.** (2022). *Self-Consistency Improves Chain of Thought Reasoning in Language Models.* [arXiv:2203.11171](https://arxiv.org/abs/2203.11171). ICLR 2023.
   - The cheap baseline every multi-agent design has to beat. +17.9pp on GSM8K, +12.2pp on AQuA — using no personas. Sampling N CoT traces and majority-voting often outperforms more elaborate multi-agent setups without tuning.
 
+## External corroboration published after our runs (added 2026-07)
+
+- **Agarwal, A.** (2026). *Refute-or-Promote: An Adversarial Stage-Gated Multi-Agent Review Methodology for High-Precision LLM-Assisted Defect Discovery.* [arXiv:2604.19049](https://arxiv.org/abs/2604.19049). Preprint.
+  - Multi-stage adversarial review for LLM-assisted defect discovery, with mandatory empirical validation gates; reports an 83% prospective kill rate for suspicious candidates on a consolidated-protocol subset (n=30). The headline anecdote: a fabricated Bleichenbacher padding-oracle vulnerability in OpenSSL's CMS module that **ten dedicated reviewers unanimously endorsed** — caught only by the empirical gate. This supports verification as a general design principle; it does not measure Code Crew's specific verifier.
+
+- **Chowdhury, K., Banik, D., Ferdous, K. M., Shamim, S. I.** (2026). *From Industry Claims to Empirical Reality: An Empirical Study of Code Review Agents in Pull Requests.* [arXiv:2604.03196](https://arxiv.org/abs/2604.03196). Accepted at MSR 2026.
+  - 3,109 PRs, 13 deployed code review agents: **12 of 13 show average signal ratios below 60%**, and CRA-only PRs merge at 45.20% vs 68.37% for human-only (−23.17pp). Positions noise/fabrication — not raw recall — as the axis on which review agents succeed or fail in production, which is the axis Code Crew's verifier and fabrication-rate reporting are built around.
+
 ## Our experimental results (cite these papers when explaining the empirical claims)
 
 | Code Crew finding | Grounded by |

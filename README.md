@@ -1,6 +1,6 @@
 # Code Crew
 
-A downloadable famous-programmer code review crew for Codex, Claude Code, Hermes, Cursor, and AgentSkills-compatible agents.
+A downloadable famous-programmer code review crew for Codex, Claude Code, Hermes, Cursor, and AgentSkills-compatible agents (GitHub Copilot, Gemini CLI, and the other hosts of the open [agentskills.io](https://agentskills.io) format).
 
 Code Crew packages named software-engineering reasoning lenses for working through code quality, system design, and code improvement. Think of it as a reusable review discipline you can ask for when a diff deserves more than one opinion. Foreman dispatches the right persona specs as independent subagents, each follows its process, and Foreman synthesizes the returned reports.
 
@@ -15,9 +15,24 @@ This is a **review-and-improvement shop for software**. The crew is designed to 
 | Bigger crews feel thorough but degrade output | Default stays at the measured 3-persona preset; sextet is opt-in |
 | Agent edits drift into drive-by refactors | Implementation discipline requires stated assumptions, surgical scope, and concrete verification |
 
+## Code Crew and built-in review
+
+Codex, Claude Code, and Cursor now have capable built-in review workflows. Use those when you want the host's quickest default bug scan. Code Crew is useful when you explicitly want several recognizable engineering lenses and an auditable pass from each one.
+
+Reach for Code Crew when you want multi-lens engineering *judgment* rather than a bug scan:
+
+- persona-diverse passes designed to argue (rigor vs. simplicity vs. maintainer reality), with dissent preserved when lenses disagree on the land/block decision
+- design critique and refactoring judgment, not just diff review
+- the same review discipline portable across every host you use, instead of a different built-in per tool
+- public prompts, experiment artifacts, and limitations you can inspect under [`experiments/`](experiments/)
+
+A 2026 study of deployed code-review agents found that 12 of 13 had average signal ratios below 60%, reinforcing the need to treat plausible findings skeptically ([Chowdhury et al.](https://arxiv.org/abs/2604.03196)). Code Crew therefore puts a verifier between the blind passes and synthesis. That verifier is a defensive design choice; its incremental effect has not yet been measured independently in this repo.
+
+The package contains Markdown instructions only: no scripts, hooks, MCP servers, dependencies, or background processes. Prompt-only does not make a skill automatically trustworthy, but it does make the complete behavior inspectable in this repository.
+
 ## Install
 
-The canonical distributable package is [`plugins/code-crew/`](plugins/code-crew/). It is prompt-only: it adds reusable skill instructions and persona briefs, not running software.
+The canonical distributable package is [`plugins/code-crew/`](plugins/code-crew/). It is prompt-only: it adds reusable skill instructions and persona references, not running software.
 
 Codex:
 
@@ -28,7 +43,7 @@ codex plugin add code-crew@code-crew
 
 The first command tells Codex where this repo's plugin marketplace lives. Most users run it once per Codex profile or machine; after that, the second command installs `code-crew` from that marketplace.
 
-Codex installs [`plugins/code-crew/`](plugins/code-crew/): a `.codex-plugin/plugin.json` manifest, the `code-crew` skill, and the full core persona briefs bundled under `skills/code-crew/briefs/`.
+Codex installs [`plugins/code-crew/`](plugins/code-crew/): a `.codex-plugin/plugin.json` manifest, the `code-crew` skill, and the full persona and workflow files under `skills/code-crew/references/`.
 
 Claude Code:
 
@@ -40,15 +55,16 @@ claude plugin install code-crew
 Hermes:
 
 ```bash
-hermes skills install https://raw.githubusercontent.com/gmentat/code-crew/main/plugins/code-crew/skills/code-crew/SKILL.md \
+hermes skills install gmentat/code-crew/plugins/code-crew/skills/code-crew \
   --category software-development \
-  --name code-crew \
   --yes
 ```
 
-OpenClaw-compatible runtimes: the package includes [`plugins/code-crew/openclaw.plugin.json`](plugins/code-crew/openclaw.plugin.json), but this repository does not yet publish a locally verified OpenClaw CLI install command.
+The GitHub repo-path form lets Hermes track the source and installs the explicitly referenced files under `references/` and `examples/` together with `SKILL.md`.
 
-Cursor: this repo includes a project rule at [`.cursor/rules/code-crew.mdc`](.cursor/rules/code-crew.mdc). The plugin package also includes a copyable template at [`plugins/code-crew/cursor/code-crew.mdc`](plugins/code-crew/cursor/code-crew.mdc). It is an explicit-invocation rule, not an always-on reviewer. See [`CURSOR.md`](CURSOR.md).
+OpenClaw-compatible runtimes: the package includes [`plugins/code-crew/openclaw.plugin.json`](plugins/code-crew/openclaw.plugin.json). OpenClaw documents local-path installs (`openclaw plugins install ./plugins/code-crew` from a clone, or `openclaw skills install ./plugins/code-crew/skills/code-crew` for the bare skill); this repository has not yet verified them against a live OpenClaw binary. Prefer a clone + local-path install over the `git:` source form — OpenClaw documents `SKILL.md`-at-source-root for git skill installs, subdirectory git installs are undocumented, and this repo nests the package under `plugins/code-crew/`. See [`INSTALL.md`](INSTALL.md).
+
+Cursor: install Code Crew as a native Agent Skill by copying `plugins/code-crew/skills/code-crew/` into your project's `.cursor/skills/` (or `~/.cursor/skills/` for all projects). The package also ships a Cursor plugin manifest at [`plugins/code-crew/.cursor-plugin/plugin.json`](plugins/code-crew/.cursor-plugin/plugin.json) and an explicit-invocation rule for older installations. See [`CURSOR.md`](CURSOR.md).
 
 For local development and fallback manual installs, see [`INSTALL.md`](INSTALL.md).
 
@@ -83,7 +99,7 @@ The recall headlines below are **raw recall**. The original fixed-precision prim
 - **K+H+T is the best tested default, not a magic formula.** A follow-up triple search tested 10 of 20 possible 3-persona combinations and found no challenger with a better point estimate, but several challengers are statistical ties and the untested 10 remain open.
 - **Direct-naming briefs (`"X — author of TAOCP, ..."`) underperformed archetype-inspired briefs** (−3.9pp recall, −3.5pp precision, +9.9pp fabrication; paired n=50). Don't rewrite persona briefs to lead with the person's name and accomplishments.
 
-The repo includes the runnable harness so anyone can re-test these claims (or refute them) on `foundry-ai/swe-prbench` from inside Claude Code.
+The repo includes the harness, protocol, analysis scripts, and committed run artifacts so anyone can inspect these claims or re-run the experiment. See the experiment README for the current runner requirements.
 
 ## Research grounding
 
@@ -96,6 +112,8 @@ Code Crew's design and empirical claims are grounded in the multi-agent-debate, 
 - Kong et al. NAACL 2024 *Role-Play Prompting* + Salewski et al. NeurIPS 2023 *In-Context Impersonation* — what the *role description* does, not the persona name.
 - Wang et al. ICLR 2023 *Self-Consistency* — the cheap baseline every multi-agent design has to beat.
 - Deshpande et al. EMNLP 2023 *Toxicity in ChatGPT* + Kim et al. 2024 *Persona is a Double-edged Sword* — persona-induced fabrication and the role-play accuracy hit.
+- Agarwal 2026 *Refute-or-Promote* — ten reviewers unanimously endorsed a non-existent OpenSSL vulnerability; adversarial and empirical gates rejected most candidates. This supports verification as a general design principle, not the effectiveness of Code Crew's specific verifier.
+- Chowdhury et al. 2026 (MSR 2026) — 12 of 13 deployed code-review agents had average signal ratios below 60%; automated review should augment rather than replace human judgment.
 
 The full literature synthesis that informed individual design decisions (a 4-survey LLM workflow report, with broader citations not all independently verified) lives at [`experiments/2026-06-01-dissent-ablation/RESEARCH_PERSONA_PROMPTING.md`](experiments/2026-06-01-dissent-ablation/RESEARCH_PERSONA_PROMPTING.md).
 
@@ -194,9 +212,10 @@ For a full code-review run, the operating rhythm is: Foreman dispatches each len
 - [code_review_methods.md](code_review_methods.md) — concrete review and improvement methods the crew uses
 - [crew_disagreements.md](crew_disagreements.md) — built-in disagreement map (the seams the system is designed around)
 - [safety_floor.md](safety_floor.md) — autonomy boundaries, AI provenance, refusal rules (binding)
-- [INSTALL.md](INSTALL.md) — install paths for Codex, Claude Code, Hermes, and AgentSkills-compatible agents
+- [INSTALL.md](INSTALL.md) — install paths for Codex, Claude Code, Hermes, Cursor, OpenClaw, and AgentSkills-compatible agents
 - [NOTICE](NOTICE) — license boundary for MIT project files vs CC BY SWE-PRBench-derived experiment data
-- [CURSOR.md](CURSOR.md) — Cursor project-rule usage
+- [PRIVACY.md](PRIVACY.md) — what the prompt-only package does and does not collect
+- [CURSOR.md](CURSOR.md) — Cursor install and usage (native Agent Skill on 2.4+, project rule for older versions)
 - [plugins/code-crew/](plugins/code-crew/) — distributable plugin/skill package
 - [plugins/code-crew/CURSOR.md](plugins/code-crew/CURSOR.md) — Cursor usage from the plugin package alone
 - `agents/` — core persona files (historical archetypes)

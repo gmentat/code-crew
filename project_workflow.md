@@ -109,7 +109,7 @@ The historical archetypes disagree by design. Foreman's job is to make their dis
 
 Mechanically, disagreement is protected by independent execution: each selected lens gets its own subagent context, produces its own blind-pass report, and cannot read another lens's output until Foreman has locked the first-pass artifacts. A single agent writing multiple persona sections in one context is not a blind pass.
 
-Every Foreman-dispatched subagent uses the highest reasoning budget available. In Codex, that means `reasoning_effort: xhigh` on each `spawn_agent` call.
+Every Foreman-dispatched subagent uses the highest reasoning budget the active host and model expose. Inspect the current dispatch schema or host settings instead of hardcoding a token such as `xhigh`, `max`, or `ultra`; supported levels change by model and release. If no per-subagent control exists, inherit the session setting and record that fact.
 
 When Foreman writes the change memo:
 - The recommended action is named

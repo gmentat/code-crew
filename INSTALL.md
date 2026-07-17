@@ -22,6 +22,13 @@ codex plugin add code-crew@code-crew
 
 The marketplace command tells Codex where this repo's plugin source lives. Most users run it once per Codex profile or machine; after that, the second command installs `code-crew` from that source.
 
+To update an existing GitHub installation:
+
+```bash
+codex plugin marketplace upgrade code-crew
+codex plugin add code-crew@code-crew
+```
+
 Install from a local clone:
 
 ```bash
@@ -33,7 +40,7 @@ If you downloaded only the `plugins/code-crew/` package directory, install from 
 
 Do not run `codex plugin marketplace add .` from inside `plugins/code-crew/`; that directory is a plugin root, not a supported Codex marketplace shape.
 
-This installs `plugins/code-crew/`, including the full core persona briefs in `plugins/code-crew/skills/code-crew/briefs/`.
+This installs `plugins/code-crew/`, including the full persona and workflow files in `plugins/code-crew/skills/code-crew/references/`.
 
 After installation, Code Crew is available as a skill. In an interactive Codex session, either select it with `/skills` or invoke it directly:
 
@@ -77,14 +84,15 @@ claude --plugin-dir ./plugins/code-crew
 
 Hermes uses local skill folders with `SKILL.md`.
 
-Install the published skill directly:
+Install the published skill by its GitHub repo-path identifier:
 
 ```bash
-hermes skills install https://raw.githubusercontent.com/gmentat/code-crew/main/plugins/code-crew/skills/code-crew/SKILL.md \
+hermes skills install gmentat/code-crew/plugins/code-crew/skills/code-crew \
   --category software-development \
-  --name code-crew \
   --yes
 ```
+
+The GitHub identifier lets Hermes track the source for later updates. Current Hermes releases install `SKILL.md` plus the explicitly linked files under standard support directories; Code Crew keeps all required persona and workflow material under `references/` and its optional calibration material under `examples/`.
 
 Local development symlink:
 
@@ -96,24 +104,59 @@ hermes skills list | grep code-crew
 
 ## OpenClaw-Compatible Runtimes
 
-The plugin root includes `openclaw.plugin.json`, which points at the same `SKILL.md` folder. A local OpenClaw binary was not available during validation, so this repo does not publish a tested OpenClaw CLI command yet.
+The plugin root includes `openclaw.plugin.json`, which points at the same `SKILL.md` folder. OpenClaw documents local-path installs:
 
-Use `plugins/code-crew/` as the plugin root in runtimes that support OpenClaw-style plugin manifests. Use `plugins/code-crew/skills/code-crew/` as the skill root in runtimes that support AgentSkills-compatible `SKILL.md` folders.
+```bash
+openclaw plugins install ./plugins/code-crew
+# or install just the skill folder:
+openclaw skills install ./plugins/code-crew/skills/code-crew
+```
+
+A local OpenClaw binary was not available during validation, so these commands are OpenClaw-documented but not yet verified by this repo. Prefer clone-then-local-path over the `git:` source form: OpenClaw's docs state git and local *skill* installs expect `SKILL.md` at the source root, subdirectory installs from a git source are not documented for plugins, and this repo nests the package under `plugins/code-crew/`.
+
+Use `plugins/code-crew/` as the plugin root in runtimes that support OpenClaw-style plugin manifests. OpenClaw also runs AgentSkills-style `SKILL.md` folders natively.
 
 ## Cursor
 
-From a full source clone, Cursor can use the project rule already committed at `.cursor/rules/code-crew.mdc`.
+On Cursor 2.4+, install Code Crew as a native Agent Skill — Cursor reads the same `SKILL.md` folder format:
 
-To install the rule into another project:
+```bash
+# project-scoped
+mkdir -p /path/to/target-project/.cursor/skills
+cp -R plugins/code-crew/skills/code-crew /path/to/target-project/.cursor/skills/code-crew
+
+# or global
+mkdir -p ~/.cursor/skills
+cp -R plugins/code-crew/skills/code-crew ~/.cursor/skills/code-crew
+```
+
+The skill becomes slash-invokable in the editor and the Cursor CLI, and Cursor's native subagents (2.4+) can run the personas as independent blind passes. The package also includes a Cursor plugin manifest at `plugins/code-crew/.cursor-plugin/plugin.json`, with the rule auto-discovered from `plugins/code-crew/rules/`; the plugin has not yet been submitted to the Cursor marketplace.
+
+For older Cursor versions, the explicit-invocation project rule still works:
 
 ```bash
 mkdir -p /path/to/target-project/.cursor/rules
 cp .cursor/rules/code-crew.mdc /path/to/target-project/.cursor/rules/code-crew.mdc
 ```
 
-If you downloaded only the plugin package, copy `plugins/code-crew/cursor/code-crew.mdc` into the target project's `.cursor/rules/` directory instead.
+If you downloaded only the plugin package, copy `plugins/code-crew/cursor/code-crew.mdc` instead.
 
-The Cursor rule is opt-in. It does not run as an always-on reviewer; ask Cursor to use Code Crew when you want the review.
+Both surfaces are opt-in. Neither runs as an always-on reviewer; ask Cursor to use Code Crew when you want the review.
+
+## Other AgentSkills-Compatible Hosts
+
+`plugins/code-crew/skills/code-crew/` follows the open Agent Skills format ([agentskills.io](https://agentskills.io)). The generic install is copying the folder into a host's documented skills directory.
+
+Gemini CLI and other hosts adopting the vendor-neutral convention read `.agents/skills/` (project) and `~/.agents/skills/` (global):
+
+```bash
+mkdir -p ~/.agents/skills
+cp -R plugins/code-crew/skills/code-crew ~/.agents/skills/code-crew
+```
+
+GitHub Copilot reads `.github/skills/` (project) and `~/.copilot/skills/` (user), per GitHub's docs.
+
+These copy destinations follow the Gemini CLI and GitHub Copilot documentation but have not been smoke-tested by this repo. GitHub CLI also provides `gh skill` commands in public preview; this project is not yet published through that channel.
 
 ## What It Installs
 
@@ -123,11 +166,11 @@ The skill adds the famous-programmer review crew:
 - Hickey for simplicity, data, value/identity/time, and incidental complexity.
 - Torvalds for practical maintainer review, patch scope, and working systems.
 
-It only installs skill files and persona briefs. Nothing runs in the background.
+It only installs skill instructions and persona references. Nothing runs in the background.
 
 ## Invocation Model
 
-Code Crew is a prompt skill. The host agent loads the skill when selected explicitly, invoked by name, or routed from a matching review/design request. It is not a resident process and does not run on every file edit or commit.
+Code Crew is a prompt skill. The host agent loads it when selected explicitly or when a request names Code Crew, K+H+T, famous-programmer lenses, or an independent multi-lens review. It is not a resident process and does not run on every file edit or commit.
 
 In Codex, the installed skill may appear as `code-crew:code-crew`. That is expected. It is not a callable tool exposed in the tool list.
 
